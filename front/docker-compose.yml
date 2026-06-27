@@ -1,0 +1,22 @@
+services:
+  front:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taxi-front
+    ports:
+      - "3001:3000"
+    env_file:
+      - ./.env.local
+    environment:
+      - WATCHPACK_POLLING=true
+    volumes:
+      - ./src:/app/src
+      - ./public:/app/public
+    networks:
+      - taxi-net
+
+networks:
+  taxi-net:
+    external: true
+    name: back_taxi-net
