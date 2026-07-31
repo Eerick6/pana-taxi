@@ -77,6 +77,9 @@ export class CooperativesService {
         pass: process.env.BREVO_SMTP_KEY,
       },
       tls: { rejectUnauthorized: false },
+      connectionTimeout: 10000,
+      greetingTimeout: 5000,
+      socketTimeout: 15000,
     });
   }
 
