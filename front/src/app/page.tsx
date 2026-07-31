@@ -7,7 +7,7 @@ import NavUserMenu from '@/features/landing/NavUserMenu';
 import FooterSocials from '@/features/landing/FooterSocials';
 
 export const metadata: Metadata = {
-  title: 'Pana Taxi — Plataforma de Gestión de Cooperativas de Taxi en Ecuador',
+  title: 'Pana Taxi',
   description: 'Software de gestión integral para cooperativas de taxi en Ecuador. Control en tiempo real, taxímetro digital, billetera digital y mucho más.',
   keywords: ['cooperativa taxi Ecuador', 'software taxi', 'gestión cooperativa taxi', 'taxímetro digital', 'pana taxi'],
   openGraph: {
