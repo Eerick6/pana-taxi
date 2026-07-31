@@ -69,7 +69,7 @@ import { BillingModule } from './modules/billing/billing.module';
       password: process.env.DB_PASSWORD || 'taxi',
       database: process.env.DB_NAME || 'taxi',
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: process.env.NODE_ENV === 'development',
+      synchronize: process.env.NODE_ENV === 'development' || process.env.DB_SYNCHRONIZE === 'true',
       extra: {
         connectionLimit: 20,
         connectTimeout: 10000,
