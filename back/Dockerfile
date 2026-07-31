@@ -21,10 +21,6 @@ RUN npm ci --only=production && npm cache clean --force
 # Artefacto compilado del stage anterior
 COPY --from=builder /app/dist ./dist
 
-# Firebase service account (Railway lo inyecta como variable o archivo)
-# Si usas GOOGLE_APPLICATION_CREDENTIALS como env var, este COPY es opcional
-COPY --from=builder /app/firebase-service-account.json ./firebase-service-account.json
-
 EXPOSE 3000
 
 CMD ["node", "dist/main.js"]
