@@ -30,16 +30,23 @@ export class NotificationsService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    const serviceAccountPath = process.env.FCM_SERVICE_ACCOUNT_PATH;
-    if (!serviceAccountPath) {
-      this.logger.warn('FCM_SERVICE_ACCOUNT_PATH no configurado — push notifications deshabilitadas');
-      return;
-    }
     try {
-      const raw = fs.readFileSync(serviceAccountPath, 'utf8');
-      const serviceAccount = JSON.parse(raw);
+      let serviceAccount: object | null = null;
+
+      if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+      } else if (process.env.FCM_SERVICE_ACCOUNT_PATH) {
+        const raw = fs.readFileSync(process.env.FCM_SERVICE_ACCOUNT_PATH, 'utf8');
+        serviceAccount = JSON.parse(raw);
+      }
+
+      if (!serviceAccount) {
+        this.logger.warn('Firebase no configurado — push notifications deshabilitadas');
+        return;
+      }
+
       if (!admin.apps.length) {
-        admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+        admin.initializeApp({ credential: admin.credential.cert(serviceAccount as admin.ServiceAccount) });
       }
       this.initialized = true;
       this.logger.log('Firebase Admin SDK inicializado correctamente');
