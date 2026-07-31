@@ -7,19 +7,10 @@ import type { AppNotification } from "@/types";
 
 function playNotificationSound() {
   try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, ctx.currentTime);
-    osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.12);
-    gain.gain.setValueAtTime(0.15, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.35);
-  } catch { /* browser blocked autoplay — silent */ }
+    const audio = new Audio('/notification.wav');
+    audio.volume = 0.3;
+    audio.play().catch(() => {});
+  } catch { /* silent */ }
 }
 
 function notifActionUrl(n: AppNotification): string | null {
