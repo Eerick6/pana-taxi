@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as nodemailer from 'nodemailer';
 import { Cooperative, CooperativeStatus, CooperativeApprovalStatus } from './entities/cooperative.entity';
 import { CooperativeMember, CooperativeMemberRole } from './entities/cooperative-member.entity';
 import { CooperativeDocument, CooperativeDocumentStatus } from './entities/cooperative-document.entity';
@@ -45,7 +44,6 @@ const DOC_TYPE_LABEL: Record<string, string> = {
 
 @Injectable()
 export class CooperativesService {
-  private mailer: nodemailer.Transporter;
   private readonly logger = new Logger(CooperativesService.name);
   private readonly isDev = process.env.NODE_ENV !== 'production';
 
@@ -68,19 +66,25 @@ export class CooperativesService {
     private termsService: TermsService,
     private notifications: NotificationsService,
   ) {
-    this.mailer = nodemailer.createTransport({
-      host: 'smtp-relay.brevo.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: process.env.BREVO_SMTP_USER,
-        pass: process.env.BREVO_SMTP_KEY,
-      },
-      tls: { rejectUnauthorized: false },
-      connectionTimeout: 10000,
-      greetingTimeout: 5000,
-      socketTimeout: 15000,
+  }
+
+  private async sendBrevoEmail(to: string, subject: string, html: string): Promise<void> {
+    const apiKey = process.env.BREVO_API_KEY;
+    if (!apiKey) throw new Error('BREVO_API_KEY no configurado');
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'accept': 'application/json', 'api-key': apiKey, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sender: { name: 'Pana Taxi', email: process.env.BREVO_FROM },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+      }),
     });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Brevo API ${res.status}: ${errText}`);
+    }
   }
 
   private async sendDocumentNotification(
@@ -110,25 +114,16 @@ export class CooperativesService {
           <p>Por favor sube el documento corregido desde el panel de administración.</p>
         </div>`;
 
-    await this.mailer.sendMail({
-      from: `"Pana Taxi" <${process.env.BREVO_FROM}>`,
-      to,
-      subject,
-      html,
-    });
+    await this.sendBrevoEmail(to, subject, html);
   }
 
   private async sendCoopReviewEmail(to: string, coopName: string, inviteToken: string) {
     const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3001';
     const setPasswordLink = `${frontendUrl}/set-password?email=${encodeURIComponent(to)}&token=${encodeURIComponent(inviteToken)}`;
     try {
-      const info = await this.mailer.sendMail({
-      from: `"Pana Taxi" <${process.env.BREVO_FROM}>`,
-      to,
-      subject: `Tu cooperativa "${coopName}" está siendo revisada — Pana Taxi`,
-      html: `
+      await this.sendBrevoEmail(to, `Tu cooperativa "${coopName}" está siendo revisada — Pana Taxi`, `
         <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px">
-          <h2 style="color:#1a1a1a">¡Registro recibido! 🎉</h2>
+          <h2 style="color:#1a1a1a">¡Registro recibido!</h2>
           <p>Hemos recibido la solicitud de registro de la cooperativa <strong>${coopName}</strong>. Nuestro equipo revisará la información y te notificará cuando sea aprobada (menos de 24 horas).</p>
           <p><strong>Paso 1:</strong> Crea tu contraseña haciendo clic en el botón de abajo. El enlace expira en 24 horas.</p>
           <a href="${setPasswordLink}" style="display:inline-block;background:#fcbd13;color:#000;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:8px 0">
@@ -137,9 +132,8 @@ export class CooperativesService {
           <p><strong>Paso 2:</strong> Una vez creada tu contraseña, podrás iniciar sesión en el panel para subir los documentos requeridos.</p>
           <p><strong>Paso 3:</strong> Cuando tu cooperativa sea aprobada, recibirás otro correo de confirmación y podrás operar en la plataforma.</p>
           <p style="color:#888;font-size:12px;margin-top:20px">¿Preguntas? Escríbenos a soporte@panataxista.com</p>
-        </div>`,
-      });
-      this.logger.log(`[EMAIL OK] coop-review → ${to} | ${info.messageId}`);
+        </div>`);
+      this.logger.log(`[EMAIL OK] coop-review → ${to}`);
     } catch (err) {
       this.logger.error(`[EMAIL FAIL] coop-review → ${to} | ${err.message}`);
       throw err;
@@ -149,41 +143,31 @@ export class CooperativesService {
   private async sendStaffInviteEmail(to: string, fullName: string, coopName: string, inviteToken: string) {
     const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3001';
     const setPasswordLink = `${frontendUrl}/set-password?email=${encodeURIComponent(to)}&token=${encodeURIComponent(inviteToken)}`;
-    await this.mailer.sendMail({
-      from: `"Pana Taxi" <${process.env.BREVO_FROM}>`,
-      to,
-      subject: `Te invitaron a gestionar la cooperativa "${coopName}" — Pana Taxi`,
-      html: `
-        <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px">
-          <h2 style="color:#1a1a1a">¡Hola, ${fullName}! 👋</h2>
-          <p>Has sido añadido como miembro del equipo de <strong>${coopName}</strong> en la plataforma Pana Taxi.</p>
-          <p>Para acceder al panel, primero crea tu contraseña haciendo clic en el botón de abajo. El enlace expira en 48 horas.</p>
-          <a href="${setPasswordLink}" style="display:inline-block;background:#fcbd13;color:#000;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:8px 0">
-            Crear mi contraseña →
-          </a>
-          <p>Una vez creada tu contraseña, podrás iniciar sesión en <a href="${frontendUrl}/signin">el panel</a> con este correo.</p>
-          <p style="color:#888;font-size:12px;margin-top:20px">¿Preguntas? Escríbenos a soporte@panataxista.com</p>
-        </div>`,
-    });
+    await this.sendBrevoEmail(to, `Te invitaron a gestionar la cooperativa "${coopName}" — Pana Taxi`, `
+      <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px">
+        <h2 style="color:#1a1a1a">¡Hola, ${fullName}!</h2>
+        <p>Has sido añadido como miembro del equipo de <strong>${coopName}</strong> en la plataforma Pana Taxi.</p>
+        <p>Para acceder al panel, primero crea tu contraseña haciendo clic en el botón de abajo. El enlace expira en 48 horas.</p>
+        <a href="${setPasswordLink}" style="display:inline-block;background:#fcbd13;color:#000;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:8px 0">
+          Crear mi contraseña →
+        </a>
+        <p>Una vez creada tu contraseña, podrás iniciar sesión en <a href="${frontendUrl}/signin">el panel</a> con este correo.</p>
+        <p style="color:#888;font-size:12px;margin-top:20px">¿Preguntas? Escríbenos a soporte@panataxista.com</p>
+      </div>`);
   }
 
   async sendCoopApprovedEmail(to: string, coopName: string) {
     const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3001';
-    await this.mailer.sendMail({
-      from: `"Pana Taxi" <${process.env.BREVO_FROM}>`,
-      to,
-      subject: `¡Tu cooperativa "${coopName}" fue aprobada! — Pana Taxi`,
-      html: `
-        <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px">
-          <h2 style="color:#16a34a">¡Cooperativa aprobada! ✅</h2>
-          <p>La cooperativa <strong>${coopName}</strong> ha sido revisada y aprobada por el equipo de Pana Taxi.</p>
-          <p>Ya puedes iniciar sesión en el panel y comenzar a gestionar tu cooperativa, registrar socios y operar en la plataforma.</p>
-          <a href="${frontendUrl}/signin" style="display:inline-block;background:#fcbd13;color:#000;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:8px 0">
-            Ir al panel →
-          </a>
-          <p style="color:#888;font-size:12px;margin-top:20px">¿Preguntas? Escríbenos a soporte@panataxista.com</p>
-        </div>`,
-    });
+    await this.sendBrevoEmail(to, `¡Tu cooperativa "${coopName}" fue aprobada! — Pana Taxi`, `
+      <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px">
+        <h2 style="color:#16a34a">¡Cooperativa aprobada!</h2>
+        <p>La cooperativa <strong>${coopName}</strong> ha sido revisada y aprobada por el equipo de Pana Taxi.</p>
+        <p>Ya puedes iniciar sesión en el panel y comenzar a gestionar tu cooperativa, registrar socios y operar en la plataforma.</p>
+        <a href="${frontendUrl}/signin" style="display:inline-block;background:#fcbd13;color:#000;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:8px 0">
+          Ir al panel →
+        </a>
+        <p style="color:#888;font-size:12px;margin-top:20px">¿Preguntas? Escríbenos a soporte@panataxista.com</p>
+      </div>`);
   }
 
   // ─── Notificar admins de plataforma ──────────────────────────────────────────

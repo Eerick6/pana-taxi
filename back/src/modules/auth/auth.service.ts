@@ -7,7 +7,6 @@ import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Twilio } from 'twilio';
-import * as nodemailer from 'nodemailer';
 import { NOTIFICATION_QUEUE } from '../../queues/notifications/notification-queue.types';
 import { User, UserRole, UserStatus } from '../users/entities/user.entity';
 import { Client } from '../clients/entities/client.entity';
@@ -40,7 +39,6 @@ const COOP_ROLES = [
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private twilio: Twilio;
-  private mailer: nodemailer.Transporter;
 
   constructor(
     @InjectRepository(User)
@@ -58,19 +56,6 @@ export class AuthService {
     if (process.env.TWILIO_ACCOUNT_SID) {
       this.twilio = new Twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     }
-    this.mailer = nodemailer.createTransport({
-      host: 'smtp-relay.brevo.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: process.env.BREVO_SMTP_USER,
-        pass: process.env.BREVO_SMTP_KEY,
-      },
-      tls: { rejectUnauthorized: false },
-      connectionTimeout: 10000,
-      greetingTimeout: 5000,
-      socketTimeout: 15000,
-    });
   }
 
   async requestPhoneOtp(dto: OtpRequestDto) {
@@ -143,24 +128,38 @@ export class AuthService {
     return this.generateTokens(user);
   }
 
+  private async sendBrevoEmail(to: string, subject: string, html: string): Promise<void> {
+    const apiKey = process.env.BREVO_API_KEY;
+    if (!apiKey) throw new Error('BREVO_API_KEY no configurado');
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'accept': 'application/json', 'api-key': apiKey, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sender: { name: 'Pana Taxi', email: process.env.BREVO_FROM },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Brevo API ${res.status}: ${errText}`);
+    }
+  }
+
   private async sendSetPasswordEmail(to: string, token: string) {
     const link = `${process.env.FRONTEND_URL ?? 'http://localhost:3001'}/set-password?email=${encodeURIComponent(to)}&token=${encodeURIComponent(token)}`;
     try {
-      const info = await this.mailer.sendMail({
-        from: `"Pana Taxi" <${process.env.BREVO_FROM}>`,
-        to,
-        subject: 'Crea tu contraseña — Pana Taxi',
-        html: `
-          <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:20px">
-            <h2>Crea tu contraseña de acceso</h2>
-            <p>Para acceder al panel de Pana Taxi, establece una contraseña haciendo clic en el botón de abajo. El enlace expira en 24 horas.</p>
-            <a href="${link}" style="display:inline-block;background:#fcbd13;color:#000;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">
-              Crear mi contraseña →
-            </a>
-            <p style="color:#888;font-size:12px;margin-top:16px">Si no solicitaste esto, ignora este correo.</p>
-          </div>`,
-      });
-      this.logger.log(`[EMAIL OK] set-password → ${to} | messageId: ${info.messageId}`);
+      await this.sendBrevoEmail(to, 'Crea tu contraseña — Pana Taxi', `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:20px">
+          <h2>Crea tu contraseña de acceso</h2>
+          <p>Para acceder al panel de Pana Taxi, establece una contraseña haciendo clic en el botón de abajo. El enlace expira en 24 horas.</p>
+          <a href="${link}" style="display:inline-block;background:#fcbd13;color:#000;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">
+            Crear mi contraseña →
+          </a>
+          <p style="color:#888;font-size:12px;margin-top:16px">Si no solicitaste esto, ignora este correo.</p>
+        </div>`);
+      this.logger.log(`[EMAIL OK] set-password → ${to}`);
     } catch (err) {
       this.logger.error(`[EMAIL FAIL] set-password → ${to} | ${err.message}`);
       throw err;
@@ -394,21 +393,16 @@ export class AuthService {
   private async sendPasswordResetEmail(to: string, code: string) {
     const link = `${process.env.FRONTEND_URL ?? 'http://localhost:3001'}/reset-password?email=${encodeURIComponent(to)}&token=${code}`;
     try {
-      const info = await this.mailer.sendMail({
-        from: `"Pana Taxi" <${process.env.BREVO_FROM}>`,
-        to,
-        subject: 'Recuperación de contraseña — Pana Taxi',
-        html: `
-          <div style="font-family:sans-serif;max-width:480px;margin:auto">
-            <h2>Recuperar contraseña</h2>
-            <p>Haz clic en el botón para establecer una nueva contraseña. El enlace expira en 10 minutos.</p>
-            <a href="${link}" style="display:inline-block;background:#fcbd13;color:#000;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">
-              Restablecer contraseña
-            </a>
-            <p style="color:#888;font-size:12px;margin-top:16px">Si no solicitaste esto, ignora este correo.</p>
-          </div>`,
-      });
-      this.logger.log(`[EMAIL OK] reset-password → ${to} | messageId: ${info.messageId}`);
+      await this.sendBrevoEmail(to, 'Recuperación de contraseña — Pana Taxi', `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto">
+          <h2>Recuperar contraseña</h2>
+          <p>Haz clic en el botón para establecer una nueva contraseña. El enlace expira en 10 minutos.</p>
+          <a href="${link}" style="display:inline-block;background:#fcbd13;color:#000;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">
+            Restablecer contraseña
+          </a>
+          <p style="color:#888;font-size:12px;margin-top:16px">Si no solicitaste esto, ignora este correo.</p>
+        </div>`);
+      this.logger.log(`[EMAIL OK] reset-password → ${to}`);
     } catch (err) {
       this.logger.error(`[EMAIL FAIL] reset-password → ${to} | ${err.message}`);
       throw err;
@@ -417,28 +411,19 @@ export class AuthService {
 
   async sendCoopReviewEmail(to: string, coopName: string) {
     this.logger.log(`[COOP REVIEW EMAIL] → ${to}: cooperativa ${coopName}`);
-    await this.mailer.sendMail({
-      from: `"Pana Taxi" <${process.env.BREVO_FROM}>`,
-      to,
-      subject: `Tu cooperativa "${coopName}" está siendo revisada — Pana Taxi`,
-      html: `
-        <div style="font-family:sans-serif;max-width:480px;margin:auto">
-          <h2>¡Registro recibido! 🎉</h2>
-          <p>Hemos recibido la solicitud de registro de la cooperativa <strong>${coopName}</strong>.</p>
-          <p>Nuestro equipo revisará la documentación y te notificará por este correo cuando sea aprobada. El proceso generalmente toma menos de 24 horas.</p>
-          <p>Puedes <a href="${process.env.FRONTEND_URL ?? 'http://localhost:3001'}/signin">iniciar sesión</a> en el panel para subir tus documentos mientras tanto.</p>
-          <p style="color:#888;font-size:12px">Si tienes preguntas, escríbenos a soporte@panataxista.com</p>
-        </div>`,
-    });
+    await this.sendBrevoEmail(to, `Tu cooperativa "${coopName}" está siendo revisada — Pana Taxi`, `
+      <div style="font-family:sans-serif;max-width:480px;margin:auto">
+        <h2>¡Registro recibido!</h2>
+        <p>Hemos recibido la solicitud de registro de la cooperativa <strong>${coopName}</strong>.</p>
+        <p>Nuestro equipo revisará la documentación y te notificará por este correo cuando sea aprobada. El proceso generalmente toma menos de 24 horas.</p>
+        <p>Puedes <a href="${process.env.FRONTEND_URL ?? 'http://localhost:3001'}/signin">iniciar sesión</a> en el panel para subir tus documentos mientras tanto.</p>
+        <p style="color:#888;font-size:12px">Si tienes preguntas, escríbenos a soporte@panataxista.com</p>
+      </div>`);
   }
 
   private async sendEmail(to: string, code: string) {
-    await this.mailer.sendMail({
-      from: `"TaxiEC" <${process.env.BREVO_FROM}>`,
-      to,
-      subject: 'Tu código de verificación',
-      html: `<p>Tu código de acceso es: <strong style="font-size:24px">${code}</strong></p><p>Expira en 10 minutos.</p>`,
-    });
+    await this.sendBrevoEmail(to, 'Tu código de verificación — Pana Taxi',
+      `<p>Tu código de acceso es: <strong style="font-size:24px">${code}</strong></p><p>Expira en 10 minutos.</p>`);
   }
 
   private async generateTokens(user: User) {
