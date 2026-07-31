@@ -1,13 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const PUBLIC_PATHS = ['/signin', '/signup', '/api/auth/login', '/api/auth/refresh', '/api/auth/logout'];
+// Routes accessible without a session
+const PUBLIC_PATHS = [
+  '/',
+  '/signin',
+  '/signup',
+  '/forgot-password',
+  '/reset-password',
+  '/set-password',
+  '/resend-invite',
+  '/terminos',
+  '/privacidad',
+  '/registro/cooperativa',
+  '/api/auth/login',
+  '/api/auth/forgot-password',
+  '/api/auth/reset-password',
+  '/api/auth/resend-invite',
+  '/api/auth/refresh',
+  '/api/auth/logout',
+  '/api/public',
+];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
-    return NextResponse.next();
-  }
+  const isPublic = PUBLIC_PATHS.some(
+    (p) => pathname === p || (p !== '/' && pathname.startsWith(p)),
+  );
+
+  if (isPublic) return NextResponse.next();
 
   const refreshToken = req.cookies.get('refresh_token')?.value;
 

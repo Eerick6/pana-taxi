@@ -5,18 +5,18 @@ import type { PlatformMember, UserRole } from '@/types';
 import { getStaff, inviteStaff, deleteStaff } from '../api';
 
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
-  { value: 'PLATFORM_ADMIN', label: 'Admin Plataforma' },
-  { value: 'FINANCE', label: 'Finanzas' },
-  { value: 'MONITORING', label: 'Monitoreo' },
-  { value: 'SUPPORT', label: 'Soporte' },
+  { value: 'platform_admin', label: 'Admin Plataforma' },
+  { value: 'finance', label: 'Finanzas' },
+  { value: 'monitoring', label: 'Monitoreo' },
+  { value: 'support', label: 'Soporte' },
 ];
 
 const ROLE_BADGE: Record<string, string> = {
-  OWNER: 'bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-400',
-  PLATFORM_ADMIN: 'bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-400',
-  FINANCE: 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400',
-  MONITORING: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400',
-  SUPPORT: 'bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400',
+  owner: 'bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-400',
+  platform_admin: 'bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-400',
+  finance: 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400',
+  monitoring: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400',
+  support: 'bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400',
 };
 
 export default function StaffList() {
@@ -27,7 +27,7 @@ export default function StaffList() {
   const [showInvite, setShowInvite] = useState(false);
   const [inviteLoading, setInviteLoading] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [form, setForm] = useState({ email: '', full_name: '', role: 'SUPPORT' as UserRole });
+  const [form, setForm] = useState({ email: '', full_name: '', role: 'support' as UserRole });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -50,7 +50,7 @@ export default function StaffList() {
     try {
       await inviteStaff(form);
       setShowInvite(false);
-      setForm({ email: '', full_name: '', role: 'SUPPORT' });
+      setForm({ email: '', full_name: '', role: 'support' });
       await load();
     } finally {
       setInviteLoading(false);
@@ -115,7 +115,7 @@ export default function StaffList() {
                       </td>
                       <td className="px-5 py-3.5 text-xs text-gray-400">{dateStr(m.created_at)}</td>
                       <td className="px-5 py-3.5">
-                        {m.role !== 'OWNER' && (
+                        {m.role !== 'owner' && (
                           <button onClick={() => setDeleteId(m.id)} className="px-2.5 py-1 text-xs font-medium rounded-lg bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400 hover:bg-error-100 transition-colors">
                             Eliminar
                           </button>

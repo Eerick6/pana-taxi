@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CooperativesService } from './cooperatives.service';
 import { CooperativesController } from './cooperatives.controller';
+import { CooperativesPublicController } from './cooperatives-public.controller';
 import { Cooperative } from './entities/cooperative.entity';
 import { CooperativeMember } from './entities/cooperative-member.entity';
 import { CooperativeDocument } from './entities/cooperative-document.entity';
@@ -19,7 +20,7 @@ import { TermsModule } from '../terms/terms.module';
     TermsModule,
   ],
   providers: [CooperativesService],
-  controllers: [CooperativesController],
+  controllers: [CooperativesController, CooperativesPublicController],
   exports: [TypeOrmModule],
 })
 export class CooperativesModule {}

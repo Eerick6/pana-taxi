@@ -50,6 +50,14 @@ export class TripsScheduler {
       this.gateway.notifyTripUpdate(trip.id, 'trip.radius_expanded', {
         trip_id: trip.id,
         search_radius_km: newRadius,
+        origin_lat: trip.origin_lat ? parseFloat(trip.origin_lat as any) : null,
+        origin_lng: trip.origin_lng ? parseFloat(trip.origin_lng as any) : null,
+        origin_address: trip.origin_address,
+        destination_address: trip.destination_address,
+        suggested_fare: trip.suggested_fare ? parseFloat(trip.suggested_fare as any) : null,
+        fare_mode: trip.fare_mode,
+        client_offer: trip.client_offer ? parseFloat(trip.client_offer as any) : null,
+        distance_km: trip.estimated_distance_km ? parseFloat(trip.estimated_distance_km as any) : null,
       });
     }
   }

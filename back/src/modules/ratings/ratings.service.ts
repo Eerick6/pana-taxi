@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import { Rating, RatingDirection } from './entities/rating.entity';
 import { Driver, DriverType } from '../drivers/entities/driver.entity';
 import { Client } from '../clients/entities/client.entity';
+import { VehicleRequest } from '../vehicle-requests/entities/vehicle-request.entity';
 import { CreateRatingDto } from './dto/create-rating.dto';
 import { UserRole } from '../users/entities/user.entity';
 
@@ -22,6 +23,8 @@ export class RatingsService {
     private driversRepo: Repository<Driver>,
     @InjectRepository(Client)
     private clientsRepo: Repository<Client>,
+    @InjectRepository(VehicleRequest)
+    private vehicleRequestsRepo: Repository<VehicleRequest>,
   ) {}
 
   async create(userId: string, role: UserRole, dto: CreateRatingDto) {
@@ -98,10 +101,17 @@ export class RatingsService {
       });
       if (already) throw new ConflictException('Ya calificaste al conductor de esta solicitud');
 
+      const request = await this.vehicleRequestsRepo.findOne({
+        where: { id: dto.vehicle_request_id },
+        relations: ['accepted_driver'],
+      });
+      if (!request?.accepted_driver) throw new BadRequestException('No hay conductor aceptado en esta solicitud');
+
       const rating = await this.ratingsRepo.save(
         this.ratingsRepo.create({
           direction: dto.direction,
           vehicle_request_id: dto.vehicle_request_id,
+          driver: request.accepted_driver,
           owner: driver,
           score: dto.score,
           comment: dto.comment,
@@ -122,11 +132,18 @@ export class RatingsService {
       });
       if (already) throw new ConflictException('Ya calificaste al dueño de esta solicitud');
 
+      const request = await this.vehicleRequestsRepo.findOne({
+        where: { id: dto.vehicle_request_id },
+        relations: ['owner'],
+      });
+      if (!request?.owner) throw new BadRequestException('No se encontró el dueño de la solicitud');
+
       const rating = await this.ratingsRepo.save(
         this.ratingsRepo.create({
           direction: dto.direction,
           vehicle_request_id: dto.vehicle_request_id,
           driver,
+          owner: request.owner,
           score: dto.score,
           comment: dto.comment,
         }),

@@ -29,6 +29,13 @@ export class StandsController {
     return this.standsService.create(user, dto);
   }
 
+  // Resumen global de paradas por cooperativa — para el dashboard de plataforma
+  @Get('summary')
+  @Roles(UserRole.OWNER, UserRole.PLATFORM_ADMIN, UserRole.MONITORING, UserRole.SUPPORT)
+  summary() {
+    return this.standsService.globalSummary();
+  }
+
   // Coop staff: returns only their coop's stands automatically
   // Platform: requires ?cooperative_id=
   @Get()

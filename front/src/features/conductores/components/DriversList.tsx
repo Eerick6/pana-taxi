@@ -2,10 +2,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { dateStr } from '@/lib/format';
 import type { Driver } from '@/types';
-import {
-  getDrivers, approveDriverPlatform, rejectDriverPlatform,
-  blockDriver, unblockDriver,
-} from '../api';
+import { getDrivers, blockDriver, unblockDriver, deleteDriver } from '../api';
+import DriverDocumentsModal from './DriverDocumentsModal';
 
 const APPROVAL_BADGE: Record<string, string> = {
   approved: 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400',
@@ -40,8 +38,9 @@ export default function DriversList({ cooperativeId }: Props) {
   const [filterApproval, setFilterApproval] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'pending'>('all');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [rejectId, setRejectId] = useState<string | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [docsDriverId, setDocsDriverId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,14 +65,17 @@ export default function DriversList({ cooperativeId }: Props) {
 
   const act = async (fn: () => Promise<void>, id: string) => {
     setActionLoading(id);
-    try { await fn(); await load(); } finally { setActionLoading(null); }
-  };
-
-  const doReject = async () => {
-    if (!rejectId || !rejectReason.trim()) return;
-    await act(() => rejectDriverPlatform(rejectId, rejectReason), rejectId);
-    setRejectId(null);
-    setRejectReason('');
+    setActionError(null);
+    try {
+      await fn();
+      await load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string | string[] } } };
+      const raw = e?.response?.data?.message;
+      setActionError(Array.isArray(raw) ? raw[0] : raw ?? 'Error al realizar la acción');
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const pages = Math.max(1, Math.ceil(total / 15));
@@ -121,6 +123,15 @@ export default function DriversList({ cooperativeId }: Props) {
         )}
       </div>
 
+      {/* Action error */}
+      {actionError && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 text-sm text-red-700 dark:text-red-400">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+          <span className="flex-1">{actionError}</span>
+          <button onClick={() => setActionError(null)} className="text-red-400 hover:text-red-600 transition-colors">✕</button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
@@ -132,7 +143,7 @@ export default function DriversList({ cooperativeId }: Props) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 dark:border-gray-800">
-                {['Conductor', 'Tipo', 'Licencia', 'Estado', 'En línea', 'Registrado', 'Acciones'].map((h) => (
+                {['Conductor', 'Tipo', 'Lic. / Caduca', 'Estado', 'En línea', 'Registrado', 'Acciones'].map((h) => (
                   <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -150,12 +161,20 @@ export default function DriversList({ cooperativeId }: Props) {
                     <tr key={d.id} className="border-b border-gray-50 dark:border-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-500/20 flex items-center justify-center text-sm font-bold text-brand-700 dark:text-brand-300 flex-shrink-0">
-                            {d.full_name?.charAt(0).toUpperCase() ?? '?'}
-                          </div>
+                          {d.profile_photo_url ? (
+                            <img
+                              src={d.profile_photo_url}
+                              alt={d.full_name}
+                              className="w-9 h-9 rounded-full object-cover flex-shrink-0 border border-gray-200 dark:border-gray-700"
+                            />
+                          ) : (
+                            <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-500/20 flex items-center justify-center text-sm font-bold text-brand-700 dark:text-brand-300 flex-shrink-0">
+                              {d.full_name?.charAt(0).toUpperCase() ?? '?'}
+                            </div>
+                          )}
                           <div>
                             <p className="font-semibold text-gray-800 dark:text-white">{d.full_name}</p>
-                            <p className="text-xs text-gray-400">{d.user?.email ?? '—'}</p>
+                            <p className="text-xs text-gray-400">{d.user?.phone ?? d.user?.email ?? '—'}</p>
                           </div>
                         </div>
                       </td>
@@ -166,12 +185,32 @@ export default function DriversList({ cooperativeId }: Props) {
                       </td>
                       <td className="px-5 py-3.5 text-gray-600 dark:text-gray-400">
                         <p>{d.license_number ?? '—'}</p>
-                        {d.license_expiry && <p className="text-xs text-gray-400">{dateStr(d.license_expiry)}</p>}
+                        {d.license_expiry && (() => {
+                          const exp = new Date(d.license_expiry);
+                          const daysLeft = Math.ceil((exp.getTime() - Date.now()) / 86_400_000);
+                          const cls = daysLeft < 0
+                            ? 'text-red-500 dark:text-red-400 font-medium'
+                            : daysLeft <= 60
+                            ? 'text-orange-500 dark:text-orange-400 font-medium'
+                            : 'text-gray-400';
+                          return (
+                            <p className={`text-xs ${cls}`}>
+                              {daysLeft < 0 ? '⚠ Vencida ' : daysLeft <= 60 ? '⚠ Vence ' : 'Vence '}{dateStr(d.license_expiry)}
+                            </p>
+                          );
+                        })()}
                       </td>
                       <td className="px-5 py-3.5">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${APPROVAL_BADGE[d.approval_status] ?? ''}`}>
-                          {d.approval_status === 'approved' ? 'Aprobado' : d.approval_status === 'pending' ? 'Pendiente' : 'Rechazado'}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${APPROVAL_BADGE[d.approval_status] ?? ''}`}>
+                            {d.approval_status === 'approved' ? 'Aprobado' : d.approval_status === 'pending' ? 'Pendiente' : 'Rechazado'}
+                          </span>
+                          {d.user?.status === 'suspended' && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400">
+                              Bloqueado
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-1.5">
@@ -182,26 +221,33 @@ export default function DriversList({ cooperativeId }: Props) {
                       <td className="px-5 py-3.5 text-xs text-gray-400 whitespace-nowrap">{dateStr(d.created_at)}</td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-1.5">
-                          {d.approval_status === 'pending' && (
-                            <>
-                              <button onClick={() => act(() => approveDriverPlatform(d.id), d.id)} disabled={actionLoading === d.id} className="px-2.5 py-1 text-xs font-medium rounded-lg bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400 hover:bg-success-100 transition-colors disabled:opacity-50">
-                                Aprobar
-                              </button>
-                              <button onClick={() => setRejectId(d.id)} disabled={actionLoading === d.id} className="px-2.5 py-1 text-xs font-medium rounded-lg bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400 hover:bg-error-100 transition-colors disabled:opacity-50">
-                                Rechazar
-                              </button>
-                            </>
-                          )}
-                          {d.approval_status === 'approved' && (
+                          {/* Documentos — abre modal con revisión y aprobación integrada */}
+                          <button
+                            onClick={() => setDocsDriverId(d.id)}
+                            className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-colors ${
+                              d.approval_status === 'pending'
+                                ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400 hover:bg-brand-100'
+                                : 'border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                            }`}
+                          >
+                            {d.approval_status === 'pending' ? 'Revisar docs' : 'Ver docs'}
+                          </button>
+                          {d.user?.status !== 'suspended' ? (
                             <button onClick={() => act(() => blockDriver(d.id), d.id)} disabled={actionLoading === d.id} className="px-2.5 py-1 text-xs font-medium rounded-lg bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400 hover:bg-orange-100 transition-colors disabled:opacity-50">
                               Bloquear
                             </button>
-                          )}
-                          {d.approval_status === 'rejected' && (
+                          ) : (
                             <button onClick={() => act(() => unblockDriver(d.id), d.id)} disabled={actionLoading === d.id} className="px-2.5 py-1 text-xs font-medium rounded-lg bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400 hover:bg-success-100 transition-colors disabled:opacity-50">
                               Desbloquear
                             </button>
                           )}
+                          <button
+                            onClick={() => setDeleteId(d.id)}
+                            disabled={actionLoading === d.id}
+                            className="px-2.5 py-1 text-xs font-medium rounded-lg bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400 hover:bg-red-100 transition-colors disabled:opacity-50"
+                          >
+                            Eliminar
+                          </button>
                           {actionLoading === d.id && (
                             <svg className="w-4 h-4 animate-spin text-brand-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
                           )}
@@ -224,20 +270,41 @@ export default function DriversList({ cooperativeId }: Props) {
         )}
       </div>
 
-      {/* Reject modal */}
-      {rejectId && (
+      {/* Documents modal */}
+      {docsDriverId && (
+        <DriverDocumentsModal
+          driverId={docsDriverId}
+          onClose={() => setDocsDriverId(null)}
+          onUpdate={load}
+        />
+      )}
+
+      {/* Delete confirmation */}
+      {deleteId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4">
-            <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Rechazar Conductor</h3>
-            <p className="text-sm text-gray-400 mb-4">Indica el motivo del rechazo</p>
-            <textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Ej: Licencia vencida..." rows={3} className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none" />
-            <div className="flex gap-3 mt-4">
-              <button onClick={() => { setRejectId(null); setRejectReason(''); }} className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Cancelar</button>
-              <button onClick={doReject} disabled={!rejectReason.trim() || !!actionLoading} className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl bg-error-500 text-white hover:bg-error-600 disabled:opacity-50 transition-colors">Confirmar rechazo</button>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+            <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">¿Eliminar conductor?</h3>
+            <p className="text-sm text-gray-400 mb-6">Esta acción es permanente. El conductor y su cuenta serán eliminados del sistema.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteId(null)} className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  const id = deleteId;
+                  setDeleteId(null);
+                  await act(() => deleteDriver(id), id);
+                }}
+                disabled={!!actionLoading}
+                className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                Sí, eliminar
+              </button>
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 }

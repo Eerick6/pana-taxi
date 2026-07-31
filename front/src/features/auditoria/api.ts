@@ -6,12 +6,15 @@ export interface AuditQuery {
   limit?: number;
   action?: string;
   entity_type?: string;
-  user_id?: string;
-  from_date?: string;
-  to_date?: string;
+  actor_id?: string;
+  actor_role?: string;
+  method?: string;
+  status_class?: number;
+  from?: string;
+  to?: string;
 }
 
 export async function getAuditLogs(q: AuditQuery = {}): Promise<PaginatedResponse<AuditLog>> {
-  const { data } = await api.get('/audit', { params: { limit: 30, page: 1, ...q } });
+  const { data } = await api.get('/audit', { params: { limit: 50, page: 1, ...q } });
   return data;
 }

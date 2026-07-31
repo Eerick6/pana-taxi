@@ -1,6 +1,8 @@
 import api from '@/lib/api';
 import { isoDate, nDaysAgo } from '@/lib/format';
 
+// ── Legacy types (kept for existing sub-components still in use) ──────────────
+
 export interface DashboardSummary {
   total_trips: number;
   total_revenue: number;
@@ -23,20 +25,11 @@ export interface TripRow {
   destination_address?: string | null;
 }
 
-export interface CoopReportRow {
-  cooperative_id: string;
-  name: string;
-  total_trips: number;
-  total_revenue: number;
-  total_commissions: number;
-  avg_fare: number;
-}
-
-export interface DailyPoint {
-  date: string;
-  revenue: number;
-  trips: number;
-  commissions: number;
+export interface TripsReport {
+  items: TripRow[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 export interface DashboardPendingCounts {
@@ -46,72 +39,57 @@ export interface DashboardPendingCounts {
   openSos: number;
 }
 
-export interface TripsReport {
-  data: TripRow[];
-  total: number;
-  page: number;
-  limit: number;
+// ── New dashboard stats ───────────────────────────────────────────────────────
+
+export interface PeriodMetric {
+  today: number;
+  week: number;
+  month: number;
+  all: number;
 }
 
-export async function getSummary(cooperative_id?: string): Promise<DashboardSummary> {
-  const { data } = await api.get('/reports/summary', {
-    params: {
-      from_date: isoDate(nDaysAgo(29)),
-      ...(cooperative_id ? { cooperative_id } : {}),
-    },
+export interface DashboardStats {
+  overview: {
+    cooperatives: number;
+    vehicles: number;
+    drivers: number;
+    clients: number;
+    online_now: number;
+  };
+  trips: {
+    in_progress: number;
+    waiting: number;
+    completed: PeriodMetric;
+    cancelled: PeriodMetric;
+    revenue: PeriodMetric;
+    commission: PeriodMetric;
+  };
+  financials: {
+    total_recharges: number;
+    total_commissions_deducted: number;
+    month_recharges: number;
+    month_commissions_deducted: number;
+  };
+  top_cooperatives: { id: string; name: string; total_trips: number; total_revenue: number; total_commission: number }[];
+  top_drivers: { id: string; full_name: string; total_trips: number; avg_rating: number }[];
+  top_clients: { id: string; full_name: string; total_trips: number; rating: number }[];
+  coop_breakdown: { id: string; name: string; status: string; vehicle_count: number; owner_count: number; active_now: number }[];
+}
+
+export async function getDashboardStats(cooperativeId?: string): Promise<DashboardStats> {
+  const { data } = await api.get('/reports/dashboard-stats', {
+    params: cooperativeId ? { cooperative_id: cooperativeId } : undefined,
   });
   return data;
 }
 
-export async function getTrendData(cooperative_id?: string): Promise<DailyPoint[]> {
-  const from = nDaysAgo(29);
-  const { data } = await api.get('/reports/trips', {
-    params: {
-      limit: 500,
-      page: 1,
-      from_date: isoDate(from),
-      ...(cooperative_id ? { cooperative_id } : {}),
-    },
-  });
-
-  const rows: TripRow[] = data.data ?? [];
-  const byDate: Record<string, DailyPoint> = {};
-
-  for (let i = 0; i < 30; i++) {
-    const d = new Date(from);
-    d.setDate(d.getDate() + i);
-    const key = isoDate(d);
-    byDate[key] = { date: key, revenue: 0, trips: 0, commissions: 0 };
-  }
-
-  for (const row of rows) {
-    const key = (row.completed_at ?? row.created_at)?.slice(0, 10);
-    if (key && byDate[key]) {
-      byDate[key].revenue += Number(row.fare_amount ?? 0);
-      byDate[key].commissions += Number(row.commission_amount ?? 0);
-      byDate[key].trips += 1;
-    }
-  }
-
-  return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
-}
+// ── Legacy helpers ────────────────────────────────────────────────────────────
 
 export async function getRecentTrips(limit = 10, cooperative_id?: string): Promise<TripsReport> {
   const { data } = await api.get('/reports/trips', {
     params: { limit, page: 1, ...(cooperative_id ? { cooperative_id } : {}) },
   });
   return data;
-}
-
-export async function getCoopRanking(): Promise<CoopReportRow[]> {
-  try {
-    const { data } = await api.get('/reports/cooperatives', {
-      params: { from_date: isoDate(nDaysAgo(29)) },
-    });
-    return data.data ?? data ?? [];
-  } catch {
-    return [];
-  }
 }
 
 export async function getPendingCounts(cooperative_id?: string): Promise<DashboardPendingCounts> {
@@ -143,3 +121,32 @@ export async function getPendingCounts(cooperative_id?: string): Promise<Dashboa
     openSos: extract(sos),
   };
 }
+
+// ── Types used by sub-components ─────────────────────────────────────────────
+
+export interface CoopReportRow {
+  cooperative_id: string;
+  name: string;
+  total_revenue: number;
+  total_trips: number;
+}
+
+export interface EntityCounts {
+  cooperativas: number;
+  conductores: number;
+  conductores_online: number;
+  vehiculos: number;
+  clientes: number;
+  viajes_hoy: number;
+}
+
+export interface DailyPoint {
+  date: string;
+  revenue: number;
+  trips: number;
+}
+
+// Keep for compat
+export type { };
+export const isoDateExport = isoDate;
+export const nDaysAgoExport = nDaysAgo;

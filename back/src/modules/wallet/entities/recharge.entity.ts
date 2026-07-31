@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { DriverWallet } from './driver-wallet.entity';
 import { User } from '../../users/entities/user.entity';
+import { BankAccount } from './bank-account.entity';
 
 export enum RechargeMethod {
   BANK_TRANSFER = 'bank_transfer',
@@ -32,6 +33,13 @@ export class Recharge {
 
   @Column({ nullable: true })
   proof_url: string;
+
+  @ManyToOne(() => BankAccount, { nullable: true, eager: false })
+  @JoinColumn({ name: 'bank_account_id' })
+  bank_account: BankAccount;
+
+  @Column({ nullable: true })
+  driver_notes: string;
 
   @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'confirmed_by' })

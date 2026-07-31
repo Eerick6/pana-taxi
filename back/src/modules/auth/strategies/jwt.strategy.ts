@@ -18,11 +18,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string; role: string }) {
+  async validate(payload: { sub: string; role: string; cooperative_id?: string | null }) {
     const user = await this.usersRepository.findOne({ where: { id: payload.sub } });
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException();
     }
+    // Inyectar cooperative_id desde el payload para que controllers de coop lo usen sin query params
+    user.cooperative_id = payload.cooperative_id ?? null;
     return user;
   }
 }

@@ -48,6 +48,13 @@ api.interceptors.response.use(
     isRefreshing = true;
     const hadToken = !!accessToken;
 
+    // No hay token en memoria: la página acaba de cargar y AuthContext
+    // ya está manejando la restauración de sesión. No interferir.
+    if (!hadToken) {
+      isRefreshing = false;
+      return Promise.reject(error);
+    }
+
     try {
       const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error('refresh failed');

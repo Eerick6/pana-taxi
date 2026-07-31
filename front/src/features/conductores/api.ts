@@ -24,6 +24,11 @@ export async function getPendingCoopDrivers(q: DriversQuery = {}): Promise<Pagin
   return data;
 }
 
+export async function getCoopMembers(q: DriversQuery = {}): Promise<PaginatedResponse<Driver>> {
+  const { data } = await api.get('/drivers/cooperative/members', { params: { limit: 20, page: 1, ...q } });
+  return data;
+}
+
 export async function approveDriverPlatform(id: string): Promise<void> {
   await api.patch(`/drivers/${id}/platform-approve`);
 }
@@ -48,7 +53,34 @@ export async function unblockDriver(id: string): Promise<void> {
   await api.patch(`/drivers/${id}/unblock`);
 }
 
-export async function getDriver(id: string): Promise<Driver> {
+export async function deleteDriver(id: string): Promise<void> {
+  await api.delete(`/drivers/${id}`);
+}
+
+export async function getDriver(id: string): Promise<Driver & { documents?: DriverDocument[] }> {
   const { data } = await api.get(`/drivers/${id}`);
   return data;
+}
+
+export interface DriverDocument {
+  id: string;
+  type: string;
+  file_url: string;
+  status: 'pending' | 'approved' | 'rejected';
+  rejection_reason: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export async function getDocumentUrl(driverId: string, documentId: string): Promise<string> {
+  const { data } = await api.get(`/drivers/${driverId}/documents/${documentId}/url`);
+  return data.url as string;
+}
+
+export async function approveDocument(driverId: string, documentId: string): Promise<void> {
+  await api.patch(`/drivers/${driverId}/documents/${documentId}/approve`);
+}
+
+export async function rejectDocument(driverId: string, documentId: string, reason: string): Promise<void> {
+  await api.patch(`/drivers/${driverId}/documents/${documentId}/reject`, { reason });
 }

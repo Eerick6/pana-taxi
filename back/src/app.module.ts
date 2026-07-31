@@ -3,7 +3,11 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { BullModule } from '@nestjs/bullmq';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { RedisModule } from './redis/redis.module';
+import { NotificationsQueueModule } from './queues/notifications/notifications-queue.module';
+import { TripExpansionModule } from './queues/trips/trip-expansion.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './modules/auth/auth.module';
@@ -29,10 +33,30 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { AuditModule } from './modules/audit/audit.module';
 import { AuditInterceptor } from './modules/audit/audit.interceptor';
 import { AccountingModule } from './modules/accounting/accounting.module';
+import { ChatModule } from './modules/chat/chat.module';
+import { PlansModule } from './modules/plans/plans.module';
+import { BillingModule } from './modules/billing/billing.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    RedisModule,
+    BullModule.forRoot({
+      connection: process.env.REDIS_URL
+        ? { url: process.env.REDIS_URL }
+        : {
+            host: process.env.REDIS_HOST || 'localhost',
+            port: parseInt(process.env.REDIS_PORT || '6379'),
+          },
+      defaultJobOptions: {
+        removeOnComplete: { count: 100 },
+        removeOnFail: { count: 50 },
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 1000 },
+      },
+    }),
+    NotificationsQueueModule,
+    TripExpansionModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([
       { name: 'global', ttl: 60000, limit: 60 },
@@ -45,7 +69,12 @@ import { AccountingModule } from './modules/accounting/accounting.module';
       password: process.env.DB_PASSWORD || 'taxi',
       database: process.env.DB_NAME || 'taxi',
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: process.env.NODE_ENV !== 'production',
+      synchronize: process.env.NODE_ENV === 'development',
+      extra: {
+        connectionLimit: 20,
+        connectTimeout: 10000,
+      },
+      poolSize: 20,
     }),
     AuthModule,
     UsersModule,
@@ -69,6 +98,9 @@ import { AccountingModule } from './modules/accounting/accounting.module';
     NotificationsModule,
     AuditModule,
     AccountingModule,
+    ChatModule,
+    PlansModule,
+    BillingModule,
   ],
   controllers: [AppController],
   providers: [

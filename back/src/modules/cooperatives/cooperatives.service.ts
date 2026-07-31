@@ -3,9 +3,11 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import * as nodemailer from 'nodemailer';
 import { Cooperative, CooperativeStatus, CooperativeApprovalStatus } from './entities/cooperative.entity';
 import { CooperativeMember, CooperativeMemberRole } from './entities/cooperative-member.entity';
 import { CooperativeDocument, CooperativeDocumentStatus } from './entities/cooperative-document.entity';
@@ -16,6 +18,7 @@ import { Trip, TripStatus } from '../trips/entities/trip.entity';
 import { In } from 'typeorm';
 import { StorageService } from '../storage/storage.service';
 import { TermsService } from '../terms/terms.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { TermsType } from '../terms/entities/terms-version.entity';
 import { CreateCooperativeDto } from './dto/create-cooperative.dto';
 import { UpdateCooperativeDto } from './dto/update-cooperative.dto';
@@ -30,8 +33,22 @@ const ROLE_MAP: Record<CooperativeMemberRole, UserRole> = {
   [CooperativeMemberRole.SUPERVISOR]: UserRole.COOPERATIVE_SUPERVISOR,
 };
 
+const DOC_TYPE_LABEL: Record<string, string> = {
+  ruc: 'RUC de la cooperativa',
+  ant_permit: 'Permiso de operación ANT/GADM',
+  seps_resolution: 'Resolución SEPS de constitución',
+  statutes: 'Estatutos aprobados',
+  representative_id: 'Cédula del representante legal',
+  representative_appointment: 'Nombramiento del representante',
+  other: 'Otro documento',
+};
+
 @Injectable()
 export class CooperativesService {
+  private mailer: nodemailer.Transporter;
+  private readonly logger = new Logger(CooperativesService.name);
+  private readonly isDev = process.env.NODE_ENV !== 'production';
+
   constructor(
     @InjectRepository(Cooperative)
     private coopRepo: Repository<Cooperative>,
@@ -49,7 +66,204 @@ export class CooperativesService {
     private tripsRepo: Repository<Trip>,
     private storage: StorageService,
     private termsService: TermsService,
-  ) {}
+    private notifications: NotificationsService,
+  ) {
+    this.mailer = nodemailer.createTransport({
+      host: 'smtp-relay.brevo.com',
+      port: 587,
+      secure: false,
+      auth: {
+        user: process.env.BREVO_SMTP_USER,
+        pass: process.env.BREVO_SMTP_KEY,
+      },
+      tls: { rejectUnauthorized: false },
+    });
+  }
+
+  private async sendDocumentNotification(
+    to: string,
+    coopName: string,
+    docType: string,
+    status: 'approved' | 'rejected',
+    reason?: string,
+  ) {
+    const label = DOC_TYPE_LABEL[docType] ?? docType;
+    const subject = status === 'approved'
+      ? `✅ Documento aprobado — ${coopName}`
+      : `❌ Documento rechazado — ${coopName}`;
+
+    const html = status === 'approved'
+      ? `
+        <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto">
+          <h2 style="color:#22c55e">Documento aprobado</h2>
+          <p>El documento <strong>${label}</strong> de la cooperativa <strong>${coopName}</strong> ha sido <strong style="color:#22c55e">aprobado</strong> por la plataforma.</p>
+          <p>Ingresa al panel para ver el estado actualizado de tus documentos.</p>
+        </div>`
+      : `
+        <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto">
+          <h2 style="color:#ef4444">Documento rechazado</h2>
+          <p>El documento <strong>${label}</strong> de la cooperativa <strong>${coopName}</strong> ha sido <strong style="color:#ef4444">rechazado</strong>.</p>
+          ${reason ? `<p><strong>Motivo:</strong> ${reason}</p>` : ''}
+          <p>Por favor sube el documento corregido desde el panel de administración.</p>
+        </div>`;
+
+    await this.mailer.sendMail({
+      from: `"Pana Taxi" <${process.env.BREVO_FROM}>`,
+      to,
+      subject,
+      html,
+    });
+  }
+
+  private async sendCoopReviewEmail(to: string, coopName: string, inviteToken: string) {
+    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3001';
+    const setPasswordLink = `${frontendUrl}/set-password?email=${encodeURIComponent(to)}&token=${encodeURIComponent(inviteToken)}`;
+    try {
+      const info = await this.mailer.sendMail({
+      from: `"Pana Taxi" <${process.env.BREVO_FROM}>`,
+      to,
+      subject: `Tu cooperativa "${coopName}" está siendo revisada — Pana Taxi`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px">
+          <h2 style="color:#1a1a1a">¡Registro recibido! 🎉</h2>
+          <p>Hemos recibido la solicitud de registro de la cooperativa <strong>${coopName}</strong>. Nuestro equipo revisará la información y te notificará cuando sea aprobada (menos de 24 horas).</p>
+          <p><strong>Paso 1:</strong> Crea tu contraseña haciendo clic en el botón de abajo. El enlace expira en 24 horas.</p>
+          <a href="${setPasswordLink}" style="display:inline-block;background:#fcbd13;color:#000;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:8px 0">
+            Crear mi contraseña →
+          </a>
+          <p><strong>Paso 2:</strong> Una vez creada tu contraseña, podrás iniciar sesión en el panel para subir los documentos requeridos.</p>
+          <p><strong>Paso 3:</strong> Cuando tu cooperativa sea aprobada, recibirás otro correo de confirmación y podrás operar en la plataforma.</p>
+          <p style="color:#888;font-size:12px;margin-top:20px">¿Preguntas? Escríbenos a soporte@panataxista.com</p>
+        </div>`,
+      });
+      this.logger.log(`[EMAIL OK] coop-review → ${to} | ${info.messageId}`);
+    } catch (err) {
+      this.logger.error(`[EMAIL FAIL] coop-review → ${to} | ${err.message}`);
+      throw err;
+    }
+  }
+
+  private async sendStaffInviteEmail(to: string, fullName: string, coopName: string, inviteToken: string) {
+    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3001';
+    const setPasswordLink = `${frontendUrl}/set-password?email=${encodeURIComponent(to)}&token=${encodeURIComponent(inviteToken)}`;
+    await this.mailer.sendMail({
+      from: `"Pana Taxi" <${process.env.BREVO_FROM}>`,
+      to,
+      subject: `Te invitaron a gestionar la cooperativa "${coopName}" — Pana Taxi`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px">
+          <h2 style="color:#1a1a1a">¡Hola, ${fullName}! 👋</h2>
+          <p>Has sido añadido como miembro del equipo de <strong>${coopName}</strong> en la plataforma Pana Taxi.</p>
+          <p>Para acceder al panel, primero crea tu contraseña haciendo clic en el botón de abajo. El enlace expira en 48 horas.</p>
+          <a href="${setPasswordLink}" style="display:inline-block;background:#fcbd13;color:#000;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:8px 0">
+            Crear mi contraseña →
+          </a>
+          <p>Una vez creada tu contraseña, podrás iniciar sesión en <a href="${frontendUrl}/signin">el panel</a> con este correo.</p>
+          <p style="color:#888;font-size:12px;margin-top:20px">¿Preguntas? Escríbenos a soporte@panataxista.com</p>
+        </div>`,
+    });
+  }
+
+  async sendCoopApprovedEmail(to: string, coopName: string) {
+    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3001';
+    await this.mailer.sendMail({
+      from: `"Pana Taxi" <${process.env.BREVO_FROM}>`,
+      to,
+      subject: `¡Tu cooperativa "${coopName}" fue aprobada! — Pana Taxi`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:20px">
+          <h2 style="color:#16a34a">¡Cooperativa aprobada! ✅</h2>
+          <p>La cooperativa <strong>${coopName}</strong> ha sido revisada y aprobada por el equipo de Pana Taxi.</p>
+          <p>Ya puedes iniciar sesión en el panel y comenzar a gestionar tu cooperativa, registrar socios y operar en la plataforma.</p>
+          <a href="${frontendUrl}/signin" style="display:inline-block;background:#fcbd13;color:#000;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:8px 0">
+            Ir al panel →
+          </a>
+          <p style="color:#888;font-size:12px;margin-top:20px">¿Preguntas? Escríbenos a soporte@panataxista.com</p>
+        </div>`,
+    });
+  }
+
+  // ─── Notificar admins de plataforma ──────────────────────────────────────────
+
+  private async notifyPlatformAdmins(payload: { title: string; body: string }) {
+    const admins = await this.usersRepo.find({
+      where: [{ role: UserRole.OWNER }, { role: UserRole.PLATFORM_ADMIN }],
+      select: ['id'],
+    });
+    const ids = admins.map((u) => u.id);
+    if (ids.length) this.notifications.sendToUsers(ids, payload).catch(() => {});
+  }
+
+  // ─── Registro público (sin auth) ─────────────────────────────────────────────
+
+  async registerPublic(dto: {
+    name: string;
+    ruc: string;
+    address?: string;
+    phone?: string;
+    admin_name: string;
+    admin_email: string;
+  }) {
+    const nameExists = await this.coopRepo.findOne({ where: { name: dto.name } });
+    if (nameExists) throw new ConflictException('Ya existe una cooperativa con ese nombre');
+
+    const rucExists = await this.coopRepo.findOne({ where: { ruc: dto.ruc } });
+    if (rucExists) throw new ConflictException('Ya existe una cooperativa con ese RUC');
+
+    const emailExists = await this.usersRepo.findOne({ where: { email: dto.admin_email } });
+    if (emailExists) throw new ConflictException('El correo ya está registrado. Inicia sesión en el panel.');
+
+    // Crear cooperativa en estado pending
+    const coop = await this.coopRepo.save(
+      this.coopRepo.create({
+        name: dto.name,
+        ruc: dto.ruc,
+        address: dto.address,
+        phone: dto.phone,
+        status: CooperativeStatus.INACTIVE,
+        approval_status: CooperativeApprovalStatus.PENDING,
+      }),
+    );
+
+    // Crear usuario admin de la cooperativa (sin contraseña aún — la crea desde el email)
+    const user = await this.usersRepo.save(
+      this.usersRepo.create({
+        email: dto.admin_email,
+        role: UserRole.COOPERATIVE_ADMIN,
+        status: UserStatus.ACTIVE,
+      }),
+    );
+
+    // Generar token de 24h para que el admin cree su contraseña
+    const inviteCode = Math.floor(100000 + Math.random() * 900000).toString() + Date.now().toString(36);
+    const inviteExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await this.usersRepo.update(user.id, { otp_code: inviteCode, otp_expires_at: inviteExpires });
+
+    // Vincular como miembro admin
+    await this.membersRepo.save(
+      this.membersRepo.create({
+        user,
+        cooperative: coop,
+        full_name: dto.admin_name,
+        role: CooperativeMemberRole.ADMIN,
+      }),
+    );
+
+    this.notifyPlatformAdmins({
+      title: '🏢 Nueva cooperativa registrada',
+      body: `${dto.name} se registró y está pendiente de verificación.`,
+    });
+
+    await this.sendCoopReviewEmail(dto.admin_email, dto.name, inviteCode).catch((e) =>
+      this.logger.error(`sendCoopReviewEmail failed for ${dto.admin_email}: ${e.message}`),
+    );
+
+    return {
+      cooperative_id: coop.id,
+      admin_email: dto.admin_email,
+      message: 'Registro exitoso. Revisa tu correo para crear tu contraseña y continuar.',
+    };
+  }
 
   // ─── CRUD ────────────────────────────────────────────────────────────────────
 
@@ -87,6 +301,17 @@ export class CooperativesService {
       order: { created_at: 'DESC' },
     });
     return { items, total, page, limit };
+  }
+
+  async listActive(page = 1, limit = 50) {
+    const [items, total] = await this.coopRepo.findAndCount({
+      where: { approval_status: CooperativeApprovalStatus.APPROVED, status: CooperativeStatus.ACTIVE },
+      select: ['id', 'name', 'address', 'phone', 'logo_url'],
+      skip: (page - 1) * limit,
+      take: limit,
+      order: { name: 'ASC' },
+    });
+    return { items, total };
   }
 
   async findOne(id: string) {
@@ -143,6 +368,24 @@ export class CooperativesService {
     return { message: 'Cooperativa activada' };
   }
 
+  async setMonthlyFee(id: string, fee: number) {
+    const coop = await this.coopRepo.findOne({ where: { id } });
+    if (!coop) throw new NotFoundException('Cooperativa no encontrada');
+    if (fee < 0) throw new BadRequestException('El costo mensual no puede ser negativo');
+    await this.coopRepo.update(id, { monthly_fee_override: fee });
+    return { message: `Costo mensual actualizado a $${fee}`, monthly_fee_override: fee };
+  }
+
+  async remove(id: string) {
+    const coop = await this.coopRepo.findOne({ where: { id } });
+    if (!coop) throw new NotFoundException('Cooperativa no encontrada');
+    if (coop.status === CooperativeStatus.ACTIVE) {
+      throw new BadRequestException('No se puede eliminar una cooperativa activa. Suspéndela primero.');
+    }
+    await this.coopRepo.delete(id);
+    return { message: 'Cooperativa eliminada' };
+  }
+
   // ─── DOCUMENTOS ──────────────────────────────────────────────────────────────
 
   async uploadDocument(
@@ -152,9 +395,6 @@ export class CooperativesService {
   ) {
     const coop = await this.coopRepo.findOne({ where: { id: cooperativeId } });
     if (!coop) throw new NotFoundException('Cooperativa no encontrada');
-    if (coop.approval_status === CooperativeApprovalStatus.APPROVED) {
-      throw new BadRequestException('La cooperativa ya está aprobada');
-    }
 
     const key = await this.storage.upload(
       `cooperatives/${cooperativeId}/docs`,
@@ -171,6 +411,11 @@ export class CooperativesService {
         status: CooperativeDocumentStatus.PENDING,
       }),
     );
+
+    this.notifyPlatformAdmins({
+      title: '📄 Documento subido',
+      body: `${coop.name} subió un documento pendiente de revisión.`,
+    });
 
     return { message: 'Documento subido. La plataforma lo revisará.' };
   }
@@ -220,6 +465,17 @@ export class CooperativesService {
       rejection_reason: null,
     });
 
+    // Notificar al admin de la coop por correo
+    const adminMember = await this.membersRepo.findOne({
+      where: { cooperative: { id }, role: CooperativeMemberRole.ADMIN },
+      relations: ['user'],
+    });
+    if (adminMember?.user?.email) {
+      this.sendCoopApprovedEmail(adminMember.user.email, coop.name).catch((e) =>
+        this.logger.error(`sendCoopApprovedEmail failed: ${e.message}`),
+      );
+    }
+
     return { message: 'Cooperativa aprobada y activada. Ya puede registrar owners.' };
   }
 
@@ -243,6 +499,7 @@ export class CooperativesService {
   async approveDocument(cooperativeId: string, docId: string) {
     const doc = await this.documentsRepo.findOne({
       where: { id: docId, cooperative: { id: cooperativeId } },
+      relations: ['cooperative'],
     });
     if (!doc) throw new NotFoundException('Documento no encontrado');
     if (doc.status === CooperativeDocumentStatus.APPROVED) {
@@ -254,12 +511,27 @@ export class CooperativesService {
       rejection_reason: null,
     });
 
+    // Notificar al admin de la cooperativa
+    const adminMember = await this.membersRepo.findOne({
+      where: { cooperative: { id: cooperativeId }, role: CooperativeMemberRole.ADMIN },
+      relations: ['user'],
+    });
+    if (adminMember?.user?.email) {
+      this.sendDocumentNotification(
+        adminMember.user.email,
+        doc.cooperative.name,
+        doc.type,
+        'approved',
+      ).catch(() => {});
+    }
+
     return { message: 'Documento aprobado' };
   }
 
   async rejectDocument(cooperativeId: string, docId: string, dto: RejectCooperativeDocumentDto) {
     const doc = await this.documentsRepo.findOne({
       where: { id: docId, cooperative: { id: cooperativeId } },
+      relations: ['cooperative'],
     });
     if (!doc) throw new NotFoundException('Documento no encontrado');
     if (doc.status === CooperativeDocumentStatus.APPROVED) {
@@ -270,6 +542,21 @@ export class CooperativesService {
       status: CooperativeDocumentStatus.REJECTED,
       rejection_reason: dto.reason,
     });
+
+    // Notificar al admin de la cooperativa
+    const adminMember = await this.membersRepo.findOne({
+      where: { cooperative: { id: cooperativeId }, role: CooperativeMemberRole.ADMIN },
+      relations: ['user'],
+    });
+    if (adminMember?.user?.email) {
+      this.sendDocumentNotification(
+        adminMember.user.email,
+        doc.cooperative.name,
+        doc.type,
+        'rejected',
+        dto.reason,
+      ).catch(() => {});
+    }
 
     return { message: 'Documento rechazado. La cooperativa puede subir uno nuevo.' };
   }
@@ -298,8 +585,16 @@ export class CooperativesService {
       this.membersRepo.create({ user, cooperative: coop, full_name: dto.full_name, role: dto.role }),
     );
 
+    // Enviar invitación con link para crear contraseña (token 48h)
+    const inviteCode = Math.floor(100000 + Math.random() * 900000).toString() + Date.now().toString(36);
+    const inviteExpires = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    await this.usersRepo.update(user.id, { otp_code: inviteCode, otp_expires_at: inviteExpires });
+    await this.sendStaffInviteEmail(dto.email, dto.full_name, coop.name, inviteCode).catch((e) =>
+      this.logger.error(`sendStaffInviteEmail failed for ${dto.email}: ${e.message}`),
+    );
+
     return {
-      message: `Miembro agregado. Puede iniciar sesión con ${dto.email} vía POST /auth/email/request-otp`,
+      message: `Miembro agregado. Se envió un correo de invitación a ${dto.email} para crear su contraseña.`,
       user_id: user.id,
     };
   }
@@ -326,6 +621,25 @@ export class CooperativesService {
     await this.membersRepo.delete(memberId);
 
     return { message: 'Miembro eliminado y cuenta desactivada' };
+  }
+
+  // ── Socios (owner-drivers) ────────────────────────────────────────────────────
+
+  async listOwners(cooperativeId: string, status?: string, page = 1, limit = 100) {
+    const coop = await this.coopRepo.findOne({ where: { id: cooperativeId } });
+    if (!coop) throw new NotFoundException('Cooperativa no encontrada');
+
+    const where: Record<string, unknown> = { cooperative: { id: cooperativeId } };
+    if (status) where['approval_status'] = status;
+
+    const [items, total] = await this.coopOwnersRepo.findAndCount({
+      where,
+      relations: ['owner', 'owner.user'],
+      skip: (page - 1) * limit,
+      take: limit,
+      order: { created_at: 'ASC' },
+    });
+    return { items, total, page, limit };
   }
 
   // ── Flota en tiempo real ─────────────────────────────────────────────────────

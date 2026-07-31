@@ -1,9 +1,13 @@
-import { Injectable, Logger, OnModuleInit, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, IsNull } from 'typeorm';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import * as admin from 'firebase-admin';
+import * as fs from 'fs';
 import { User } from '../users/entities/user.entity';
 import { AppNotification, NotificationType } from './entities/app-notification.entity';
+import { NOTIFICATION_QUEUE } from '../../queues/notifications/notification-queue.types';
 
 export interface PushPayload {
   title: string;
@@ -22,16 +26,18 @@ export class NotificationsService implements OnModuleInit {
     private usersRepo: Repository<User>,
     @InjectRepository(AppNotification)
     private notifRepo: Repository<AppNotification>,
+    @Optional() @InjectQueue(NOTIFICATION_QUEUE) private notificationQueue: Queue | null,
   ) {}
 
   onModuleInit() {
-    const serviceAccountJson = process.env.FCM_SERVICE_ACCOUNT_JSON;
-    if (!serviceAccountJson) {
-      this.logger.warn('FCM_SERVICE_ACCOUNT_JSON no configurado — push notifications deshabilitadas');
+    const serviceAccountPath = process.env.FCM_SERVICE_ACCOUNT_PATH;
+    if (!serviceAccountPath) {
+      this.logger.warn('FCM_SERVICE_ACCOUNT_PATH no configurado — push notifications deshabilitadas');
       return;
     }
     try {
-      const serviceAccount = JSON.parse(serviceAccountJson);
+      const raw = fs.readFileSync(serviceAccountPath, 'utf8');
+      const serviceAccount = JSON.parse(raw);
       if (!admin.apps.length) {
         admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
       }
@@ -58,8 +64,27 @@ export class NotificationsService implements OnModuleInit {
     this.persistNotification(userId, payload).catch(() => {});
 
     if (!this.initialized) return;
-    const user = await this.usersRepo.findOne({ where: { id: userId }, select: ['fcm_token'] });
-    if (user?.fcm_token) await this.sendToToken(user.fcm_token, payload);
+
+    if (this.notificationQueue) {
+      // Async via Bull queue — non-blocking, with retry
+      this.notificationQueue
+        .add(
+          'fcm',
+          { type: 'fcm', userId, title: payload.title, body: payload.body, data: payload.data },
+          { attempts: 3, backoff: { type: 'exponential', delay: 1000 } },
+        )
+        .catch(err => {
+          this.logger.warn(`Queue unavailable, sending FCM directly: ${err.message}`);
+          this.usersRepo
+            .findOne({ where: { id: userId }, select: ['fcm_token'] })
+            .then(user => { if (user?.fcm_token) this.sendToToken(user.fcm_token, payload); })
+            .catch(() => {});
+        });
+    } else {
+      // Fallback: direct send when queue is not available
+      const user = await this.usersRepo.findOne({ where: { id: userId }, select: ['fcm_token'] });
+      if (user?.fcm_token) await this.sendToToken(user.fcm_token, payload);
+    }
   }
 
   // Envía push + persiste para VARIOS usuarios
@@ -70,9 +95,30 @@ export class NotificationsService implements OnModuleInit {
     userIds.forEach(uid => this.persistNotification(uid, payload).catch(() => {}));
 
     if (!this.initialized) return;
-    const users = await this.usersRepo.find({ where: { id: In(userIds) }, select: ['fcm_token'] });
-    const tokens = users.map(u => u.fcm_token).filter(Boolean) as string[];
-    if (tokens.length > 0) await this.sendToTokens(tokens, payload);
+
+    if (this.notificationQueue) {
+      // One job per user — each handles its own token lookup + retry
+      const jobs = userIds.map(uid => ({
+        name: 'fcm',
+        data: { type: 'fcm' as const, userId: uid, title: payload.title, body: payload.body, data: payload.data },
+        opts: { attempts: 3, backoff: { type: 'exponential' as const, delay: 1000 } },
+      }));
+      this.notificationQueue.addBulk(jobs).catch(err => {
+        this.logger.warn(`Queue unavailable, sending FCM directly: ${err.message}`);
+        this.usersRepo
+          .find({ where: { id: In(userIds) }, select: ['fcm_token'] })
+          .then(users => {
+            const tokens = users.map(u => u.fcm_token).filter(Boolean) as string[];
+            if (tokens.length > 0) this.sendToTokens(tokens, payload).catch(() => {});
+          })
+          .catch(() => {});
+      });
+    } else {
+      // Fallback: direct send
+      const users = await this.usersRepo.find({ where: { id: In(userIds) }, select: ['fcm_token'] });
+      const tokens = users.map(u => u.fcm_token).filter(Boolean) as string[];
+      if (tokens.length > 0) await this.sendToTokens(tokens, payload);
+    }
   }
 
   async sendToTokenDirect(token: string, payload: PushPayload): Promise<void> {
@@ -139,13 +185,19 @@ export class NotificationsService implements OnModuleInit {
   }
 
   private async sendToToken(token: string, payload: PushPayload): Promise<void> {
+    const isTripAlert = payload.data?.['type'] === 'trip_new';
     try {
       await admin.messaging().send({
         token,
         notification: { title: payload.title, body: payload.body },
         data: payload.data ?? {},
-        android: { priority: 'high' },
-        apns: { payload: { aps: { sound: 'default', badge: 1 } } },
+        android: {
+          priority: 'high',
+          notification: isTripAlert
+            ? { channelId: 'trip_alert', sound: 'trip_alert', defaultSound: false }
+            : { channelId: 'default', defaultSound: true },
+        },
+        apns: { payload: { aps: { sound: isTripAlert ? 'trip_alert.wav' : 'default', badge: 1 } } },
       });
     } catch (err) {
       if (err.code === 'messaging/registration-token-not-registered') {
@@ -161,13 +213,19 @@ export class NotificationsService implements OnModuleInit {
   }
 
   private async sendToTokens(tokens: string[], payload: PushPayload): Promise<void> {
+    const isTripAlert = payload.data?.['type'] === 'trip_new';
     try {
       const response = await admin.messaging().sendEachForMulticast({
         tokens,
         notification: { title: payload.title, body: payload.body },
         data: payload.data ?? {},
-        android: { priority: 'high' },
-        apns: { payload: { aps: { sound: 'default', badge: 1 } } },
+        android: {
+          priority: 'high',
+          notification: isTripAlert
+            ? { channelId: 'trip_alert', sound: 'trip_alert', defaultSound: false }
+            : { channelId: 'default', defaultSound: true },
+        },
+        apns: { payload: { aps: { sound: isTripAlert ? 'trip_alert.wav' : 'default', badge: 1 } } },
       });
 
       const invalidTokens = tokens.filter((_, i) =>

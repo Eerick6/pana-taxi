@@ -30,8 +30,13 @@ export class SetFareConfigDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  @Max(100)
-  night_surcharge_pct?: number;
+  night_price_per_km?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  night_minimum_fare?: number;
 
   @IsOptional()
   @Type(() => Number)

@@ -1,10 +1,20 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { mkdirSync } from 'fs';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 
+const UPLOADS_DIR = process.env.UPLOADS_DIR || '/app/uploads';
+
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Asegurar que el directorio exista antes de servir
+  mkdirSync(UPLOADS_DIR, { recursive: true });
+
+  // Servir archivos estáticos en GET /static/*
+  app.useStaticAssets(UPLOADS_DIR, { prefix: '/static' });
 
   app.use(helmet());
 

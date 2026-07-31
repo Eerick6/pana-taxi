@@ -1,6 +1,6 @@
 import {
-  Entity, PrimaryGeneratedColumn, Column,
-  ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn,
+  Entity, PrimaryGeneratedColumn, Column, Index,
+  ManyToOne, OneToMany, JoinColumn, CreateDateColumn, UpdateDateColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Driver } from '../../drivers/entities/driver.entity';
@@ -8,6 +8,7 @@ import { Vehicle } from '../../vehicles/entities/vehicle.entity';
 import { Cooperative } from '../../cooperatives/entities/cooperative.entity';
 import { PaymentMethod } from '../../payment-methods/entities/payment-method.entity';
 import { Stand } from '../../stands/entities/stand.entity';
+import { TripOffer } from './trip-offer.entity';
 
 export enum PaymentStatus {
   PENDING = 'pending',
@@ -43,6 +44,11 @@ export enum CancelledBy {
 }
 
 @Entity('trips')
+@Index('IDX_trips_coop_status', ['cooperative', 'status'])
+@Index('IDX_trips_driver_status', ['driver', 'status'])
+@Index('IDX_trips_client_status', ['client', 'status'])
+@Index('IDX_trips_status', ['status'])
+@Index('IDX_trips_created_at', ['created_at'])
 export class Trip {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -200,6 +206,9 @@ export class Trip {
 
   @Column({ nullable: true })
   cancellation_reason: string;
+
+  @OneToMany(() => TripOffer, (offer) => offer.trip, { cascade: false })
+  offers: TripOffer[];
 
   @CreateDateColumn()
   created_at: Date;

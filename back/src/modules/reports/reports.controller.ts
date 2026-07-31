@@ -20,6 +20,24 @@ const FINANCE_ROLES = [
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
+  @Get('dashboard-stats')
+  @Roles(UserRole.OWNER, UserRole.PLATFORM_ADMIN, UserRole.MONITORING)
+  getDashboardStats(@Query('cooperative_id') cooperativeId?: string) {
+    return this.reportsService.getDashboardStats(cooperativeId);
+  }
+
+  @Get('global')
+  @Roles(UserRole.OWNER, UserRole.PLATFORM_ADMIN, UserRole.FINANCE, UserRole.MONITORING)
+  getGlobal(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.reportsService.getGlobal(from, to);
+  }
+
+  @Get('daily')
+  @Roles(UserRole.OWNER, UserRole.PLATFORM_ADMIN, UserRole.FINANCE, UserRole.MONITORING)
+  getDaily(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.reportsService.getDaily(from, to);
+  }
+
   @Get('summary')
   @Roles(...FINANCE_ROLES)
   getSummary(@CurrentUser() user: User, @Query() filters: ReportFiltersDto) {

@@ -13,6 +13,7 @@ import { VehicleAssignment } from '../vehicles/entities/vehicle-assignment.entit
 import { StorageModule } from '../storage/storage.module';
 import { TermsModule } from '../terms/terms.module';
 import { FareModule } from '../fare/fare.module';
+import { GatewayModule } from '../gateway/gateway.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { FareModule } from '../fare/fare.module';
     StorageModule,
     TermsModule,
     FareModule,
+    GatewayModule,
   ],
   providers: [DriversService],
   controllers: [DriversController],

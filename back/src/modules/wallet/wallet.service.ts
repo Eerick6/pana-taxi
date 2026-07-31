@@ -5,15 +5,19 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { DriverWallet } from './entities/driver-wallet.entity';
 import { Recharge, RechargeStatus } from './entities/recharge.entity';
 import { WalletTransaction, TransactionType } from './entities/wallet-transaction.entity';
+import { BankAccount, AccountType } from './entities/bank-account.entity';
 import { Driver } from '../drivers/entities/driver.entity';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/entities/app-notification.entity';
 import { StorageService } from '../storage/storage.service';
 import { RequestRechargeDto } from './dto/request-recharge.dto';
 import { RejectRechargeDto } from './dto/reject-recharge.dto';
+import { CreateBankAccountDto } from './dto/create-bank-account.dto';
 
 @Injectable()
 export class WalletService {
@@ -26,9 +30,14 @@ export class WalletService {
     private txRepo: Repository<WalletTransaction>,
     @InjectRepository(Driver)
     private driversRepo: Repository<Driver>,
+    @InjectRepository(BankAccount)
+    private bankAccountRepo: Repository<BankAccount>,
+    @InjectRepository(User)
+    private usersRepo: Repository<User>,
     @InjectDataSource()
     private dataSource: DataSource,
     private storage: StorageService,
+    private notificationsService: NotificationsService,
   ) {}
 
   // ── Driver ──────────────────────────────────────────────────────────────────
@@ -50,6 +59,9 @@ export class WalletService {
   }
 
   async requestRecharge(userId: string, dto: RequestRechargeDto, file: Express.Multer.File) {
+    const driver = await this.driversRepo.findOne({ where: { user: { id: userId } } });
+    if (!driver) throw new NotFoundException('Perfil de conductor no encontrado');
+
     const wallet = await this.findWalletByUser(userId);
 
     const amount = parseFloat(dto.amount);
@@ -70,11 +82,16 @@ export class WalletService {
     if (file.size > 10 * 1024 * 1024) throw new BadRequestException('Máximo 10MB');
 
     const key = await this.storage.upload(
-      `wallets/${wallet.id}/recharges`,
+      `drivers/${driver.id}/recharges`,
       file.originalname,
       file.buffer,
       file.mimetype,
     );
+
+    let bankAccount: BankAccount | null = null;
+    if (dto.bank_account_id) {
+      bankAccount = await this.bankAccountRepo.findOne({ where: { id: dto.bank_account_id } });
+    }
 
     const recharge = await this.rechargeRepo.save(
       this.rechargeRepo.create({
@@ -83,8 +100,26 @@ export class WalletService {
         method: dto.method,
         proof_url: key,
         status: RechargeStatus.PENDING,
+        ...(bankAccount && { bank_account: bankAccount }),
+        ...(dto.driver_notes && { driver_notes: dto.driver_notes }),
       }),
     );
+
+    // Notify finance staff (fire-and-forget)
+    this.usersRepo
+      .find({
+        where: { role: In([UserRole.OWNER, UserRole.PLATFORM_ADMIN, UserRole.FINANCE]) },
+        select: ['id'],
+      })
+      .then((staff) => {
+        const staffIds = staff.map((u) => u.id);
+        return this.notificationsService.sendToUsers(staffIds, {
+          title: '💳 Nueva solicitud de recarga',
+          body: `El conductor solicitó una recarga de $${amount.toFixed(2)}. Revisa la sección de Contabilidad.`,
+          type: NotificationType.WALLET,
+        });
+      })
+      .catch(() => {});
 
     return {
       message: 'Solicitud de recarga enviada. FINANCE la revisará en breve.',
@@ -96,6 +131,7 @@ export class WalletService {
     const wallet = await this.findWalletByUser(userId);
     const [items, total] = await this.rechargeRepo.findAndCount({
       where: { wallet: { id: wallet.id } },
+      relations: ['bank_account'],
       order: { created_at: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -105,15 +141,25 @@ export class WalletService {
 
   // ── Finance ─────────────────────────────────────────────────────────────────
 
-  async listPendingRecharges(page = 1, limit = 20) {
+  async listRecharges(page = 1, limit = 20, status?: string) {
+    const where = status ? { status: status as RechargeStatus } : {};
     const [items, total] = await this.rechargeRepo.findAndCount({
-      where: { status: RechargeStatus.PENDING },
-      relations: ['wallet', 'wallet.driver', 'wallet.driver.user'],
-      order: { created_at: 'ASC' },
+      where,
+      relations: ['wallet', 'wallet.driver', 'bank_account'],
+      order: { created_at: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });
-    return { items, total, page, limit };
+    // Flatten driver name for frontend convenience
+    const enriched = items.map((r) => ({
+      ...r,
+      driver_name: (r.wallet as any)?.driver?.full_name ?? null,
+    }));
+    return { items: enriched, total, page, limit };
+  }
+
+  async listPendingRecharges(page = 1, limit = 20) {
+    return this.listRecharges(page, limit, RechargeStatus.PENDING);
   }
 
   async getRechargeProofUrl(rechargeId: string) {
@@ -214,14 +260,66 @@ export class WalletService {
     );
   }
 
+  // ── Bank accounts ────────────────────────────────────────────────────────────
+
+  async getBankAccounts(onlyActive = true) {
+    const accounts = await this.bankAccountRepo.find({
+      where: onlyActive ? { is_active: true } : {},
+      order: { created_at: 'ASC' },
+    });
+    // Resolve logo_url: si es una key de R2 (no empieza con http) → generar presigned URL
+    return Promise.all(
+      accounts.map(async (a) => {
+        if (a.logo_url && !a.logo_url.startsWith('http')) {
+          return { ...a, logo_url: await this.storage.getPresignedUrl(a.logo_url, 604800) };
+        }
+        return a;
+      }),
+    );
+  }
+
+  async uploadBankLogo(file: Express.Multer.File): Promise<{ logo_url: string }> {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'];
+    if (!allowed.includes(file.mimetype)) throw new BadRequestException('Solo JPEG, PNG, WebP o SVG');
+    if (file.size > 2 * 1024 * 1024) throw new BadRequestException('Máximo 2MB');
+    const key = await this.storage.upload('bank-logos', file.originalname, file.buffer, file.mimetype);
+    const url = await this.storage.getPresignedUrl(key, 604800); // 7 días
+    // Guardamos el key en DB, devolvemos la URL resuelta al front
+    return { logo_url: key, resolved_url: url } as any;
+  }
+
+  async createBankAccount(dto: CreateBankAccountDto) {
+    return this.bankAccountRepo.save(this.bankAccountRepo.create(dto));
+  }
+
+  async updateBankAccount(id: string, dto: Partial<CreateBankAccountDto> & { is_active?: boolean }) {
+    const account = await this.bankAccountRepo.findOne({ where: { id } });
+    if (!account) throw new NotFoundException('Cuenta bancaria no encontrada');
+    Object.assign(account, dto);
+    return this.bankAccountRepo.save(account);
+  }
+
+  async deleteBankAccount(id: string) {
+    const account = await this.bankAccountRepo.findOne({ where: { id } });
+    if (!account) throw new NotFoundException('Cuenta bancaria no encontrada');
+    account.is_active = false;
+    await this.bankAccountRepo.save(account);
+    return { message: 'Cuenta desactivada' };
+  }
+
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
   private async findWalletByUser(userId: string): Promise<DriverWallet> {
     const driver = await this.driversRepo.findOne({ where: { user: { id: userId } } });
     if (!driver) throw new NotFoundException('Perfil de conductor no encontrado');
 
-    const wallet = await this.walletRepo.findOne({ where: { driver: { id: driver.id } } });
-    if (!wallet) throw new NotFoundException('Wallet no encontrada');
+    let wallet = await this.walletRepo.findOne({ where: { driver: { id: driver.id } } });
+    if (!wallet) {
+      // Auto-crear wallet con saldo 0 la primera vez
+      wallet = await this.walletRepo.save(
+        this.walletRepo.create({ driver, balance: '0.00' }),
+      );
+    }
 
     return wallet;
   }

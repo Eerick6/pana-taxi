@@ -10,30 +10,38 @@ import {
   WsException,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import Redis from 'ioredis';
 import { User, UserRole, UserStatus } from '../users/entities/user.entity';
 import { Driver, DriverOnlineStatus } from '../drivers/entities/driver.entity';
 import { Trip, TripStatus, FareMode } from '../trips/entities/trip.entity';
 import { CooperativeOwner, OwnerApprovalStatus } from '../cooperatives/entities/cooperative-owner.entity';
 import { CooperativeMember } from '../cooperatives/entities/cooperative-member.entity';
 import { Vehicle } from '../vehicles/entities/vehicle.entity';
+import { Conversation } from '../chat/entities/conversation.entity';
 import { FareService, GeoJsonLineString } from '../fare/fare.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { REDIS_CLIENT } from '../../redis/redis.module';
+import { TRIP_EXPANSION_QUEUE, EXPAND_RADIUS_JOB } from '../../queues/trips/trip-expansion.processor';
 
 export const ROOM = {
   driver: (id: string) => `driver:${id}`,
   user: (id: string) => `user:${id}`,
   trip: (id: string) => `trip:${id}`,
   coop: (id: string) => `coop:${id}`,
+  conversation: (id: string) => `conv:${id}`,
   platform: 'platform',
   available: 'available_drivers',
 };
 
 @Injectable()
 @WebSocketGateway({
-  cors: { origin: process.env.ALLOWED_ORIGINS?.split(',') ?? '*', credentials: true },
+  cors: { origin: process.env.ALLOWED_ORIGINS?.split(',') ?? [], credentials: true },
   namespace: '/',
 })
 export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
@@ -41,8 +49,18 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   server: Server;
 
   private readonly logger = new Logger(EventsGateway.name);
-  private socketUsers = new Map<string, string>(); // socketId → userId
-  private userSockets = new Map<string, string>(); // userId → socketId
+  private socketUsers  = new Map<string, string>(); // socketId → userId
+  private userSockets  = new Map<string, string>(); // userId → socketId
+  private wsRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+  private wsRateLimit(socketId: string, limit = 30, windowMs = 1000): boolean {
+    const now = Date.now();
+    const entry = this.wsRateLimits.get(socketId) ?? { count: 0, resetAt: now + windowMs };
+    if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + windowMs; }
+    entry.count++;
+    this.wsRateLimits.set(socketId, entry);
+    return entry.count <= limit;
+  }
 
   constructor(
     private jwtService: JwtService,
@@ -52,25 +70,26 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     @InjectRepository(CooperativeOwner) private coopOwnersRepo: Repository<CooperativeOwner>,
     @InjectRepository(CooperativeMember) private coopMembersRepo: Repository<CooperativeMember>,
     @InjectRepository(Vehicle) private vehiclesRepo: Repository<Vehicle>,
+    @InjectRepository(Conversation) private convRepo: Repository<Conversation>,
     private fareService: FareService,
+    private notificationsService: NotificationsService,
+    @Inject(REDIS_CLIENT) private redis: Redis,
+    @Optional() @InjectQueue(TRIP_EXPANSION_QUEUE) private tripExpansionQueue: Queue | null,
   ) {}
 
   // ── Init: configurar Redis adapter si está disponible ───────────────────────
 
   async afterInit(server: Server) {
-    const redisUrl = process.env.REDIS_URL;
-    if (!redisUrl) {
+    if (!process.env.REDIS_URL) {
       this.logger.warn('REDIS_URL no configurado — Socket.IO en modo single-instance (no escala horizontal)');
       return;
     }
     try {
-      const { default: Redis } = await import('ioredis');
       const { createAdapter } = await import('@socket.io/redis-adapter');
-      const pub = new Redis(redisUrl);
-      const sub = pub.duplicate();
-      pub.on('error', (err) => this.logger.error(`Redis pub error: ${err.message}`));
+      // pub = the shared injected client, sub = a dedicated duplicate for subscriptions
+      const sub = this.redis.duplicate();
       sub.on('error', (err) => this.logger.error(`Redis sub error: ${err.message}`));
-      server.adapter(createAdapter(pub, sub));
+      server.adapter(createAdapter(this.redis, sub));
       this.logger.log('Socket.IO Redis adapter activo — escala horizontal habilitada');
     } catch (err) {
       this.logger.error(`Redis adapter falló (usando in-memory): ${(err as Error).message}`);
@@ -102,6 +121,7 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       this.userSockets.delete(userId);
       this.logger.log(`Disconnected: user ${userId} (socket ${socket.id})`);
     }
+    this.wsRateLimits.delete(socket.id);
   }
 
   // ── Driver: actualizar ubicación ────────────────────────────────────────────
@@ -120,6 +140,7 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   ) {
     const user: User = socket.data.user;
     if (user.role !== UserRole.DRIVER) throw new WsException('Solo conductores');
+    if (!this.wsRateLimit(socket.id)) throw new WsException('Rate limit excedido');
 
     const { lat, lng } = data;
     if (typeof lat !== 'number' || typeof lng !== 'number') {
@@ -138,12 +159,32 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     socket.data.prevLng = lng;
     socket.data.lastPingMs = nowMs;
 
-    // Escribir ubicación en DB sin bloquear el resto del handler
-    this.driversRepo.update(driverId, {
-      current_lat: lat,
-      current_lng: lng,
-      last_seen_at: new Date(),
-    }).catch(err => this.logger.error(`Location write failed for ${driverId}: ${err.message}`));
+    // Escribir ubicación en Redis (cada ping) — TTL 60s para detectar conductores inactivos
+    const locationKey = `driver:location:${driverId}`;
+    const locationPayloadStr = JSON.stringify({
+      lat,
+      lng,
+      heading: (data as any).heading ?? null,
+      speed: data.speed_kmh ?? null,
+      updated_at: nowMs,
+    });
+    this.redis
+      .set(locationKey, locationPayloadStr, 'EX', 60)
+      .catch(err => this.logger.error(`Redis location write failed for ${driverId}: ${err.message}`));
+
+    // Escribir ubicación en DB solo cada 30s para reducir carga MySQL
+    // Usamos una clave Redis con TTL de 30s como debounce distribuido
+    const dbSyncKey = `driver:location:db-sync:${driverId}`;
+    this.redis.set(dbSyncKey, '1', 'EX', 30, 'NX').then(result => {
+      if (result === 'OK') {
+        // La clave no existía → no hubo escritura en los últimos 30s → escribir ahora
+        this.driversRepo.update(driverId, {
+          current_lat: lat,
+          current_lng: lng,
+          last_seen_at: new Date(),
+        }).catch(err => this.logger.error(`Location DB write failed for ${driverId}: ${err.message}`));
+      }
+    }).catch(err => this.logger.error(`Redis db-sync check failed for ${driverId}: ${err.message}`));
 
     const payload = { driver_id: driverId, lat, lng, ts: Date.now() };
 
@@ -275,6 +316,16 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { trip_id: string },
   ) {
+    const user: User = socket.data.user;
+    const trip = await this.tripsRepo.findOne({
+      where: { id: data.trip_id },
+      relations: ['client', 'driver', 'driver.user'],
+    });
+    if (trip) {
+      const isClient = trip.client?.id === user.id;
+      const isDriver = trip.driver?.user?.id === user.id;
+      if (!isClient && !isDriver) return { ok: false };
+    }
     await socket.leave(ROOM.trip(data.trip_id));
     return { ok: true };
   }
@@ -288,6 +339,7 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   ) {
     const user: User = socket.data.user;
     if (user.role !== UserRole.CLIENT) throw new WsException('Solo clientes');
+    if (!this.wsRateLimit(socket.id)) throw new WsException('Rate limit excedido');
 
     const { lat, lng } = data;
     if (typeof lat !== 'number' || typeof lng !== 'number') {
@@ -323,12 +375,84 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
 
   // ── Métodos públicos para TripsService y DriversService ─────────────────────
 
-  notifyNewTrip(payload: object, cooperativeId?: string) {
+  notifyNewTrip(payload: Record<string, unknown> & { trip_id?: string }, cooperativeId?: string) {
     if (cooperativeId) {
       this.server.to(ROOM.coop(cooperativeId)).emit('trip.new', payload);
     } else {
       this.server.to(ROOM.available).emit('trip.new', payload);
     }
+
+    // FCM push — llega aunque la app esté cerrada o en segundo plano
+    this._sendTripFcm(payload).catch(err =>
+      this.logger.warn(`FCM trip.new failed: ${err.message}`),
+    );
+
+    // Schedule radius expansion job via Bull (cross-pod safe, replaces in-memory scheduler)
+    if (payload.trip_id && this.tripExpansionQueue) {
+      this.fareService.getConfig().then(config => {
+        const delayMs = (config.radius_expansion_interval_sec ?? 30) * 1000;
+        this.tripExpansionQueue!
+          .add(
+            EXPAND_RADIUS_JOB,
+            { tripId: payload.trip_id },
+            { delay: delayMs, attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
+          )
+          .catch(err =>
+            this.logger.error(`Failed to enqueue radius expansion for trip ${payload.trip_id}: ${err.message}`),
+          );
+      }).catch(() => {});
+    }
+  }
+
+  private async _sendTripFcm(payload: Record<string, unknown> & { trip_id?: string }): Promise<void> {
+    const originLat  = payload.origin_lat  as number | null;
+    const originLng  = payload.origin_lng  as number | null;
+    const radiusKm   = payload.search_radius_km as number | null;
+    if (!originLat || !originLng || !radiusKm) return;
+
+    // Conductores online en el radio de búsqueda
+    const onlineDrivers = await this.driversRepo.find({
+      where: { online_status: DriverOnlineStatus.ONLINE },
+      relations: ['user'],
+      select: { id: true, current_lat: true, current_lng: true, user: { id: true } },
+    });
+
+    const userIds = onlineDrivers
+      .filter(d => {
+        if (!d.current_lat || !d.current_lng) return false;
+        const dist = this.fareService.haversineDistance(
+          originLat, originLng,
+          parseFloat(d.current_lat as any),
+          parseFloat(d.current_lng as any),
+        );
+        return dist <= radiusKm;
+      })
+      .map(d => d.user.id);
+
+    if (userIds.length === 0) return;
+
+    const origin = payload.origin_address as string ?? 'Origen';
+    const dest   = payload.destination_address as string ?? 'Destino';
+    const fare   = payload.client_offer ?? payload.suggested_fare;
+    const fareStr = fare ? `$${(fare as number).toFixed(2)}` : '';
+
+    await this.notificationsService.sendToUsers(userIds, {
+      title: `🚖 Nuevo viaje${fareStr ? ` — ${fareStr}` : ''}`,
+      body:  `${origin} → ${dest}`,
+      data: {
+        type:        'trip_new',
+        trip_id:     payload.trip_id ?? '',
+        origin_address:      origin,
+        destination_address: dest,
+        origin_lat:  String(originLat),
+        origin_lng:  String(originLng),
+        search_radius_km: String(radiusKm),
+        fare_mode:   String(payload.fare_mode ?? 'meter'),
+        suggested_fare: String(payload.suggested_fare ?? ''),
+        client_offer:   String(payload.client_offer ?? ''),
+        distance_km:    String(payload.distance_km ?? ''),
+      },
+    });
   }
 
   notifyTripUpdate(tripId: string, event: string, payload: object) {
@@ -352,13 +476,33 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     this.server.to(ROOM.platform).emit(event, payload);
   }
 
+  notifyAvailableDrivers(event: string, payload: object) {
+    this.server.to(ROOM.available).emit(event, payload);
+  }
+
+  // Añade o saca al conductor de ROOM.available según su nuevo estado online.
+  // Llamar desde DriversService después de startDay / endDay / setOnlineStatus.
+  async syncAvailableRoom(userId: string, isOnline: boolean): Promise<void> {
+    const socketId = this.userSockets.get(userId);
+    if (!socketId) return;
+    const socketMap = this.server.sockets as unknown as Map<string, Socket>;
+    const socket = socketMap.get(socketId);
+    if (!socket) return;
+    if (isOnline) {
+      await socket.join(ROOM.available);
+    } else {
+      await socket.leave(ROOM.available);
+    }
+  }
+
   // Llamar después de start-day / end-day para que el socket del conductor
   // refleje inmediatamente su nueva cooperativa sin reconectarse.
   async refreshDriverSocketCache(userId: string): Promise<void> {
     const socketId = this.userSockets.get(userId);
     if (!socketId) return; // conductor no está conectado
 
-    const socket = this.server.sockets.sockets.get(socketId);
+    const socketMap2 = this.server.sockets as unknown as Map<string, Socket>;
+    const socket = socketMap2.get(socketId);
     if (!socket) return;
 
     const driver = await this.driversRepo.findOne({
@@ -467,5 +611,49 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     ) {
       await socket.join(ROOM.platform);
     }
+  }
+
+  // ── Chat ─────────────────────────────────────────────────────────────────────
+
+  // El cliente envía un mensaje a una conversación
+  // Payload: { conversation_id, content }
+  // Emite 'chat.message' a la sala conv:<conversation_id> con el mensaje completo
+  async deliverChatMessage(payload: {
+    conversation_id: string;
+    message_id: string;
+    sender_id: string;
+    sender_name: string;
+    content: string;
+    created_at: string;
+  }) {
+    this.server.to(ROOM.conversation(payload.conversation_id)).emit('chat.message', payload);
+  }
+
+  // El cliente (app) se une a la sala de una conversación para recibir mensajes en tiempo real
+  @SubscribeMessage('chat.join')
+  async handleChatJoin(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() data: { conversation_id: string },
+  ) {
+    if (!data?.conversation_id) throw new WsException('conversation_id requerido');
+    const user: User = socket.data.user;
+    const conv = await this.convRepo.findOne({
+      where: { id: data.conversation_id },
+      relations: ['participant_a', 'participant_b'],
+    });
+    if (!conv) throw new WsException('Conversación no encontrada');
+    const isParticipant = conv.participant_a?.id === user.id || conv.participant_b?.id === user.id;
+    if (!isParticipant) throw new WsException('No eres participante de esta conversación');
+    await socket.join(ROOM.conversation(data.conversation_id));
+    return { ok: true };
+  }
+
+  @SubscribeMessage('chat.leave')
+  async handleChatLeave(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() data: { conversation_id: string },
+  ) {
+    await socket.leave(ROOM.conversation(data.conversation_id));
+    return { ok: true };
   }
 }

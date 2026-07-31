@@ -1,18 +1,18 @@
 // ── Auth & User ────────────────────────────────────────────────────────────
 export type UserRole =
-  | 'OWNER'
-  | 'PLATFORM_ADMIN'
-  | 'FINANCE'
-  | 'MONITORING'
-  | 'SUPPORT'
-  | 'COOPERATIVE_ADMIN'
-  | 'COOPERATIVE_OPERATOR'
-  | 'COOPERATIVE_SUPERVISOR'
-  | 'DRIVER'
-  | 'OWNER_DRIVER'
-  | 'CLIENT';
+  | 'owner'
+  | 'platform_admin'
+  | 'finance'
+  | 'monitoring'
+  | 'support'
+  | 'cooperative_admin'
+  | 'cooperative_operator'
+  | 'cooperative_supervisor'
+  | 'driver'
+  | 'owner_driver'
+  | 'client';
 
-export type UserStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'PENDING';
+export type UserStatus = 'active' | 'inactive' | 'suspended' | 'banned';
 
 // ── Cooperative ────────────────────────────────────────────────────────────
 export type CooperativeStatus = 'active' | 'inactive' | 'suspended';
@@ -41,7 +41,7 @@ export type DriverType = 'driver' | 'owner_driver';
 
 export interface Driver {
   id: string;
-  user?: { id?: string; email?: string; phone?: string };
+  user?: { id?: string; email?: string; phone?: string; status?: string };
   full_name: string;
   license_number: string | null;
   license_expiry: string | null;
@@ -58,6 +58,18 @@ export interface Driver {
 }
 
 // ── Vehicle ────────────────────────────────────────────────────────────────
+export type VehicleOperationalStatus = 'active' | 'inactive' | 'suspended';
+
+export interface VehicleDocument {
+  id: string;
+  type: string;
+  file_url: string;
+  status: 'pending' | 'approved' | 'rejected';
+  rejection_reason: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
 export interface Vehicle {
   id: string;
   plate: string;
@@ -66,11 +78,13 @@ export interface Vehicle {
   year: number;
   color: string;
   photo_url: string | null;
-  status: ApprovalStatus;
+  status: VehicleOperationalStatus;
+  approval_status: ApprovalStatus;
   rejection_reason: string | null;
   cooperative?: { id: string; name: string } | null;
   owner?: { id: string; full_name: string } | null;
   assigned_driver?: { id: string; full_name: string } | null;
+  documents?: VehicleDocument[];
   created_at: string;
 }
 
@@ -242,6 +256,7 @@ export interface AppNotification {
   id: string;
   title: string;
   body: string;
+  type: 'trip' | 'account' | 'wallet' | 'sos' | 'general';
   data?: Record<string, string> | null;
   read_at: string | null;
   created_at: string;
@@ -250,4 +265,96 @@ export interface AppNotification {
 export interface ApiError {
   message: string;
   statusCode: number;
+}
+
+// ── SaaS Plans ─────────────────────────────────────────────────────────────
+export type PlanInterval = 'monthly' | 'yearly';
+
+export interface Plan {
+  id: string;
+  name: string;
+  description: string | null;
+  price_monthly: number;
+  price_yearly: number | null;
+  commission_pct: number;
+  max_drivers: number | null;
+  max_vehicles: number | null;
+  max_stands: number | null;
+  features: string[];
+  is_active: boolean;
+  cooperative_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Billing / Invoices ─────────────────────────────────────────────────────
+export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
+export type PaymentMethod = 'transfer' | 'card' | 'cash' | 'other';
+
+export interface Invoice {
+  id: string;
+  cooperative?: { id: string; name: string } | null;
+  plan?: { id: string; name: string } | null;
+  period_from: string;
+  period_to: string;
+  subtotal: number;
+  tax: number;
+  total: number;
+  status: InvoiceStatus;
+  due_date: string;
+  paid_at: string | null;
+  pdf_url: string | null;
+  created_at: string;
+}
+
+export interface BillingPayment {
+  id: string;
+  invoice?: { id: string } | null;
+  cooperative?: { id: string; name: string } | null;
+  amount: number;
+  method: PaymentMethod;
+  reference: string | null;
+  status: 'pending' | 'confirmed' | 'failed';
+  paid_at: string | null;
+  created_at: string;
+}
+
+export interface Renewal {
+  cooperative_id: string;
+  cooperative_name: string;
+  plan_name: string;
+  renews_at: string;
+  amount: number;
+  status: 'upcoming' | 'overdue' | 'cancelled';
+}
+
+// ── Reports ────────────────────────────────────────────────────────────────
+export interface GlobalReportSummary {
+  total_trips: number;
+  completed_trips: number;
+  cancelled_trips: number;
+  cancellation_rate: number;
+  avg_duration_min: number;
+  avg_fare: number;
+  total_revenue: number;
+  total_commissions: number;
+  active_drivers: number;
+  active_cooperatives: number;
+}
+
+export interface ReportCoopRow {
+  cooperative_id: string;
+  cooperative_name: string;
+  trips: number;
+  revenue: number;
+  commissions: number;
+  drivers: number;
+  cancellations: number;
+}
+
+export interface ReportDailyPoint {
+  date: string;
+  trips: number;
+  revenue: number;
+  cancellations: number;
 }

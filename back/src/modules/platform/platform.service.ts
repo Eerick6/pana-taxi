@@ -10,17 +10,26 @@ import { Repository } from 'typeorm';
 import { PlatformMember } from './entities/platform-member.entity';
 import { SystemConfig } from './entities/system-config.entity';
 import { CooperativeSubscription, SubscriptionStatus } from './entities/cooperative-subscription.entity';
+import { ContactLead, LeadStatus } from './entities/contact-lead.entity';
 import { Cooperative, CooperativeApprovalStatus, CooperativeStatus } from '../cooperatives/entities/cooperative.entity';
 import { User, UserRole, UserStatus } from '../users/entities/user.entity';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import { SetConfigDto } from './dto/set-config.dto';
 import { MarkPaidDto } from './dto/mark-paid.dto';
+import { SubmitLeadDto } from './dto/submit-lead.dto';
+import { SubmitCoopApplicationDto } from './dto/submit-coop-application.dto';
+import { CooperativeApplication, CoopApplicationStatus } from './entities/cooperative-application.entity';
 
 const DEFAULT_CONFIGS: { key: string; value: string; description: string }[] = [
   { key: 'commission_rate', value: '10', description: 'Comisión global por viaje (%). Cada cooperativa puede tener su propio porcentaje.' },
   { key: 'monthly_fee', value: '50', description: 'Mensualidad base para cooperativas (USD). Cada cooperativa puede tener su propio valor.' },
+  { key: 'contact_phone', value: '+593987216789', description: 'Número de teléfono/WhatsApp público mostrado en el sitio web.' },
+  { key: 'contact_email', value: 'contacto@panataxiapp.com', description: 'Correo electrónico público de contacto mostrado en el sitio web.' },
+  { key: 'social_links', value: JSON.stringify({ whatsapp: { enabled: true }, facebook: { enabled: false, url: '' }, instagram: { enabled: false, url: '' }, tiktok: { enabled: false, url: '' }, youtube: { enabled: false, url: '' } }), description: 'Redes sociales mostradas en el sitio web (JSON).' },
 ];
+
+const PUBLIC_CONFIG_KEYS = ['contact_phone', 'contact_email', 'social_links'];
 
 @Injectable()
 export class PlatformService implements OnApplicationBootstrap {
@@ -33,8 +42,12 @@ export class PlatformService implements OnApplicationBootstrap {
     private configRepo: Repository<SystemConfig>,
     @InjectRepository(CooperativeSubscription)
     private subscriptionsRepo: Repository<CooperativeSubscription>,
+    @InjectRepository(ContactLead)
+    private leadsRepo: Repository<ContactLead>,
     @InjectRepository(Cooperative)
     private cooperativesRepo: Repository<Cooperative>,
+    @InjectRepository(CooperativeApplication)
+    private coopApplicationsRepo: Repository<CooperativeApplication>,
   ) {}
 
   async onApplicationBootstrap() {
@@ -130,6 +143,79 @@ export class PlatformService implements OnApplicationBootstrap {
     const config = await this.configRepo.findOne({ where: { key } });
     if (!config) throw new NotFoundException(`Configuración '${key}' no encontrada`);
     return config;
+  }
+
+  async getPublicConfig(): Promise<Record<string, string>> {
+    const configs = await this.configRepo.find();
+    const result: Record<string, string> = {};
+    for (const cfg of configs) {
+      if (PUBLIC_CONFIG_KEYS.includes(cfg.key)) result[cfg.key] = cfg.value;
+    }
+    return result;
+  }
+
+  async submitLead(dto: SubmitLeadDto) {
+    const lead = await this.leadsRepo.save(this.leadsRepo.create(dto));
+    return { message: 'Solicitud recibida correctamente', id: lead.id };
+  }
+
+  async listLeads(page = 1, limit = 20, status?: LeadStatus) {
+    const where: Partial<ContactLead> = status ? { status } : {};
+    const [items, total] = await this.leadsRepo.findAndCount({
+      where,
+      skip: (page - 1) * limit,
+      take: limit,
+      order: { created_at: 'DESC' },
+    });
+    return { items, total, page, limit };
+  }
+
+  async updateLeadStatus(id: string, status: LeadStatus) {
+    const lead = await this.leadsRepo.findOne({ where: { id } });
+    if (!lead) throw new NotFoundException('Solicitud no encontrada');
+    await this.leadsRepo.update(id, { status });
+    return { message: 'Estado actualizado', id, status };
+  }
+
+  async deleteLead(id: string) {
+    const lead = await this.leadsRepo.findOne({ where: { id } });
+    if (!lead) throw new NotFoundException('Solicitud no encontrada');
+    await this.leadsRepo.delete(id);
+    return { message: 'Solicitud eliminada' };
+  }
+
+  // ── Solicitudes de registro de cooperativas ──────────────────────────────────
+
+  async submitCoopApplication(dto: SubmitCoopApplicationDto) {
+    const existing = await this.coopApplicationsRepo.findOne({ where: { ruc: dto.ruc } });
+    if (existing) throw new ConflictException('Ya existe una solicitud con ese RUC');
+    const app = await this.coopApplicationsRepo.save(this.coopApplicationsRepo.create(dto));
+    return { message: 'Solicitud de registro recibida. Te contactaremos en menos de 24 horas.', id: app.id };
+  }
+
+  async listCoopApplications(page = 1, limit = 20, status?: CoopApplicationStatus) {
+    const where = status ? { status } : {};
+    const [items, total] = await this.coopApplicationsRepo.findAndCount({
+      where,
+      skip: (page - 1) * limit,
+      take: limit,
+      order: { created_at: 'DESC' },
+    });
+    return { items, total, page, limit };
+  }
+
+  async updateCoopApplicationStatus(id: string, status: CoopApplicationStatus) {
+    const app = await this.coopApplicationsRepo.findOne({ where: { id } });
+    if (!app) throw new NotFoundException('Solicitud no encontrada');
+    await this.coopApplicationsRepo.update(id, { status });
+    return { message: 'Estado actualizado', id, status };
+  }
+
+  async deleteCoopApplication(id: string) {
+    const app = await this.coopApplicationsRepo.findOne({ where: { id } });
+    if (!app) throw new NotFoundException('Solicitud no encontrada');
+    await this.coopApplicationsRepo.delete(id);
+    return { message: 'Solicitud eliminada' };
   }
 
   async setConfig(key: string, dto: SetConfigDto, userId: string) {

@@ -78,6 +78,35 @@ export class StandsService {
     throw new ForbiddenException('No estás asociado a ninguna cooperativa activa');
   }
 
+  async globalSummary() {
+    const stands = await this.standsRepo.find({ relations: ['cooperative'] });
+    if (stands.length === 0) return [];
+
+    const ids = stands.map(s => s.id);
+    const counts = await this.assignmentsRepo
+      .createQueryBuilder('a')
+      .select('a.stand_id', 'stand_id')
+      .addSelect('COUNT(a.id)', 'count')
+      .where('a.stand_id IN (:...ids)', { ids })
+      .andWhere('a.checked_out_at IS NULL')
+      .groupBy('a.stand_id')
+      .getRawMany<{ stand_id: string; count: string }>();
+
+    const countMap = new Map(counts.map(c => [c.stand_id, parseInt(c.count, 10)]));
+
+    // Agrupa por cooperativa
+    const byCoopMap = new Map<string, { coop_id: string; coop_name: string; stands: number; drivers_at_stands: number }>();
+    for (const s of stands) {
+      const coopId = s.cooperative_id;
+      const existing = byCoopMap.get(coopId) ?? { coop_id: coopId, coop_name: s.cooperative?.name ?? coopId, stands: 0, drivers_at_stands: 0 };
+      existing.stands += 1;
+      existing.drivers_at_stands += countMap.get(s.id) ?? 0;
+      byCoopMap.set(coopId, existing);
+    }
+
+    return Array.from(byCoopMap.values()).sort((a, b) => b.drivers_at_stands - a.drivers_at_stands);
+  }
+
   async findAll(user: User, explicitCoopId?: string) {
     const coopId = await this.resolveCoopId(user, explicitCoopId);
 

@@ -30,7 +30,7 @@ export class NotificationsController {
   // ── Feed ───────────────────────────────────────────────────────────────────
 
   @Get('me')
-  @Roles(UserRole.CLIENT, UserRole.DRIVER, UserRole.OWNER, UserRole.COOPERATIVE_ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.DRIVER, UserRole.OWNER, UserRole.COOPERATIVE_ADMIN, UserRole.PLATFORM_ADMIN, UserRole.FINANCE, UserRole.SUPPORT)
   getMyNotifications(
     @CurrentUser() user: User,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
@@ -40,25 +40,25 @@ export class NotificationsController {
   }
 
   @Get('me/unread-count')
-  @Roles(UserRole.CLIENT, UserRole.DRIVER, UserRole.OWNER, UserRole.COOPERATIVE_ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.DRIVER, UserRole.OWNER, UserRole.COOPERATIVE_ADMIN, UserRole.PLATFORM_ADMIN, UserRole.FINANCE, UserRole.SUPPORT)
   getUnreadCount(@CurrentUser() user: User) {
     return this.notificationsService.getUnreadCount(user.id);
   }
 
   @Patch(':id/read')
-  @Roles(UserRole.CLIENT, UserRole.DRIVER, UserRole.OWNER, UserRole.COOPERATIVE_ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.DRIVER, UserRole.OWNER, UserRole.COOPERATIVE_ADMIN, UserRole.PLATFORM_ADMIN, UserRole.FINANCE, UserRole.SUPPORT)
   markRead(@CurrentUser() user: User, @Param('id', ParseUUIDPipe) id: string) {
     return this.notificationsService.markRead(id, user.id);
   }
 
   @Patch('read-all')
-  @Roles(UserRole.CLIENT, UserRole.DRIVER, UserRole.OWNER, UserRole.COOPERATIVE_ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.DRIVER, UserRole.OWNER, UserRole.COOPERATIVE_ADMIN, UserRole.PLATFORM_ADMIN, UserRole.FINANCE, UserRole.SUPPORT)
   markAllRead(@CurrentUser() user: User) {
     return this.notificationsService.markAllRead(user.id);
   }
 
   @Delete(':id')
-  @Roles(UserRole.CLIENT, UserRole.DRIVER, UserRole.OWNER, UserRole.COOPERATIVE_ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.DRIVER, UserRole.OWNER, UserRole.COOPERATIVE_ADMIN, UserRole.PLATFORM_ADMIN, UserRole.FINANCE, UserRole.SUPPORT)
   deleteNotification(@CurrentUser() user: User, @Param('id', ParseUUIDPipe) id: string) {
     return this.notificationsService.deleteNotification(id, user.id);
   }

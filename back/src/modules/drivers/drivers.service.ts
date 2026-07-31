@@ -4,9 +4,14 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Inject,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Not } from 'typeorm';
+import * as bcrypt from 'bcrypt';
+import Redis from 'ioredis';
+import { REDIS_CLIENT } from '../../redis/redis.module';
 import { User, UserRole, UserStatus } from '../users/entities/user.entity';
 import { Driver, DriverApprovalStatus, DriverType, DriverOnlineStatus } from './entities/driver.entity';
 import { DriverDocument, DriverDocumentType, DocumentStatus } from './entities/driver-document.entity';
@@ -17,6 +22,7 @@ import { Vehicle, VehicleApprovalStatus } from '../vehicles/entities/vehicle.ent
 import { VehicleAssignment, AssignmentStatus } from '../vehicles/entities/vehicle-assignment.entity';
 import { StorageService } from '../storage/storage.service';
 import { TermsService } from '../terms/terms.service';
+import { EventsGateway } from '../gateway/events.gateway';
 import { TermsType } from '../terms/entities/terms-version.entity';
 import { RegisterDriverDto } from './dto/register-driver.dto';
 import { UploadDriverDocumentDto } from './dto/upload-driver-document.dto';
@@ -27,11 +33,10 @@ import { FareService } from '../fare/fare.service';
 
 @Injectable()
 export class DriversService {
-  // Caché del conductor + vehículo activo por jornada.
-  // Se llena en startDay, se borra en endDay. TTL de seguridad: 4 horas.
-  // Evita ir a la BD cada vez que un viaje necesita saber qué taxi usa el conductor.
-  private readonly driverVehicleCache = new Map<string, { driver: Driver; expiresAt: number }>();
-  private static readonly VEHICLE_CACHE_TTL_MS = 4 * 60 * 60 * 1000;
+  private readonly logger = new Logger(DriversService.name);
+
+  // Redis cache TTL for driver+vehicle: 4 hours
+  private static readonly VEHICLE_CACHE_TTL_S = 4 * 60 * 60;
 
   constructor(
     @InjectRepository(User)
@@ -53,32 +58,76 @@ export class DriversService {
     private storage: StorageService,
     private termsService: TermsService,
     private fareService: FareService,
+    private gateway: EventsGateway,
+    @Inject(REDIS_CLIENT) private redis: Redis,
   ) {}
 
-  // Retorna conductor con active_vehicle+cooperative desde caché o BD.
+  // Retorna conductor con active_vehicle+cooperative desde Redis o BD.
   // Usar en lugar de driversRepo.findOne con esas relaciones.
   async getCachedDriverWithVehicle(driverId: string): Promise<Driver | null> {
-    const cached = this.driverVehicleCache.get(driverId);
-    if (cached && Date.now() < cached.expiresAt) return cached.driver;
+    const cacheKey = `driver:cache:${driverId}`;
+    try {
+      const cached = await this.redis.get(cacheKey);
+      if (cached) return JSON.parse(cached) as Driver;
+    } catch (err) {
+      this.logger.warn(`Redis cache get failed for driver ${driverId}: ${err.message}`);
+    }
 
     const driver = await this.driversRepo.findOne({
       where: { id: driverId },
       relations: ['active_vehicle', 'active_vehicle.cooperative'],
     });
     if (driver?.active_vehicle) {
-      this.driverVehicleCache.set(driverId, {
-        driver,
-        expiresAt: Date.now() + DriversService.VEHICLE_CACHE_TTL_MS,
-      });
+      try {
+        await this.redis.set(
+          cacheKey,
+          JSON.stringify(driver),
+          'EX',
+          DriversService.VEHICLE_CACHE_TTL_S,
+        );
+      } catch (err) {
+        this.logger.warn(`Redis cache set failed for driver ${driverId}: ${err.message}`);
+      }
     }
     return driver ?? null;
   }
 
-  private setCachedDriver(driver: Driver): void {
-    this.driverVehicleCache.set(driver.id, {
-      driver,
-      expiresAt: Date.now() + DriversService.VEHICLE_CACHE_TTL_MS,
-    });
+  private async setCachedDriver(driver: Driver): Promise<void> {
+    const cacheKey = `driver:cache:${driver.id}`;
+    try {
+      await this.redis.set(
+        cacheKey,
+        JSON.stringify(driver),
+        'EX',
+        DriversService.VEHICLE_CACHE_TTL_S,
+      );
+    } catch (err) {
+      this.logger.warn(`Redis cache set failed for driver ${driver.id}: ${err.message}`);
+    }
+  }
+
+  // Invalida la caché de Redis del conductor (llamar cuando cambia vehículo o aprobación)
+  async invalidateDriverCache(driverId: string): Promise<void> {
+    try {
+      await this.redis.del(`driver:cache:${driverId}`);
+    } catch (err) {
+      this.logger.warn(`Redis cache invalidation failed for driver ${driverId}: ${err.message}`);
+    }
+  }
+
+  // Lee la última ubicación conocida del conductor desde Redis.
+  // Usar en getAvailableTrips en lugar de driver.current_lat desde BD.
+  async getDriverLocationFromRedis(
+    driverId: string,
+  ): Promise<{ lat: number; lng: number; updated_at: number } | null> {
+    try {
+      const raw = await this.redis.get(`driver:location:${driverId}`);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (err) {
+      this.logger.warn(`Redis location get failed for driver ${driverId}: ${err.message}`);
+      return null;
+    }
   }
 
   // ── Registro ────────────────────────────────────────────────────────────────
@@ -89,6 +138,7 @@ export class DriversService {
 
     const terms = await this.termsService.validateAcceptance(TermsType.DRIVER, dto.terms_version);
 
+    const passwordHash = await bcrypt.hash(dto.password, 12);
     const user = await this.usersRepo.save(
       this.usersRepo.create({
         phone: dto.phone,
@@ -96,6 +146,7 @@ export class DriversService {
         status: UserStatus.ACTIVE,
         terms_version: terms.version,
         terms_accepted_at: new Date(),
+        password_hash: passwordHash,
       }),
     );
 
@@ -123,6 +174,11 @@ export class DriversService {
 
   // ── Perfil ──────────────────────────────────────────────────────────────────
 
+  private async signPhotoUrl(key: string | null | undefined): Promise<string | null> {
+    if (!key) return null;
+    return this.storage.getPresignedUrl(key, 7200);
+  }
+
   async getMyProfile(userId: string) {
     const driver = await this.driversRepo.findOne({
       where: { user: { id: userId } },
@@ -136,7 +192,36 @@ export class DriversService {
     });
 
     const { otp_code, otp_expires_at, refresh_token, password_hash, ...user } = driver.user as any;
-    return { ...driver, user, cooperatives };
+    const profile_photo_url = await this.signPhotoUrl(driver.profile_photo_url);
+    return { ...driver, profile_photo_url, user, cooperatives };
+  }
+
+  async updateLocation(userId: string, lat: number, lng: number) {
+    const driver = await this.driversRepo.findOne({ where: { user: { id: userId } } });
+    if (!driver) throw new NotFoundException('Perfil de conductor no encontrado');
+    if (driver.online_status === DriverOnlineStatus.OFFLINE) {
+      throw new ForbiddenException('Debes estar en línea para actualizar ubicación');
+    }
+    await this.driversRepo.update(driver.id, {
+      current_lat: lat,
+      current_lng: lng,
+      last_seen_at: new Date(),
+    });
+    return { message: 'Ubicación actualizada', lat, lng };
+  }
+
+  async requestReview(userId: string) {
+    const driver = await this.driversRepo.findOne({
+      where: { user: { id: userId } },
+      relations: ['documents'],
+    });
+    if (!driver) throw new NotFoundException('Perfil de conductor no encontrado');
+    if (driver.approval_status === DriverApprovalStatus.APPROVED) {
+      return { message: 'Tu perfil ya está aprobado.' };
+    }
+    // Marcar timestamp para que el admin lo vea como recién solicitado
+    await this.driversRepo.update(driver.id, { review_requested_at: new Date() });
+    return { message: 'Solicitud enviada. El equipo revisará tu perfil en 24–48 horas.' };
   }
 
   async setOnlineStatus(userId: string, status: DriverOnlineStatus) {
@@ -153,6 +238,7 @@ export class DriversService {
     }
 
     await this.driversRepo.update(driver.id, { online_status: status, last_seen_at: new Date() });
+    await this.gateway.syncAvailableRoom(userId, status !== DriverOnlineStatus.OFFLINE);
     return { online_status: status };
   }
 
@@ -178,6 +264,14 @@ export class DriversService {
       });
       if (!vehicle) throw new NotFoundException('Vehículo no encontrado, no te pertenece o no está aprobado');
 
+      // Verificar que nadie más tenga ese taxi en jornada activa
+      const taxiEnUso = await this.driversRepo.findOne({
+        where: { active_vehicle: { id: vehicle.id }, online_status: Not(DriverOnlineStatus.OFFLINE) },
+      });
+      if (taxiEnUso && taxiEnUso.id !== driver.id) {
+        throw new ConflictException('Este taxi ya tiene una jornada activa iniciada por otro conductor.');
+      }
+
     } else {
       // DRIVER (chofer): usa el vehículo de su jornada activa (VehicleAssignment)
       const assignment = await this.assignmentsRepo.findOne({
@@ -191,6 +285,14 @@ export class DriversService {
       if (vehicleId && vehicle.id !== vehicleId) {
         throw new BadRequestException('El vehicle_id no coincide con tu jornada activa');
       }
+
+      // Verificar que el dueño u otro conductor no lo tenga en jornada activa
+      const taxiEnUso = await this.driversRepo.findOne({
+        where: { active_vehicle: { id: vehicle.id }, online_status: Not(DriverOnlineStatus.OFFLINE) },
+      });
+      if (taxiEnUso && taxiEnUso.id !== driver.id) {
+        throw new ConflictException('Este taxi ya tiene una jornada activa. Espera a que el conductor actual finalice su jornada.');
+      }
     }
 
     await this.driversRepo.update(driver.id, {
@@ -199,12 +301,14 @@ export class DriversService {
       last_seen_at: new Date(),
     });
 
+    await this.gateway.syncAvailableRoom(userId, true);
+
     // Cargar driver completo con vehículo+cooperativa para el caché
     const updatedDriver = await this.driversRepo.findOne({
       where: { id: driver.id },
       relations: ['active_vehicle', 'active_vehicle.cooperative'],
     });
-    if (updatedDriver) this.setCachedDriver(updatedDriver);
+    if (updatedDriver) await this.setCachedDriver(updatedDriver);
 
     const fareConfig = await this.fareService.getConfig();
 
@@ -226,8 +330,10 @@ export class DriversService {
       last_seen_at: new Date(),
     });
 
-    // Limpiar caché al terminar jornada
-    this.driverVehicleCache.delete(driver.id);
+    await this.gateway.syncAvailableRoom(userId, false);
+
+    // Limpiar caché Redis al terminar jornada
+    await this.invalidateDriverCache(driver.id);
 
     return { message: 'Jornada finalizada. Hasta pronto.' };
   }
@@ -329,9 +435,11 @@ export class DriversService {
 
   // ── Admin: lista general de conductores ─────────────────────────────────────
 
-  async listAll(page = 1, limit = 20, approvalStatus?: string, search?: string) {
+  async listAll(page = 1, limit = 20, approvalStatus?: string, search?: string, cooperativeId?: string) {
     const qb = this.driversRepo.createQueryBuilder('d')
       .leftJoinAndSelect('d.user', 'u')
+      .leftJoinAndSelect('d.active_vehicle', 'v')
+      .leftJoinAndSelect('v.cooperative', 'coop')
       .orderBy('d.created_at', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
@@ -340,9 +448,15 @@ export class DriversService {
     if (search) {
       qb.andWhere('(u.email LIKE :q OR u.phone LIKE :q OR d.full_name LIKE :q)', { q: `%${search}%` });
     }
+    if (cooperativeId) {
+      qb.andWhere('v.cooperative_id = :cid', { cid: cooperativeId });
+    }
 
     const [items, total] = await qb.getManyAndCount();
-    return { items, total, page, limit };
+    const signedItems = await Promise.all(
+      items.map(async (d) => ({ ...d, profile_photo_url: await this.signPhotoUrl(d.profile_photo_url) })),
+    );
+    return { items: signedItems, total, page, limit };
   }
 
   // ── Plataforma: aprueba conductores tipo DRIVER ──────────────────────────────
@@ -359,13 +473,16 @@ export class DriversService {
   }
 
   async platformApprove(id: string) {
-    const driver = await this.driversRepo.findOne({ where: { id } });
+    const driver = await this.driversRepo.findOne({ where: { id }, relations: ['user'] });
     if (!driver) throw new NotFoundException('Conductor no encontrado');
     if (driver.approval_status === DriverApprovalStatus.APPROVED) {
       throw new BadRequestException('El conductor ya está aprobado');
     }
 
     await this.driversRepo.update(id, { approval_status: DriverApprovalStatus.APPROVED, rejection_reason: null });
+
+    // Notificar al conductor en tiempo real para que la app actualice sin recargar
+    this.gateway.notifyDriver(id, 'driver.approved', { driver_id: id });
 
     const msg = driver.driver_type === DriverType.OWNER_DRIVER
       ? 'Conductor-dueño aprobado. Ahora puede solicitar unirse a cooperativas.'
@@ -385,6 +502,23 @@ export class DriversService {
   }
 
   // ── Cooperativa: aprueba membresía de OWNER_DRIVER ───────────────────────────
+
+  async listCooperativeMembers(cooperativeId: string, page = 1, limit = 20, search?: string) {
+    const qb = this.cooperativeOwnersRepo.createQueryBuilder('co')
+      .leftJoinAndSelect('co.owner', 'd')
+      .leftJoinAndSelect('d.user', 'u')
+      .where('co.cooperative_id = :cid', { cid: cooperativeId })
+      .orderBy('co.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (search) {
+      qb.andWhere('(d.full_name LIKE :q OR u.email LIKE :q OR u.phone LIKE :q)', { q: `%${search}%` });
+    }
+
+    const [items, total] = await qb.getManyAndCount();
+    return { items, total, page, limit };
+  }
 
   async listCooperativePending(cooperativeId: string, page = 1, limit = 20) {
     const [items, total] = await this.cooperativeOwnersRepo.findAndCount({
@@ -443,7 +577,8 @@ export class DriversService {
       where: { owner: { id } },
       relations: ['cooperative'],
     });
-    return { ...driver, documents: docs, cooperatives };
+    const profile_photo_url = await this.signPhotoUrl(driver.profile_photo_url);
+    return { ...driver, profile_photo_url, documents: docs, cooperatives };
   }
 
   async approveDocument(driverId: string, documentId: string) {
@@ -483,5 +618,39 @@ export class DriversService {
     if (!driver) throw new NotFoundException('Conductor no encontrado');
     await this.usersRepo.update(driver.user.id, { status: UserStatus.ACTIVE });
     return { message: 'Conductor desbloqueado' };
+  }
+
+  async deleteDriver(id: string) {
+    const driver = await this.driversRepo.findOne({ where: { id }, relations: ['user'] });
+    if (!driver) throw new NotFoundException('Conductor no encontrado');
+    if (driver.online_status !== DriverOnlineStatus.OFFLINE) {
+      throw new BadRequestException('El conductor debe estar desconectado para poder eliminarlo');
+    }
+    const userId = driver.user.id;
+    await this.driversRepo.remove(driver);
+    await this.usersRepo.delete(userId);
+    return { message: 'Conductor eliminado' };
+  }
+
+  async findNearby(lat: number, lng: number, radiusKm: number) {
+    const drivers = await this.driversRepo
+      .createQueryBuilder('d')
+      .select(['d.id', 'd.current_lat', 'd.current_lng'])
+      .where('d.online_status = :online', { online: DriverOnlineStatus.ONLINE })
+      .andWhere('d.current_lat IS NOT NULL')
+      .andWhere('d.current_lng IS NOT NULL')
+      .andWhere(
+        `(6371 * acos(LEAST(1, cos(radians(:lat)) * cos(radians(d.current_lat)) * cos(radians(d.current_lng) - radians(:lng)) + sin(radians(:lat)) * sin(radians(d.current_lat))))) <= :radius`,
+        { lat, lng, radius: radiusKm },
+      )
+      .getMany();
+
+    // ±~150m de ruido para evitar stalking de conductores por clientes
+    const fuzz = (v: number) => v + (Math.random() - 0.5) * 0.003;
+    return drivers.map(d => ({
+      id: d.id,
+      lat: fuzz(parseFloat(d.current_lat as any)),
+      lng: fuzz(parseFloat(d.current_lng as any)),
+    }));
   }
 }

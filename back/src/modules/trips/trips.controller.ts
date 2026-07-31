@@ -10,6 +10,7 @@ import {
   ParseUUIDPipe,
   ParseIntPipe,
   DefaultValuePipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import { TripsService } from './trips.service';
 import { CreateTripDto } from './dto/create-trip.dto';
@@ -119,6 +120,17 @@ export class TripsController {
     return this.tripsService.getOffers(id, user.id);
   }
 
+  // Cliente ignora/rechaza una oferta → notifica al conductor para que pueda re-ofertar
+  @Patch(':id/offers/:offerId/reject')
+  @Roles(UserRole.CLIENT)
+  rejectOffer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('offerId', ParseUUIDPipe) offerId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.tripsService.rejectOffer(id, offerId, user.id);
+  }
+
   // Cliente selecciona una oferta → asigna conductor, rechaza el resto
   @Patch(':id/offers/:offerId/select')
   @Roles(UserRole.CLIENT)
@@ -135,6 +147,13 @@ export class TripsController {
   @Roles(UserRole.CLIENT)
   incrementOffer(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
     return this.tripsService.incrementOffer(id, user.id);
+  }
+
+  // Cliente reduce su oferta $0.25 (hasta el mínimo calculado)
+  @Patch(':id/decrement-offer')
+  @Roles(UserRole.CLIENT)
+  decrementOffer(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
+    return this.tripsService.decrementOffer(id, user.id);
   }
 
   // Cliente confirma que ya viene hacia el taxi
@@ -185,11 +204,12 @@ export class TripsController {
   @Get()
   @Roles(...PLATFORM_ROLES, ...COOP_ROLES)
   listTrips(
+    @CurrentUser() user: User,
     @Query('status') status: TripStatus,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
   ) {
-    return this.tripsService.listTrips(status, page, limit);
+    return this.tripsService.listTrips(user, status, page, limit);
   }
 
   // OTP solo se expone al cliente — lo eliminamos para cualquier otro rol
@@ -200,6 +220,12 @@ export class TripsController {
     @CurrentUser() user: User,
   ) {
     const trip = await this.tripsService.getTripById(id);
+
+    if (user.role === UserRole.CLIENT && (trip as any).client?.id !== user.id)
+      throw new ForbiddenException('No eres el cliente de este viaje');
+    if (user.role === UserRole.DRIVER && (trip as any).driver?.user?.id !== user.id)
+      throw new ForbiddenException('No eres el conductor de este viaje');
+
     if (user.role !== UserRole.CLIENT) {
       const { otp_code: _otp, ...safe } = trip as any;
       return safe;

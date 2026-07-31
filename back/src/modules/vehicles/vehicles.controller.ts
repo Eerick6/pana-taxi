@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Patch,
+  Delete,
   Param,
   Body,
   UseGuards,
@@ -84,6 +85,13 @@ export class VehiclesController {
     return this.vehiclesService.getVehicleDocumentUrl(user.id, vehicleId, documentId);
   }
 
+  @Delete('mine/:id')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(UserRole.DRIVER)
+  deleteMyVehicle(@CurrentUser() user: User, @Param('id', ParseUUIDPipe) id: string) {
+    return this.vehiclesService.deleteMyVehicle(user.id, id);
+  }
+
   @Patch(':id/assign-driver')
   @UseGuards(JwtGuard, RolesGuard)
   @Roles(UserRole.DRIVER)
@@ -105,8 +113,9 @@ export class VehiclesController {
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @Query('cooperative_id') cooperativeId?: string,
   ) {
-    return this.vehiclesService.listAll(page, limit, status, search);
+    return this.vehiclesService.listAll(page, limit, status, search, cooperativeId);
   }
 
   @Get('pending')
@@ -139,6 +148,27 @@ export class VehiclesController {
   @Roles(...COOP_WRITE_ROLES)
   reject(@Param('id', ParseUUIDPipe) id: string, @Body() dto: RejectVehicleDto) {
     return this.vehiclesService.rejectVehicle(id, dto);
+  }
+
+  @Patch(':id/suspend')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(...COOP_WRITE_ROLES)
+  suspend(@Param('id', ParseUUIDPipe) id: string) {
+    return this.vehiclesService.suspendVehicle(id);
+  }
+
+  @Patch(':id/activate')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(...COOP_WRITE_ROLES)
+  activate(@Param('id', ParseUUIDPipe) id: string) {
+    return this.vehiclesService.activateVehicle(id);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(...COOP_WRITE_ROLES)
+  delete(@Param('id', ParseUUIDPipe) id: string) {
+    return this.vehiclesService.deleteVehicle(id);
   }
 
   @Patch(':vehicleId/documents/:documentId/approve')

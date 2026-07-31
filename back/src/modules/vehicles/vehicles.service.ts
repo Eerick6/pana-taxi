@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Vehicle, VehicleApprovalStatus } from './entities/vehicle.entity';
+import { Vehicle, VehicleApprovalStatus, VehicleStatus } from './entities/vehicle.entity';
 import { VehicleDocument, VehicleDocumentType } from './entities/vehicle-document.entity';
 import { Driver, DriverType, DriverApprovalStatus } from '../drivers/entities/driver.entity';
 import { Cooperative, CooperativeStatus } from '../cooperatives/entities/cooperative.entity';
@@ -41,6 +41,9 @@ export class VehiclesService {
     if (driver.driver_type !== DriverType.OWNER_DRIVER) {
       throw new ForbiddenException('Solo los conductores-dueños pueden registrar vehículos');
     }
+    if (driver.approval_status !== DriverApprovalStatus.APPROVED) {
+      throw new ForbiddenException('La plataforma debe aprobar tus documentos antes de registrar un vehículo');
+    }
 
     const cooperative = await this.cooperativesRepo.findOne({ where: { id: dto.cooperative_id } });
     if (!cooperative) throw new NotFoundException('Cooperativa no encontrada');
@@ -48,16 +51,19 @@ export class VehiclesService {
       throw new BadRequestException('La cooperativa está suspendida');
     }
 
-    // Owner must be an approved member of this cooperative
-    const membership = await this.cooperativeOwnersRepo.findOne({
+    // Verificar membresía: si no existe, auto-unirse (pending); si fue rechazada, bloquear
+    let membership = await this.cooperativeOwnersRepo.findOne({
       where: { owner: { id: driver.id }, cooperative: { id: dto.cooperative_id } },
     });
+    if (membership?.approval_status === OwnerApprovalStatus.REJECTED) {
+      throw new ForbiddenException('Tu solicitud de membresía en esta cooperativa fue rechazada');
+    }
     if (!membership) {
-      throw new ForbiddenException('No eres miembro de esta cooperativa. Solicita unirte primero.');
+      membership = await this.cooperativeOwnersRepo.save(
+        this.cooperativeOwnersRepo.create({ owner: driver, cooperative }),
+      );
     }
-    if (membership.approval_status !== OwnerApprovalStatus.APPROVED) {
-      throw new ForbiddenException('Tu membresía en esta cooperativa aún no ha sido aprobada');
-    }
+    // Si la membresía está pendiente o aprobada se permite registrar el vehículo
 
     const plateExists = await this.vehiclesRepo.findOne({ where: { plate: dto.plate } });
     if (plateExists) throw new ConflictException('Placa ya registrada en el sistema');
@@ -164,7 +170,7 @@ export class VehiclesService {
 
   // ── Admin: lista general de vehículos ───────────────────────────────────────
 
-  async listAll(page = 1, limit = 20, status?: string, search?: string) {
+  async listAll(page = 1, limit = 20, status?: string, search?: string, cooperativeId?: string) {
     const qb = this.vehiclesRepo.createQueryBuilder('v')
       .leftJoinAndSelect('v.owner', 'o')
       .leftJoinAndSelect('o.user', 'u')
@@ -174,6 +180,7 @@ export class VehiclesService {
       .take(limit);
 
     if (status) qb.andWhere('v.approval_status = :s', { s: status });
+    if (cooperativeId) qb.andWhere('c.id = :coopId', { coopId: cooperativeId });
     if (search) {
       qb.andWhere(
         '(v.plate LIKE :q OR v.brand LIKE :q OR v.model LIKE :q OR u.email LIKE :q)',
@@ -201,12 +208,58 @@ export class VehiclesService {
   async getVehicleById(id: string) {
     const vehicle = await this.vehiclesRepo.findOne({
       where: { id },
-      relations: ['owner', 'owner.user', 'owner.cooperative'],
+      relations: ['owner', 'owner.user'],
     });
     if (!vehicle) throw new NotFoundException('Vehículo no encontrado');
 
     const docs = await this.vehicleDocsRepo.find({ where: { vehicle: { id } } });
     return { ...vehicle, documents: docs };
+  }
+
+  async suspendVehicle(id: string) {
+    const vehicle = await this.vehiclesRepo.findOne({ where: { id } });
+    if (!vehicle) throw new NotFoundException('Vehículo no encontrado');
+    await this.vehiclesRepo.update(id, { status: VehicleStatus.SUSPENDED });
+    return { message: 'Vehículo suspendido' };
+  }
+
+  async activateVehicle(id: string) {
+    const vehicle = await this.vehiclesRepo.findOne({ where: { id } });
+    if (!vehicle) throw new NotFoundException('Vehículo no encontrado');
+    if (vehicle.approval_status !== VehicleApprovalStatus.APPROVED) {
+      throw new BadRequestException('El vehículo debe estar aprobado antes de activarse');
+    }
+    await this.vehiclesRepo.update(id, { status: VehicleStatus.ACTIVE });
+    return { message: 'Vehículo activado' };
+  }
+
+  async deleteVehicle(id: string) {
+    const vehicle = await this.vehiclesRepo.findOne({ where: { id } });
+    if (!vehicle) throw new NotFoundException('Vehículo no encontrado');
+    if (vehicle.status === VehicleStatus.ACTIVE) {
+      throw new BadRequestException('No se puede eliminar un vehículo activo. Suspéndelo primero.');
+    }
+    await this.vehiclesRepo.delete(id);
+    return { message: 'Vehículo eliminado' };
+  }
+
+  async deleteMyVehicle(userId: string, vehicleId: string) {
+    const driver = await this.driversRepo.findOne({ where: { user: { id: userId } } });
+    if (!driver) throw new NotFoundException('Perfil de conductor no encontrado');
+
+    const vehicle = await this.vehiclesRepo.findOne({
+      where: { id: vehicleId, owner: { id: driver.id } },
+    });
+    if (!vehicle) throw new NotFoundException('Vehículo no encontrado o no te pertenece');
+    if (vehicle.status === VehicleStatus.ACTIVE) {
+      throw new BadRequestException('No puedes eliminar un vehículo activo. Contacta a la cooperativa.');
+    }
+    if (vehicle.approval_status === VehicleApprovalStatus.APPROVED) {
+      throw new BadRequestException('No puedes eliminar un vehículo aprobado. Contacta a la cooperativa para darlo de baja.');
+    }
+
+    await this.vehiclesRepo.delete(vehicleId);
+    return { message: 'Vehículo eliminado' };
   }
 
   async approveVehicle(id: string) {

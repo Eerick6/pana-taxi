@@ -9,32 +9,44 @@ export class FareConfig {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  // Tarifa de arranque (mínimo al subir al taxi)
-  @Column({ type: 'decimal', precision: 8, scale: 2, default: '1.50' })
+  // ── Tarifa diurna (06:00–22:00) ─────────────────────────────────────────────
+
+  // Bajada de bandera (arranque) — igual día y noche
+  @Column({ type: 'decimal', precision: 8, scale: 2, default: '0.50' })
   base_fare: number;
 
-  // Precio por kilómetro recorrido
+  // Precio por kilómetro diurno
   @Column({ type: 'decimal', precision: 8, scale: 4, default: '0.4000' })
   price_per_km: number;
 
-  // Precio por minuto cuando la velocidad baja del umbral (taxímetro en espera)
-  @Column({ type: 'decimal', precision: 8, scale: 4, default: '0.0800' })
+  // Precio por minuto parado — igual día y noche
+  @Column({ type: 'decimal', precision: 8, scale: 4, default: '0.1000' })
   price_per_minute: number;
 
-  // Velocidad umbral para cambiar de cobro por distancia a cobro por tiempo (km/h)
-  @Column({ type: 'decimal', precision: 5, scale: 2, default: '10.00' })
-  slow_speed_threshold_kmh: number;
+  // Carrera mínima diurna
+  @Column({ type: 'decimal', precision: 8, scale: 2, default: '1.50' })
+  minimum_fare: number;
 
-  // Recargo nocturno en % sobre la tarifa calculada (ej. 25 = +25%)
-  @Column({ type: 'decimal', precision: 5, scale: 2, default: '25.00' })
-  night_surcharge_pct: number;
+  // ── Tarifa nocturna (22:00–06:00) ────────────────────────────────────────────
 
-  // Horario del recargo nocturno (formato 24h)
+  // Precio por kilómetro nocturno
+  @Column({ type: 'decimal', precision: 8, scale: 4, default: '0.4500' })
+  night_price_per_km: number;
+
+  // Carrera mínima nocturna
+  @Column({ type: 'decimal', precision: 8, scale: 2, default: '1.70' })
+  night_minimum_fare: number;
+
+  // Horario nocturno (formato 24h)
   @Column({ type: 'tinyint', default: 22 })
   night_start_hour: number;
 
   @Column({ type: 'tinyint', default: 6 })
   night_end_hour: number;
+
+  // Velocidad umbral para cambiar de cobro por distancia a cobro por tiempo (km/h)
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: '10.00' })
+  slow_speed_threshold_kmh: number;
 
   // Radio inicial para mostrar viajes al conductor (km)
   @Column({ type: 'decimal', precision: 6, scale: 2, default: '5.00' })
@@ -52,13 +64,9 @@ export class FareConfig {
   @Column({ type: 'smallint', default: 60 })
   radius_expansion_interval_sec: number;
 
-  // Tarifa mínima por viaje (ningún viaje puede cerrarse por menos de esto)
-  @Column({ type: 'decimal', precision: 8, scale: 2, default: '1.50' })
-  minimum_fare: number;
-
   // Descuento máximo que puede ofrecer el cliente en modo negociación (%)
-  // Ej: 30 → el cliente no puede ofrecer menos del 70% de la tarifa sugerida
-  @Column({ type: 'decimal', precision: 5, scale: 2, default: '30.00' })
+  // 15 → el cliente no puede ofrecer menos del 85% de la tarifa sugerida (protege al taxista)
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: '15.00' })
   max_negotiation_discount_pct: number;
 
   // Distancia máxima de la ruta planificada antes de considerar desvío (metros)

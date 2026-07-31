@@ -52,6 +52,16 @@ export class CooperativesController {
     return this.cooperativesService.findAll(page, limit);
   }
 
+  // Conductores pueden listar cooperativas activas para solicitar membresía
+  @Get('active')
+  @Roles(...READ_ROLES, UserRole.DRIVER)
+  listActive(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
+  ) {
+    return this.cooperativesService.listActive(page, limit);
+  }
+
   // Must be before :id to avoid route collision
   @Get('pending')
   @Roles(...PLATFORM_ROLES)
@@ -92,10 +102,25 @@ export class CooperativesController {
     return this.cooperativesService.activate(id);
   }
 
+  @Patch(':id/set-fee')
+  @Roles(...PLATFORM_ROLES)
+  setFee(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('monthly_fee') fee: number,
+  ) {
+    return this.cooperativesService.setMonthlyFee(id, fee);
+  }
+
+  @Delete(':id')
+  @Roles(...PLATFORM_ROLES)
+  remove(@Param('id', ParseUUIDPipe) id: string) {
+    return this.cooperativesService.remove(id);
+  }
+
   // ─── DOCUMENTOS ────────────────────────────────────────────────────────────
 
   @Post(':id/documents')
-  @Roles(...PLATFORM_ROLES)
+  @Roles(...PLATFORM_ROLES, UserRole.COOPERATIVE_ADMIN)
   @UseInterceptors(FileInterceptor('file'))
   uploadDocument(
     @Param('id', ParseUUIDPipe) id: string,
@@ -112,7 +137,7 @@ export class CooperativesController {
   }
 
   @Get(':id/documents/:docId/url')
-  @Roles(...READ_ROLES)
+  @Roles(...READ_ROLES, UserRole.COOPERATIVE_ADMIN)
   getDocumentUrl(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('docId', ParseUUIDPipe) docId: string,
@@ -168,6 +193,17 @@ export class CooperativesController {
   @Roles(...READ_ROLES, UserRole.COOPERATIVE_ADMIN)
   listMembers(@Param('id', ParseUUIDPipe) id: string) {
     return this.cooperativesService.listMembers(id);
+  }
+
+  @Get(':id/owners')
+  @Roles(...READ_ROLES, UserRole.COOPERATIVE_ADMIN, UserRole.COOPERATIVE_OPERATOR)
+  listOwners(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('status') status?: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number = 1,
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number = 100,
+  ) {
+    return this.cooperativesService.listOwners(id, status, page, limit);
   }
 
   // Snapshot de flota para el mapa del panel web

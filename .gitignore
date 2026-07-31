@@ -1,0 +1,10 @@
+.DS_Store
+**/.DS_Store
+
+# VS Code workspace settings (pueden contener tokens)
+.vscode/
+**/.vscode/
+
+# Mobile env files con tokens
+mobile/driver/env/
+mobile/clientes/env/

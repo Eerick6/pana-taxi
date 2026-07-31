@@ -1,36 +1,11 @@
-"use client";
+import type { Metadata } from 'next';
+import AdminLayoutClient from './_AdminLayoutClient';
 
-import { useSidebar } from "@/context/SidebarContext";
-import { CoopProvider } from "@/context/CoopContext";
-import AppHeader from "@/layout/AppHeader";
-import AppSidebar from "@/layout/AppSidebar";
-import Backdrop from "@/layout/Backdrop";
-import React from "react";
+export const metadata: Metadata = {
+  title: { template: '%s | Panel Pana Taxi', default: 'Panel | Pana Taxi' },
+  robots: { index: false, follow: false },
+};
 
-export default function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const { isExpanded, isHovered, isMobileOpen } = useSidebar();
-
-  // Dynamic class for main content margin based on sidebar state
-  const mainContentMargin = isMobileOpen
-    ? "ml-0"
-    : isExpanded || isHovered
-    ? "lg:ml-[290px]"
-    : "lg:ml-[90px]";
-
-  return (
-    <CoopProvider>
-      <div className="min-h-screen xl:flex">
-        <AppSidebar />
-        <Backdrop />
-        <div className={`flex-1 transition-all duration-300 ease-in-out ${mainContentMargin}`}>
-          <AppHeader />
-          <div className="p-4 mx-auto max-w-(--breakpoint-2xl) md:p-6">{children}</div>
-        </div>
-      </div>
-    </CoopProvider>
-  );
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  return <AdminLayoutClient>{children}</AdminLayoutClient>;
 }

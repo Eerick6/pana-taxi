@@ -9,10 +9,10 @@ export class SystemConfig {
   @Column({ unique: true })
   key: string;
 
-  @Column()
+  @Column('text')
   value: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'text', nullable: true })
   description: string;
 
   @ManyToOne(() => User, { nullable: true })

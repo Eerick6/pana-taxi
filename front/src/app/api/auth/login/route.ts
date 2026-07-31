@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
 
   let upstream: Response;
   try {
-    upstream = await fetch(`${API_URL}/auth/email-otp/verify`, {
+    upstream = await fetch(`${API_URL}/auth/login/password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

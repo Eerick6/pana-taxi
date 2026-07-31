@@ -23,6 +23,8 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
 import { SubscriptionStatus } from './entities/cooperative-subscription.entity';
+import { LeadStatus } from './entities/contact-lead.entity';
+import { CoopApplicationStatus } from './entities/cooperative-application.entity';
 
 const READ_ROLES = [UserRole.OWNER, UserRole.PLATFORM_ADMIN];
 
@@ -127,5 +129,59 @@ export class PlatformController {
   @Roles(UserRole.OWNER)
   markOverdue(@Param('id', ParseUUIDPipe) id: string) {
     return this.platformService.markSubscriptionOverdue(id);
+  }
+
+  // ── Solicitudes de contacto ──────────────────────────────────────────────────
+
+  @Get('leads')
+  @Roles(...READ_ROLES)
+  listLeads(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('status') status?: LeadStatus,
+  ) {
+    return this.platformService.listLeads(page, limit, status);
+  }
+
+  @Patch('leads/:id/status')
+  @Roles(...READ_ROLES)
+  updateLeadStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('status') status: LeadStatus,
+  ) {
+    return this.platformService.updateLeadStatus(id, status);
+  }
+
+  @Delete('leads/:id')
+  @Roles(UserRole.OWNER)
+  deleteLead(@Param('id', ParseUUIDPipe) id: string) {
+    return this.platformService.deleteLead(id);
+  }
+
+  // ── Solicitudes de registro de cooperativas ──────────────────────────────────
+
+  @Get('coop-applications')
+  @Roles(...READ_ROLES)
+  listCoopApplications(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('status') status?: CoopApplicationStatus,
+  ) {
+    return this.platformService.listCoopApplications(page, limit, status);
+  }
+
+  @Patch('coop-applications/:id/status')
+  @Roles(...READ_ROLES)
+  updateCoopApplicationStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('status') status: CoopApplicationStatus,
+  ) {
+    return this.platformService.updateCoopApplicationStatus(id, status);
+  }
+
+  @Delete('coop-applications/:id')
+  @Roles(UserRole.OWNER)
+  deleteCoopApplication(@Param('id', ParseUUIDPipe) id: string) {
+    return this.platformService.deleteCoopApplication(id);
   }
 }

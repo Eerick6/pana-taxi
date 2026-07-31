@@ -5,6 +5,8 @@ import { useAuth } from "@/context/AuthContext";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import { DropdownItem } from "../ui/dropdown/DropdownItem";
 
+const COOP_ROLES = ['cooperative_admin', 'cooperative_operator', 'cooperative_supervisor'];
+
 const ROLE_LABEL: Record<string, string> = {
   OWNER: 'Propietario',
   PLATFORM_ADMIN: 'Admin Plataforma',
@@ -68,7 +70,7 @@ export default function UserDropdown() {
             <DropdownItem
               onItemClick={() => setIsOpen(false)}
               tag="a"
-              href="/profile"
+              href={user && COOP_ROLES.includes(user.role) ? '/coop/perfil' : '/profile'}
               className="flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white transition-colors"
             >
               <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

@@ -82,13 +82,26 @@ export class ClientsController {
   listClients(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('search') search?: string,
   ) {
-    return this.clientsService.listClients(page, limit);
+    return this.clientsService.listClients(page, limit, search);
   }
 
   @Get(':id')
   @Roles(...ADMIN_ROLES)
   getClientById(@Param('id', ParseUUIDPipe) id: string) {
     return this.clientsService.getClientById(id);
+  }
+
+  @Patch(':id/block')
+  @Roles(...ADMIN_ROLES)
+  blockClient(@Param('id', ParseUUIDPipe) id: string) {
+    return this.clientsService.blockClient(id);
+  }
+
+  @Patch(':id/unblock')
+  @Roles(...ADMIN_ROLES)
+  unblockClient(@Param('id', ParseUUIDPipe) id: string) {
+    return this.clientsService.unblockClient(id);
   }
 }

@@ -4,23 +4,23 @@ import { useAuth } from '@/context/AuthContext';
 import api from '@/lib/api';
 
 const ROLE_LABEL: Record<string, string> = {
-  OWNER: 'Propietario de la Plataforma',
-  PLATFORM_ADMIN: 'Administrador de Plataforma',
-  FINANCE: 'Finanzas',
-  MONITORING: 'Monitoreo',
-  SUPPORT: 'Soporte',
-  COOPERATIVE_ADMIN: 'Administrador de Cooperativa',
-  COOPERATIVE_OPERATOR: 'Operador de Cooperativa',
-  COOPERATIVE_SUPERVISOR: 'Supervisor de Cooperativa',
+  owner: 'Propietario de la Plataforma',
+  platform_admin: 'Administrador de Plataforma',
+  finance: 'Finanzas',
+  monitoring: 'Monitoreo',
+  support: 'Soporte',
+  cooperative_admin: 'Administrador de Cooperativa',
+  cooperative_operator: 'Operador de Cooperativa',
+  cooperative_supervisor: 'Supervisor de Cooperativa',
 };
 
 const ROLE_COLOR: Record<string, string> = {
-  OWNER: 'bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-400',
-  PLATFORM_ADMIN: 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400',
-  FINANCE: 'bg-success-100 text-success-700 dark:bg-success-500/20 dark:text-success-400',
-  MONITORING: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400',
-  SUPPORT: 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400',
-  COOPERATIVE_ADMIN: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-400',
+  owner: 'bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-400',
+  platform_admin: 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400',
+  finance: 'bg-success-100 text-success-700 dark:bg-success-500/20 dark:text-success-400',
+  monitoring: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400',
+  support: 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400',
+  cooperative_admin: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-400',
 };
 
 interface Stats {
@@ -73,11 +73,14 @@ export default function ProfilePage() {
           <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 20% 50%, white 1px, transparent 1px), radial-gradient(circle at 80% 50%, white 1px, transparent 1px)', backgroundSize: '30px 30px' }} />
         </div>
         <div className="px-6 pb-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4 -mt-8">
-            <div className="w-16 h-16 rounded-2xl border-4 border-white dark:border-gray-900 shadow-lg flex items-center justify-center text-xl font-bold text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-500/10 flex-shrink-0">
+          <div className="relative z-10 -mt-8 mb-3">
+            <div className="w-16 h-16 rounded-2xl border-4 border-white dark:border-gray-900 shadow-lg flex items-center justify-center text-xl font-bold text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-500/10">
               {initials}
             </div>
-            <div className="flex-1 min-w-0 pt-2 sm:pt-0">
+          </div>
+          {/* Nombre y acciones — siempre por debajo del banner */}
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div className="min-w-0">
               <h1 className="text-lg font-bold text-gray-900 dark:text-white leading-tight">{user.full_name}</h1>
               <p className="text-sm text-gray-500 dark:text-gray-400">{user.email}</p>
             </div>
@@ -100,7 +103,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Stats */}
-      {(user.role === 'OWNER' || user.role === 'PLATFORM_ADMIN') && (
+      {(user.role === 'owner' || user.role === 'platform_admin') && (
         <div className="grid grid-cols-3 gap-4">
           {[
             { label: 'Cooperativas', value: stats.totalCoops ?? '—', icon: '🏢' },

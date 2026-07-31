@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthUser, UserRole } from '@/types';
 import { setAccessToken } from '@/lib/api';
@@ -20,13 +20,14 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const PLATFORM_ROLES: UserRole[] = ['OWNER', 'PLATFORM_ADMIN', 'FINANCE', 'MONITORING', 'SUPPORT'];
-const COOP_ROLES: UserRole[] = ['COOPERATIVE_ADMIN', 'COOPERATIVE_OPERATOR', 'COOPERATIVE_SUPERVISOR'];
+const PLATFORM_ROLES: UserRole[] = ['owner', 'platform_admin', 'finance', 'monitoring', 'support'];
+const COOP_ROLES: UserRole[] = ['cooperative_admin', 'cooperative_operator', 'cooperative_supervisor'];
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const didRestore = useRef(false);
 
   const loadUser = useCallback(async (token: string) => {
     setAccessToken(token);
@@ -35,6 +36,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Prevent double-invocation in React Strict Mode (dev) from consuming
+    // the rotating refresh token twice and invalidating the session.
+    if (didRestore.current) return;
+    didRestore.current = true;
+
     const restore = async () => {
       try {
         const r = await fetch('/api/auth/refresh', { method: 'POST' });
@@ -79,7 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       hasRole,
       isPlatformStaff: !!user && PLATFORM_ROLES.includes(user.role),
       isCoopStaff: !!user && COOP_ROLES.includes(user.role),
-      isOwner: user?.role === 'OWNER',
+      isOwner: user?.role === 'owner',
     }}>
       {children}
     </AuthContext.Provider>

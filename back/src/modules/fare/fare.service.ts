@@ -24,6 +24,7 @@ export interface FareEstimate {
   night_surcharge: number;
   total: number;
   is_night_rate: boolean;
+  max_negotiation_discount_pct: number;
   route_geometry: GeoJsonLineString | null;
 }
 
@@ -93,11 +94,13 @@ export class FareService {
       const route = res.data?.routes?.[0];
       if (!route) return this.haversineRoute(originLat, originLng, destLat, destLng);
 
-      return {
+      const result = {
         distance_km: +(route.distance / 1000).toFixed(2),
         duration_min: Math.ceil(route.duration / 60),
         geometry: route.geometry as GeoJsonLineString,
       };
+      console.log(`[Mapbox] ${result.distance_km}km, ${result.duration_min}min`);
+      return result;
     } catch {
       return this.haversineRoute(originLat, originLng, destLat, destLng);
     }
@@ -123,24 +126,29 @@ export class FareService {
   }
 
   calculateFare(route: RouteInfo, config: FareConfig): FareEstimate {
-    const base = parseFloat(config.base_fare as any);
-    const perKm = parseFloat(config.price_per_km as any);
-    const perMin = parseFloat(config.price_per_minute as any);
-
-    const subtotal = +(base + route.distance_km * perKm + route.duration_min * perMin).toFixed(2);
     const isNight = this.isNightTime(config);
-    const nightSurcharge = isNight
-      ? +(subtotal * (parseFloat(config.night_surcharge_pct as any) / 100)).toFixed(2)
-      : 0;
+    const base    = parseFloat(config.base_fare as any);
+    const perKm   = isNight
+      ? parseFloat(config.night_price_per_km as any)
+      : parseFloat(config.price_per_km as any);
+    const perMin  = parseFloat(config.price_per_minute as any);
+    const minFare = isNight
+      ? parseFloat(config.night_minimum_fare as any)
+      : parseFloat(config.minimum_fare as any);
+
+    const calculated = +(base + route.distance_km * perKm).toFixed(2);
+    const raw        = +Math.max(calculated, minFare).toFixed(2);
+    const total      = +(Math.ceil(+(raw / 0.05).toFixed(10)) * 0.05).toFixed(2);
 
     return {
-      base_fare: base,
-      distance_km: route.distance_km,
-      duration_min: route.duration_min,
-      subtotal,
-      night_surcharge: nightSurcharge,
-      total: +(subtotal + nightSurcharge).toFixed(2),
-      is_night_rate: isNight,
+      base_fare:      base,
+      distance_km:    route.distance_km,
+      duration_min:   route.duration_min,
+      subtotal:       total,
+      night_surcharge: 0,
+      total,
+      is_night_rate:  isNight,
+      max_negotiation_discount_pct: parseFloat(config.max_negotiation_discount_pct as any),
       route_geometry: route.geometry,
     };
   }
@@ -163,17 +171,16 @@ export class FareService {
     speedKmh: number,
     config: FareConfig,
   ): number {
-    const perKm = parseFloat(config.price_per_km as any);
-    const perMin = parseFloat(config.price_per_minute as any);
+    const isNight   = this.isNightTime(config);
+    const perKm     = isNight
+      ? parseFloat(config.night_price_per_km as any)
+      : parseFloat(config.price_per_km as any);
+    const perMin    = parseFloat(config.price_per_minute as any);
     const threshold = parseFloat(config.slow_speed_threshold_kmh as any);
-    const nightMult = this.isNightTime(config)
-      ? 1 + parseFloat(config.night_surcharge_pct as any) / 100
-      : 1;
 
-    const increment = (speedKmh < threshold
-      ? durationMin * perMin    // taxi lento/parado: cobra por tiempo
-      : distanceKm * perKm      // taxi en marcha: cobra por distancia
-    ) * nightMult;
+    const increment = speedKmh < threshold
+      ? durationMin * perMin   // parado/lento: cobra por tiempo
+      : distanceKm * perKm;    // en marcha: cobra por distancia
 
     return +(currentAmount + increment).toFixed(2);
   }
@@ -181,19 +188,17 @@ export class FareService {
   // Velocidad de crecimiento del taxímetro en $/segundo para animación fluida en el frontend.
   // El cliente anima display = meter_amount + increment_per_second * elapsed_s entre pings GPS.
   calculateIncrementPerSecond(speedKmh: number, config: FareConfig): number {
-    const perKm = parseFloat(config.price_per_km as any);
-    const perMin = parseFloat(config.price_per_minute as any);
+    const isNight   = this.isNightTime(config);
+    const perKm     = isNight
+      ? parseFloat(config.night_price_per_km as any)
+      : parseFloat(config.price_per_km as any);
+    const perMin    = parseFloat(config.price_per_minute as any);
     const threshold = parseFloat(config.slow_speed_threshold_kmh as any);
-    const nightMult = this.isNightTime(config)
-      ? 1 + parseFloat(config.night_surcharge_pct as any) / 100
-      : 1;
 
     if (speedKmh < threshold) {
-      // Parado/lento: cobra por minuto → $/s = perMin / 60
-      return +((perMin / 60) * nightMult).toFixed(6);
+      return +((perMin / 60)).toFixed(6);           // $/s parado
     } else {
-      // En marcha: cobra por km → $/s = (km/h × $/km) / 3600
-      return +(((speedKmh * perKm) / 3600) * nightMult).toFixed(6);
+      return +(((speedKmh * perKm) / 3600)).toFixed(6); // $/s en marcha
     }
   }
 

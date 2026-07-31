@@ -4,10 +4,11 @@ import { ClientsService } from './clients.service';
 import { ClientsController } from './clients.controller';
 import { Client } from './entities/client.entity';
 import { EmergencyContact } from './entities/emergency-contact.entity';
+import { User } from '../users/entities/user.entity';
 import { StorageModule } from '../storage/storage.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Client, EmergencyContact]), StorageModule],
+  imports: [TypeOrmModule.forFeature([Client, EmergencyContact, User]), StorageModule],
   providers: [ClientsService],
   controllers: [ClientsController],
   exports: [TypeOrmModule],

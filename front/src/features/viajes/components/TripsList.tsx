@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { currency, dateTimeStr } from '@/lib/format';
 import type { Trip } from '@/types';
-import { getTrips } from '../api';
+import { getTrips, cancelTrip } from '../api';
 
 const STATUS_MAP: Record<string, { label: string; cls: string }> = {
   completed: { label: 'Completado', cls: 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400' },
@@ -26,9 +26,11 @@ const STATUS_OPTIONS = [
   { value: 'cancelled', label: 'Cancelados' },
 ];
 
-interface Props { cooperativeId?: string }
+const ACTIVE_STATUSES = new Set(['requested', 'negotiating', 'accepted', 'driver_arrived', 'in_progress']);
 
-export default function TripsList({ cooperativeId }: Props) {
+interface Props { cooperativeId?: string; canCancel?: boolean; refreshKey?: number }
+
+export default function TripsList({ cooperativeId, canCancel = false, refreshKey }: Props) {
   const [items, setItems] = useState<Trip[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -36,6 +38,9 @@ export default function TripsList({ cooperativeId }: Props) {
   const [filterStatus, setFilterStatus] = useState('completed');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelLoading, setCancelLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,7 +62,7 @@ export default function TripsList({ cooperativeId }: Props) {
     }
   }, [page, filterStatus, fromDate, toDate, cooperativeId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, refreshKey]);
 
   const pages = Math.max(1, Math.ceil(total / 20));
 
@@ -92,8 +97,8 @@ export default function TripsList({ cooperativeId }: Props) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 dark:border-gray-800">
-                {['Fecha', 'Origen → Destino', 'Conductor', 'Cooperativa', 'Modalidad', 'Tarifa', 'Comisión', 'Fuente', 'Estado'].map((h) => (
-                  <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                {['Fecha', 'Origen → Destino', 'Conductor', 'Cooperativa', 'Modalidad', 'Tarifa', 'Comisión', 'Fuente', 'Estado', ...(canCancel ? [''] : [])].map((h, i) => (
+                  <th key={i} className="px-5 py-3 text-left text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -138,6 +143,18 @@ export default function TripsList({ cooperativeId }: Props) {
                             {status.label}
                           </span>
                         </td>
+                        {canCancel && (
+                          <td className="px-5 py-3.5">
+                            {ACTIVE_STATUSES.has(t.status) && (
+                              <button
+                                onClick={() => { setCancelId(t.id); setCancelReason(''); }}
+                                className="px-2.5 py-1 text-xs font-medium rounded-lg border border-error-200 dark:border-error-800 text-error-600 dark:text-error-400 hover:bg-error-50 dark:hover:bg-error-500/10 transition-colors whitespace-nowrap"
+                              >
+                                Cancelar
+                              </button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -155,6 +172,41 @@ export default function TripsList({ cooperativeId }: Props) {
           </div>
         )}
       </div>
+      {cancelId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+            <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-2">Cancelar viaje</h3>
+            <p className="text-sm text-gray-400 mb-4">Indica el motivo de la cancelación.</p>
+            <textarea
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Motivo de cancelación..."
+              rows={3}
+              className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+            />
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={() => setCancelId(null)}
+                className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                Volver
+              </button>
+              <button
+                onClick={async () => {
+                  if (!cancelReason.trim()) return;
+                  setCancelLoading(true);
+                  try { await cancelTrip(cancelId, cancelReason.trim()); setCancelId(null); await load(); }
+                  finally { setCancelLoading(false); }
+                }}
+                disabled={!cancelReason.trim() || cancelLoading}
+                className="flex-1 px-4 py-2.5 text-sm font-semibold rounded-xl bg-error-500 text-white hover:bg-error-600 disabled:opacity-50 transition-colors"
+              >
+                {cancelLoading ? 'Cancelando...' : 'Cancelar viaje'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

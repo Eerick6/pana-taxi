@@ -64,4 +64,9 @@ export class User {
 
   @UpdateDateColumn()
   updated_at: Date;
+
+  // Propiedad virtual — NO es columna BD.
+  // La inyecta JwtStrategy desde el payload del token para que los controllers
+  // de staff de cooperativa siempre tengan su cooperative_id disponible.
+  cooperative_id?: string | null;
 }

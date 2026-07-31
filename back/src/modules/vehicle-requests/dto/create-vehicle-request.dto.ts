@@ -1,4 +1,4 @@
-import { IsUUID, IsOptional, IsString, IsDateString, MaxLength } from 'class-validator';
+import { IsUUID, IsOptional, IsString, IsDateString, MaxLength, IsNumber } from 'class-validator';
 
 export class CreateVehicleRequestDto {
   @IsUUID()
@@ -16,4 +16,21 @@ export class CreateVehicleRequestDto {
   @IsOptional()
   @IsDateString()
   needed_until?: string;
+
+  // Posición actual del taxi al publicar (para filtrar por radio)
+  @IsOptional()
+  @IsNumber()
+  lat?: number;
+
+  @IsOptional()
+  @IsNumber()
+  lng?: number;
 }
+
+export class ApplyToRequestDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  message?: string; // mensaje del conductor al postularse
+}
+

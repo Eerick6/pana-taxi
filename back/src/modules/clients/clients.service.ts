@@ -8,7 +8,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Client } from './entities/client.entity';
 import { EmergencyContact } from './entities/emergency-contact.entity';
+import { User, UserStatus } from '../users/entities/user.entity';
 import { StorageService } from '../storage/storage.service';
+import { LocalStorageService } from '../storage/local-storage.service';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { AddEmergencyContactDto } from './dto/add-emergency-contact.dto';
 
@@ -21,7 +23,10 @@ export class ClientsService {
     private clientsRepo: Repository<Client>,
     @InjectRepository(EmergencyContact)
     private contactsRepo: Repository<EmergencyContact>,
+    @InjectRepository(User)
+    private usersRepo: Repository<User>,
     private storage: StorageService,
+    private localStorage: LocalStorageService,
   ) {}
 
   async getMyProfile(userId: string) {
@@ -32,7 +37,20 @@ export class ClientsService {
     if (!client) throw new NotFoundException('Perfil de cliente no encontrado');
 
     const { otp_code, otp_expires_at, refresh_token, password_hash, ...user } = client.user as any;
-    return { ...client, user };
+
+    // Solo servir fotos en disco local ("local:..."); limpiar keys R2 legacy
+    const raw = client.profile_photo_url;
+    let photoUrl: string | null = null;
+    if (raw) {
+      if (this.localStorage.isLocal(raw)) {
+        photoUrl = this.localStorage.staticPath(raw);
+      } else {
+        // Key R2 antigua — limpiar del DB para que el usuario suba de nuevo
+        await this.clientsRepo.update(client.id, { profile_photo_url: null });
+      }
+    }
+
+    return { ...client, user, profile_photo_url: photoUrl };
   }
 
   async updateMyProfile(userId: string, dto: UpdateClientDto) {
@@ -52,14 +70,9 @@ export class ClientsService {
     if (!allowed.includes(file.mimetype)) throw new BadRequestException('Solo JPEG, PNG o WebP');
     if (file.size > 5 * 1024 * 1024) throw new BadRequestException('Máximo 5MB');
 
-    const key = await this.storage.upload(
-      `clients/${client.id}/photo`,
-      file.originalname,
-      file.buffer,
-      file.mimetype,
-    );
+    const key = this.localStorage.save(`clients/${client.id}`, file.buffer, file.originalname);
     await this.clientsRepo.update(client.id, { profile_photo_url: key });
-    return { profile_photo_url: await this.storage.getPresignedUrl(key) };
+    return { profile_photo_url: key };
   }
 
   // ── Contactos de emergencia ─────────────────────────────────────────────────
@@ -104,13 +117,21 @@ export class ClientsService {
 
   // ── Admin ───────────────────────────────────────────────────────────────────
 
-  async listClients(page = 1, limit = 20) {
-    const [items, total] = await this.clientsRepo.findAndCount({
-      relations: ['user'],
-      skip: (page - 1) * limit,
-      take: limit,
-      order: { created_at: 'DESC' },
-    });
+  async listClients(page = 1, limit = 20, search?: string) {
+    const qb = this.clientsRepo.createQueryBuilder('c')
+      .leftJoinAndSelect('c.user', 'u')
+      .orderBy('c.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (search) {
+      qb.andWhere(
+        '(c.full_name LIKE :q OR u.email LIKE :q OR u.phone LIKE :q)',
+        { q: `%${search}%` },
+      );
+    }
+
+    const [items, total] = await qb.getManyAndCount();
     return { items, total, page, limit };
   }
 
@@ -120,5 +141,19 @@ export class ClientsService {
 
     const contacts = await this.contactsRepo.find({ where: { client: { id } } });
     return { ...client, emergency_contacts: contacts };
+  }
+
+  async blockClient(id: string) {
+    const client = await this.clientsRepo.findOne({ where: { id }, relations: ['user'] });
+    if (!client) throw new NotFoundException('Cliente no encontrado');
+    await this.usersRepo.update(client.user.id, { status: UserStatus.SUSPENDED });
+    return { message: 'Cliente suspendido correctamente' };
+  }
+
+  async unblockClient(id: string) {
+    const client = await this.clientsRepo.findOne({ where: { id }, relations: ['user'] });
+    if (!client) throw new NotFoundException('Cliente no encontrado');
+    await this.usersRepo.update(client.user.id, { status: UserStatus.ACTIVE });
+    return { message: 'Cliente reactivado correctamente' };
   }
 }

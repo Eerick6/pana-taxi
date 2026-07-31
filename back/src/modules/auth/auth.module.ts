@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BullModule } from '@nestjs/bullmq';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
@@ -12,6 +13,7 @@ import { Client } from '../clients/entities/client.entity';
 import { PlatformMember } from '../platform/entities/platform-member.entity';
 import { CooperativeMember } from '../cooperatives/entities/cooperative-member.entity';
 import { TermsModule } from '../terms/terms.module';
+import { NOTIFICATION_QUEUE } from '../../queues/notifications/notification-queue.types';
 
 @Module({
   imports: [
@@ -24,6 +26,7 @@ import { TermsModule } from '../terms/terms.module';
     }),
     TypeOrmModule.forFeature([User, Client, PlatformMember, CooperativeMember]),
     TermsModule,
+    BullModule.registerQueue({ name: NOTIFICATION_QUEUE }),
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, JwtGuard, RolesGuard],

@@ -1,4 +1,5 @@
 import { Controller, Post, Get, Body, UseGuards } from '@nestjs/common';
+import { IsEmail, IsString, MinLength, Matches } from 'class-validator';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { JwtGuard } from './guards/jwt.guard';
@@ -10,6 +11,35 @@ import { EmailOtpRequestDto } from './dto/email-otp-request.dto';
 import { EmailOtpVerifyDto } from './dto/email-otp-verify.dto';
 import { RegisterClientDto } from './dto/register-client.dto';
 import { RefreshDto } from './dto/refresh.dto';
+
+class LoginPasswordDto {
+  @IsEmail() email: string;
+  @IsString() @MinLength(8) password: string;
+}
+
+class LoginPhoneDto {
+  @IsString() @Matches(/^\+\d{7,15}$/) phone: string;
+  @IsString() @MinLength(8) password: string;
+}
+
+class ForgotPasswordDto {
+  @IsEmail() email: string;
+}
+
+class ResendInviteDto {
+  @IsEmail() email: string;
+}
+
+class ResetPasswordDto {
+  @IsEmail() email: string;
+  @IsString() token: string;
+  @IsString()
+  @MinLength(8)
+  @Matches(/^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^()\-_=+])/, {
+    message: 'La contraseña debe tener al menos 1 mayúscula, 1 número y 1 carácter especial',
+  })
+  password: string;
+}
 
 @Controller('auth')
 export class AuthController {
@@ -39,11 +69,43 @@ export class AuthController {
     return this.authService.verifyEmailOtp(dto);
   }
 
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
+  @Post('login/password')
+  loginWithPassword(@Body() dto: LoginPasswordDto) {
+    return this.authService.loginWithPassword(dto.email, dto.password);
+  }
+
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
+  @Post('login/phone')
+  loginWithPhone(@Body() dto: LoginPhoneDto) {
+    return this.authService.loginWithPhone(dto.phone, dto.password);
+  }
+
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
+  @Post('password/forgot')
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  @Post('password/reset')
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.email, dto.token, dto.password);
+  }
+
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
+  @Post('resend-invite')
+  resendInvite(@Body() dto: ResendInviteDto) {
+    return this.authService.resendInvite(dto.email);
+  }
+
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
   @Post('register/client')
   registerClient(@Body() dto: RegisterClientDto) {
     return this.authService.registerClient(dto);
   }
 
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @Post('refresh')
   refresh(@Body() dto: RefreshDto) {
     return this.authService.refresh(dto.refresh_token);

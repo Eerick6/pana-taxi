@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "317694678604",
+    "project_id": "pana-taxi-71dde",
+    "storage_bucket": "pana-taxi-71dde.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:317694678604:android:5e1531fc76b4f0619d46e9",
+        "android_client_info": {
+          "package_name": "com.panataxista.driver"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB4cXGUvy7MfudDdI0_Vcnb18Kj5hSIUtk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

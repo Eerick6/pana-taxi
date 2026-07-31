@@ -75,9 +75,17 @@ export class AuditService {
       .take(limit);
 
     if (filters.actor_id) qb.andWhere('a.actor_id = :actorId', { actorId: filters.actor_id });
+    if (filters.actor_role) qb.andWhere('a.actor_role = :actorRole', { actorRole: filters.actor_role });
     if (filters.entity_type) qb.andWhere('a.entity_type = :et', { et: filters.entity_type });
     if (filters.entity_id) qb.andWhere('a.entity_id = :eid', { eid: filters.entity_id });
     if (filters.action) qb.andWhere('a.action LIKE :action', { action: `%${filters.action}%` });
+    if (filters.method) qb.andWhere('a.action LIKE :method', { method: `${filters.method} %` });
+    if (filters.status_class) {
+      qb.andWhere('a.status_code >= :scMin AND a.status_code < :scMax', {
+        scMin: filters.status_class * 100,
+        scMax: filters.status_class * 100 + 100,
+      });
+    }
     if (filters.from) qb.andWhere('a.created_at >= :from', { from: new Date(filters.from) });
     if (filters.to) {
       const to = new Date(filters.to);

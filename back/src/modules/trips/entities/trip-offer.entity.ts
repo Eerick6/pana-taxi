@@ -20,7 +20,7 @@ export class TripOffer {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => Trip, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Trip, (trip) => trip.offers, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'trip_id' })
   trip: Trip;
 

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { Stand } from '@/types';
 import { useCoop } from '@/context/CoopContext';
-import { getStands, deleteStand, createStand } from '../api';
+import { getStands, deleteStand, createStand, updateStand } from '../api';
 
 const EMPTY_FORM = { name: '', address: '', lat: '', lng: '', capacity: '20' };
 
@@ -109,12 +109,29 @@ export default function StandsList() {
                   <span>Lng: <strong className="text-gray-600 dark:text-gray-300">{Number(s.lng).toFixed(4)}</strong></span>
                 </div>
 
-                <button
-                  onClick={() => setDeleteId(s.id)}
-                  className="w-full py-1.5 text-xs font-medium rounded-lg border border-error-200 dark:border-error-800 text-error-600 dark:text-error-400 hover:bg-error-50 dark:hover:bg-error-500/10 transition-colors"
-                >
-                  Eliminar
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      setActionLoading(s.id);
+                      try { await updateStand(s.id, { is_active: !s.is_active }); await load(); }
+                      finally { setActionLoading(null); }
+                    }}
+                    disabled={actionLoading === s.id}
+                    className={`flex-1 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-50 ${
+                      s.is_active
+                        ? 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                        : 'border-success-200 dark:border-success-800 text-success-600 dark:text-success-400 hover:bg-success-50 dark:hover:bg-success-500/10'
+                    }`}
+                  >
+                    {actionLoading === s.id ? '...' : s.is_active ? 'Desactivar' : 'Activar'}
+                  </button>
+                  <button
+                    onClick={() => setDeleteId(s.id)}
+                    className="flex-1 py-1.5 text-xs font-medium rounded-lg border border-error-200 dark:border-error-800 text-error-600 dark:text-error-400 hover:bg-error-50 dark:hover:bg-error-500/10 transition-colors"
+                  >
+                    Eliminar
+                  </button>
+                </div>
               </div>
             ))}
       </div>

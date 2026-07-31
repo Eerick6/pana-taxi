@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Patch,
+  Delete,
   Param,
   Body,
   UseGuards,
@@ -11,7 +12,9 @@ import {
   ParseUUIDPipe,
   Query,
   ParseIntPipe,
+  ParseFloatPipe,
   DefaultValuePipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import { IsEnum } from 'class-validator';
 import { DriverOnlineStatus } from './entities/driver.entity';
@@ -22,6 +25,7 @@ import { UploadDriverDocumentDto } from './dto/upload-driver-document.dto';
 import { RejectDriverDto } from './dto/reject-driver.dto';
 import { RejectDocumentDto } from './dto/reject-document.dto';
 import { JoinCooperativeDto } from './dto/join-cooperative.dto';
+import { Throttle } from '@nestjs/throttler';
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -38,6 +42,7 @@ export class DriversController {
 
   // ── Self-registration (public) ────────────────────────────────────────────
 
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
   @Post('register')
   register(@Body() dto: RegisterDriverDto) {
     return this.driversService.register(dto);
@@ -57,6 +62,24 @@ export class DriversController {
   @Roles(UserRole.DRIVER)
   setStatus(@CurrentUser() user: User, @Body('status') status: DriverOnlineStatus) {
     return this.driversService.setOnlineStatus(user.id, status);
+  }
+
+  @Patch('me/request-review')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(UserRole.DRIVER)
+  requestReview(@CurrentUser() user: User) {
+    return this.driversService.requestReview(user.id);
+  }
+
+  @Patch('me/location')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(UserRole.DRIVER)
+  updateLocation(
+    @CurrentUser() user: User,
+    @Body('lat') lat: number,
+    @Body('lng') lng: number,
+  ) {
+    return this.driversService.updateLocation(user.id, lat, lng);
   }
 
   @Post('documents')
@@ -123,16 +146,32 @@ export class DriversController {
 
   // ── Platform staff: admin list ───────────────────────────────────────────
 
+  @Get('nearby')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(UserRole.CLIENT)
+  findNearby(
+    @Query('lat', ParseFloatPipe) lat: number,
+    @Query('lng', ParseFloatPipe) lng: number,
+    @Query('radius', new DefaultValuePipe(5), ParseFloatPipe) radius: number,
+  ) {
+    return this.driversService.findNearby(lat, lng, Math.min(radius, 20));
+  }
+
   @Get()
   @UseGuards(JwtGuard, RolesGuard)
   @Roles(...PLATFORM_ROLES, UserRole.COOPERATIVE_ADMIN, UserRole.COOPERATIVE_OPERATOR)
   listAll(
+    @CurrentUser() user: User,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
     @Query('approval_status') approvalStatus?: string,
     @Query('search') search?: string,
+    @Query('cooperative_id') cooperativeId?: string,
   ) {
-    return this.driversService.listAll(page, limit, approvalStatus, search);
+    // COOP roles solo ven conductores de su cooperativa — ignorar cooperative_id del query param
+    const isCoop = [UserRole.COOPERATIVE_ADMIN, UserRole.COOPERATIVE_OPERATOR].includes(user.role);
+    const effectiveCoopId = isCoop ? (user.cooperative_id ?? undefined) : cooperativeId;
+    return this.driversService.listAll(page, limit, approvalStatus, search, effectiveCoopId);
   }
 
   // ── Platform staff: reviews regular DRIVER type only ─────────────────────
@@ -163,15 +202,31 @@ export class DriversController {
 
   // ── Cooperative staff: reviews OWNER_DRIVER from their cooperative ────────
 
+  @Get('cooperative/members')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(...COOP_READ_ROLES)
+  listCooperativeMembers(
+    @CurrentUser() user: User,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('search') search?: string,
+    @Query('cooperative_id') queryCoopId?: string,
+  ) {
+    const coopId = this.resolveCoopId(user, queryCoopId);
+    return this.driversService.listCooperativeMembers(coopId, page, limit, search);
+  }
+
   @Get('cooperative/pending')
   @UseGuards(JwtGuard, RolesGuard)
   @Roles(...COOP_READ_ROLES)
   listCooperativePending(
-    @Query('cooperative_id', ParseUUIDPipe) cooperativeId: string,
+    @CurrentUser() user: User,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('cooperative_id') queryCoopId?: string,
   ) {
-    return this.driversService.listCooperativePending(cooperativeId, page, limit);
+    const coopId = this.resolveCoopId(user, queryCoopId);
+    return this.driversService.listCooperativePending(coopId, page, limit);
   }
 
   @Patch(':id/cooperative-approve')
@@ -179,9 +234,11 @@ export class DriversController {
   @Roles(...COOP_WRITE_ROLES)
   cooperativeApprove(
     @Param('id', ParseUUIDPipe) id: string,
-    @Query('cooperative_id', ParseUUIDPipe) cooperativeId: string,
+    @CurrentUser() user: User,
+    @Query('cooperative_id') queryCoopId?: string,
   ) {
-    return this.driversService.cooperativeApprove(id, cooperativeId);
+    const coopId = this.resolveCoopId(user, queryCoopId);
+    return this.driversService.cooperativeApprove(id, coopId);
   }
 
   @Patch(':id/cooperative-reject')
@@ -189,10 +246,30 @@ export class DriversController {
   @Roles(...COOP_WRITE_ROLES)
   cooperativeReject(
     @Param('id', ParseUUIDPipe) id: string,
-    @Query('cooperative_id', ParseUUIDPipe) cooperativeId: string,
+    @CurrentUser() user: User,
     @Body() dto: RejectDriverDto,
+    @Query('cooperative_id') queryCoopId?: string,
   ) {
-    return this.driversService.cooperativeReject(id, cooperativeId, dto);
+    const coopId = this.resolveCoopId(user, queryCoopId);
+    return this.driversService.cooperativeReject(id, coopId, dto);
+  }
+
+  // Devuelve cooperative_id validado según el rol:
+  // - COOP staff → siempre usa el del JWT (no confiar en query params)
+  // - OWNER → puede pasar cualquier cooperative_id por query param
+  private resolveCoopId(user: User, queryCoopId?: string): string {
+    const PURE_COOP_ROLES = [
+      UserRole.COOPERATIVE_ADMIN,
+      UserRole.COOPERATIVE_OPERATOR,
+      UserRole.COOPERATIVE_SUPERVISOR,
+    ];
+    if (PURE_COOP_ROLES.includes(user.role)) {
+      if (!user.cooperative_id) throw new ForbiddenException('No estás asociado a ninguna cooperativa');
+      return user.cooperative_id;
+    }
+    // OWNER: requiere pasar cooperative_id por query
+    if (!queryCoopId) throw new ForbiddenException('Se requiere cooperative_id para esta operación');
+    return queryCoopId;
   }
 
   // ── Document approval (platform for drivers / coop for owner_drivers) ─────
@@ -240,6 +317,13 @@ export class DriversController {
   @Roles(...PLATFORM_ROLES)
   unblockDriver(@Param('id', ParseUUIDPipe) id: string) {
     return this.driversService.unblockDriver(id);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(...PLATFORM_ROLES)
+  deleteDriver(@Param('id', ParseUUIDPipe) id: string) {
+    return this.driversService.deleteDriver(id);
   }
 
   @Get(':id')

@@ -2,7 +2,7 @@ import { IsString, Matches, Length } from 'class-validator';
 
 export class OtpVerifyDto {
   @IsString()
-  @Matches(/^09\d{8}$/, { message: 'Teléfono inválido. Formato: 09XXXXXXXX' })
+  @Matches(/^\+\d{7,15}$/, { message: 'Teléfono inválido. Formato internacional: +593XXXXXXXXX' })
   phone: string;
 
   @IsString()

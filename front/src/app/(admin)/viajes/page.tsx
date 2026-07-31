@@ -10,7 +10,7 @@ export default function Page() {
         <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Viajes</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Historial y seguimiento de todos los viajes</p>
       </div>
-      <TripsList />
+      <TripsList canCancel />
     </div>
   );
 }

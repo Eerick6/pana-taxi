@@ -1,10 +1,14 @@
-import { IsOptional, IsString, IsDateString, IsInt, Min, Max, IsUUID } from 'class-validator';
+import { IsOptional, IsString, IsDateString, IsInt, Min, Max, IsUUID, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryAuditDto {
   @IsOptional()
   @IsUUID()
   actor_id?: string;
+
+  @IsOptional()
+  @IsString()
+  actor_role?: string;
 
   @IsOptional()
   @IsString()
@@ -17,6 +21,16 @@ export class QueryAuditDto {
   @IsOptional()
   @IsString()
   action?: string;
+
+  @IsOptional()
+  @IsIn(['GET', 'POST', 'PATCH', 'PUT', 'DELETE'])
+  method?: string;
+
+  /** 2 = 2xx, 4 = 4xx, 5 = 5xx */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  status_class?: number;
 
   @IsOptional()
   @IsDateString()

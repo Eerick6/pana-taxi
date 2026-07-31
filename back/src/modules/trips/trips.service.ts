@@ -30,6 +30,7 @@ import { Stand } from '../stands/entities/stand.entity';
 import { StandAssignment } from '../stands/entities/stand-assignment.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AccountingService } from '../accounting/accounting.service';
+import { Client } from '../clients/entities/client.entity';
 
 const DEFAULT_COMMISSION_RATE_PCT = 10;
 
@@ -68,6 +69,8 @@ export class TripsService {
     private standsRepo: Repository<Stand>,
     @InjectRepository(StandAssignment)
     private standAssignmentsRepo: Repository<StandAssignment>,
+    @InjectRepository(Client)
+    private clientsRepo: Repository<Client>,
     private notificationsService: NotificationsService,
     private accountingService: AccountingService,
   ) {}
@@ -78,6 +81,17 @@ export class TripsService {
     const fareMode = dto.fare_mode ?? FareMode.METER;
 
     if (user.role === UserRole.CLIENT) {
+      // Bloquear si el cliente ya tiene un viaje activo o pendiente
+      const existing = await this.tripsRepo.findOne({
+        where: {
+          client: { id: user.id },
+          status: In([TripStatus.REQUESTED, TripStatus.ACCEPTED, TripStatus.DRIVER_ARRIVED, TripStatus.IN_PROGRESS]),
+        },
+      });
+      if (existing) {
+        throw new ConflictException('Ya tienes un viaje activo. Cancela el viaje actual para crear uno nuevo.');
+      }
+
       const rate = await this.resolveCommissionRate(null);
       const estimate = await this.fareService.estimateFare(
         dto.origin_lat, dto.origin_lng,
@@ -117,17 +131,51 @@ export class TripsService {
         }),
       );
 
+      // Cargar info del cliente para el overlay del taxista
+      const clientProfile = await this.clientsRepo.findOne({ where: { user: { id: user.id } } });
+
       this.gateway.notifyNewTrip({
         trip_id: trip.id,
         origin_address: trip.origin_address,
         destination_address: trip.destination_address,
+        origin_lat: parseFloat(trip.origin_lat as any),
+        origin_lng: parseFloat(trip.origin_lng as any),
+        search_radius_km: parseFloat(fareConfig.search_radius_km as any),
         suggested_fare: estimate.total,
         fare_mode: fareMode,
-        client_offer: trip.client_offer,
+        client_offer: trip.client_offer ? parseFloat(trip.client_offer as any) : null,
         distance_km: estimate.distance_km,
         duration_min: estimate.duration_min,
         is_night_rate: estimate.is_night_rate,
+        client_name: clientProfile?.full_name ?? (user as any).full_name ?? null,
+        client_rating: clientProfile ? parseFloat(clientProfile.rating as any) : null,
+        client_total_trips: clientProfile?.total_trips ?? 0,
       });
+
+      // FCM a conductores online — necesario cuando el app está en background o cerrada
+      // (el socket solo llega si el app está en primer plano)
+      this.driversRepo
+        .find({
+          where: { online_status: DriverOnlineStatus.ONLINE, approval_status: DriverApprovalStatus.APPROVED },
+          relations: ['user'],
+          select: { id: true, user: { id: true, fcm_token: true } as any },
+        })
+        .then(onlineDrivers => {
+          const userIds = onlineDrivers
+            .filter(d => d.user?.fcm_token)
+            .map(d => d.user.id);
+          if (userIds.length === 0) return;
+          const fareLabel = fareMode === 'negotiated'
+            ? `Oferta: $${(trip.client_offer ? parseFloat(trip.client_offer as any) : estimate.total).toFixed(2)}`
+            : `Est. $${estimate.total.toFixed(2)}`;
+          this.notificationsService.sendToUsers(userIds, {
+            title: '¡Nuevo viaje disponible!',
+            body: `${trip.origin_address} → ${trip.destination_address} · ${fareLabel}`,
+            data: { type: 'trip_new', trip_id: trip.id, event: 'trip.new' },
+          });
+        })
+        .catch(() => {});
+
       return trip;
     }
 
@@ -220,7 +268,7 @@ export class TripsService {
 
       if (firstInQueue?.driver?.user) {
         // Aviso personal al primero de la cola
-        this.gateway.notifyDriver(firstInQueue.driver.user.id, 'trip.new', {
+        this.gateway.notifyDriver(firstInQueue.driver.id, 'trip.new', {
           ...tripPayload,
           stand_dispatch: true,
           message: 'Nuevo viaje desde tu parada. ¡Te toca!',
@@ -291,7 +339,20 @@ export class TripsService {
       .orderBy('trip.created_at', 'ASC')
       .getMany();
 
-    if (driver.current_lat && driver.current_lng) {
+    // Prefer real-time location from Redis; fall back to DB column
+    const redisLoc = await this.driversService.getDriverLocationFromRedis(driver.id);
+    const driverLat = redisLoc
+      ? redisLoc.lat
+      : driver.current_lat
+        ? parseFloat(driver.current_lat as any)
+        : null;
+    const driverLng = redisLoc
+      ? redisLoc.lng
+      : driver.current_lng
+        ? parseFloat(driver.current_lng as any)
+        : null;
+
+    if (driverLat != null && driverLng != null) {
       const fareConfig = await this.fareService.getConfig();
       const defaultRadius = parseFloat(fareConfig.search_radius_km as any);
 
@@ -302,8 +363,8 @@ export class TripsService {
             : defaultRadius;
 
         const dist = this.fareService.haversineDistance(
-          parseFloat(driver.current_lat as any),
-          parseFloat(driver.current_lng as any),
+          driverLat,
+          driverLng,
           parseFloat(trip.origin_lat as any),
           parseFloat(trip.origin_lng as any),
         );
@@ -398,8 +459,10 @@ export class TripsService {
       if (trip.cooperative) {
         this.gateway.notifyCoop(trip.cooperative.id, 'trip.accepted', basePayload);
       }
-      this.gateway.notifyDriver(driver.user.id, 'trip.accepted', basePayload);
+      this.gateway.notifyDriver(driver.id, 'trip.accepted', basePayload);
       this.gateway.notifyTripUpdate(tripId, 'trip.accepted', basePayload);
+      // Notificar a todos los conductores disponibles para que descarten el overlay
+      this.gateway.notifyAvailableDrivers('trip.taken', { trip_id: tripId });
 
       return { message: 'Viaje aceptado. Dirígete al punto de recogida.', trip_id: tripId };
     });
@@ -449,19 +512,26 @@ export class TripsService {
       }
     }
 
+    // Verificar límite de 3 ofertas por conductor por viaje
+    const totalOffersCount = await this.tripOffersRepo.count({
+      where: { trip_id: tripId, driver_id: driver.id },
+    });
+    if (totalOffersCount >= 3) {
+      throw new BadRequestException('Has alcanzado el límite de 3 ofertas para este viaje');
+    }
+
     const offerAmount = dto.amount ?? clientPrice;
     const vehicle = await this.findDriverVehicle(driver.id, trip);
 
-    // ETA del conductor al punto de recogida
+    // ETA del conductor al punto de recogida — Haversine / 30 km/h promedio urbano
+    // No llamamos a Mapbox aquí: N taxistas haciendo oferta = N llamadas innecesarias
     let eta_pickup_min: number | null = null;
     if (driver.current_lat && driver.current_lng) {
-      try {
-        const eta = await this.fareService.getRouteInfo(
-          parseFloat(driver.current_lat as any), parseFloat(driver.current_lng as any),
-          parseFloat(trip.origin_lat as any), parseFloat(trip.origin_lng as any),
-        );
-        eta_pickup_min = eta.duration_min;
-      } catch { /* sin ETA si falla Mapbox */ }
+      const distKm = this.fareService.haversineDistance(
+        parseFloat(driver.current_lat as any), parseFloat(driver.current_lng as any),
+        parseFloat(trip.origin_lat as any), parseFloat(trip.origin_lng as any),
+      );
+      eta_pickup_min = Math.ceil((distKm / 30) * 60);
     }
 
     // Actualizar oferta existente o crear nueva
@@ -490,14 +560,36 @@ export class TripsService {
       offerId = offer.id;
     }
 
-    // Notificar al cliente
+    // Calcular distancia en km al origen
+    let distanceToOriginKm: number | null = null;
+    if (driver.current_lat && driver.current_lng) {
+      distanceToOriginKm = +this.fareService.haversineDistance(
+        parseFloat(driver.current_lat as any), parseFloat(driver.current_lng as any),
+        parseFloat(trip.origin_lat as any), parseFloat(trip.origin_lng as any),
+      ).toFixed(2);
+    }
+
+    // Notificar al cliente con info completa del taxista
     if (trip.client) {
-      this.gateway.notifyUser(trip.client.id, 'trip.new_offer', {
-        trip_id: tripId,
-        offer_id: offerId,
-        driver_id: driver.id,
-        amount: offerAmount,
+      const offerPayload = {
+        trip_id:        tripId,
+        offer_id:       offerId,
+        driver_id:      driver.id,
+        driver_name:    driver.full_name ?? null,
+        driver_photo:   driver.profile_photo_url ?? null,
+        driver_rating:  (driver as any).rating ? parseFloat((driver as any).rating) : null,
+        vehicle_plate:  vehicle ? (vehicle as any).plate : null,
+        vehicle_model:  vehicle ? `${(vehicle as any).brand ?? ''} ${(vehicle as any).model ?? ''}`.trim() : null,
+        amount:         offerAmount,
+        is_counter:     dto.amount != null,
         eta_pickup_min,
+        distance_to_origin_km: distanceToOriginKm,
+      };
+      this.gateway.notifyUser(trip.client.id, 'trip.new_offer', offerPayload);
+      this.notificationsService.sendToUser(trip.client.id, {
+        title: `🚖 ${driver.full_name ?? 'Un taxista'} quiere llevarte`,
+        body: `$${(offerAmount as number).toFixed(2)} · ${eta_pickup_min != null ? `${eta_pickup_min} min de distancia` : 'cerca de ti'}`,
+        data: { trip_id: tripId, event: 'trip.new_offer' },
       });
     }
 
@@ -507,6 +599,41 @@ export class TripsService {
       amount: offerAmount,
       eta_pickup_min,
     };
+  }
+
+  // ── Cliente rechaza oferta de un conductor (flujo InDrive re-oferta) ─────────
+
+  async rejectOffer(tripId: string, offerId: string, userId: string) {
+    const trip = await this.tripsRepo.findOne({ where: { id: tripId, client: { id: userId } } });
+    if (!trip) throw new NotFoundException('Viaje no encontrado');
+
+    const offer = await this.tripOffersRepo.findOne({
+      where: { id: offerId, trip_id: tripId, status: OfferStatus.PENDING },
+      relations: ['driver', 'driver.user'],
+    });
+    if (!offer) throw new NotFoundException('Oferta no encontrada o ya procesada');
+
+    await this.tripOffersRepo.update(offerId, { status: OfferStatus.REJECTED });
+
+    // Contar cuántas ofertas (de cualquier estado) ha hecho este conductor en este viaje
+    const offerCount = await this.tripOffersRepo.count({
+      where: { trip_id: tripId, driver_id: offer.driver_id },
+    });
+
+    const canReOffer = offerCount < 3;
+
+    // Notificar al conductor: puede re-ofertar o ya alcanzó el límite
+    if (offer.driver?.user) {
+      this.gateway.notifyDriver(offer.driver.id, 'trip.offer_ignored', {
+        trip_id:       tripId,
+        offer_id:      offerId,
+        can_re_offer:  canReOffer,
+        offers_made:   offerCount,
+        max_offers:    3,
+      });
+    }
+
+    return { ok: true, can_re_offer: canReOffer };
   }
 
   // ── Listar ofertas del viaje (cliente) ───────────────────────────────────────
@@ -525,19 +652,35 @@ export class TripsService {
 
     const clientPrice = parseFloat(trip.client_offer as any) ?? parseFloat(trip.suggested_fare as any);
 
-    return offers.map((o) => ({
-      offer_id: o.id,
-      driver: {
-        id: o.driver.id,
-        name: (o.driver as any).full_name ?? null,
-      },
-      vehicle: o.vehicle
-        ? { plate: (o.vehicle as any).plate, model: (o.vehicle as any).model }
-        : null,
-      amount: o.amount != null ? parseFloat(o.amount as any) : clientPrice,
-      eta_pickup_min: o.eta_pickup_min,
-      created_at: o.created_at,
-    }));
+    const originLat = parseFloat(trip.origin_lat as any);
+    const originLng = parseFloat(trip.origin_lng as any);
+
+    return offers.map((o) => {
+      const driverLat = (o.driver as any).current_lat;
+      const driverLng = (o.driver as any).current_lng;
+      const distanceKm =
+        driverLat != null && driverLng != null && !isNaN(originLat) && !isNaN(originLng)
+          ? this.fareService.haversineDistance(originLat, originLng, parseFloat(driverLat), parseFloat(driverLng))
+          : null;
+
+      return {
+        offer_id: o.id,
+        driver: {
+          id:     o.driver.id,
+          name:   (o.driver as any).full_name         ?? null,
+          photo:  (o.driver as any).profile_photo_url ?? null,
+          rating: (o.driver as any).rating ? parseFloat((o.driver as any).rating) : null,
+        },
+        vehicle: o.vehicle
+          ? { plate: (o.vehicle as any).plate, model: (o.vehicle as any).model }
+          : null,
+        amount:              o.amount != null ? parseFloat(o.amount as any) : clientPrice,
+        is_counter:          o.amount != null && parseFloat(o.amount as any) !== clientPrice,
+        eta_pickup_min:      o.eta_pickup_min,
+        distance_to_origin_km: distanceKm,
+        created_at:          o.created_at,
+      };
+    });
   }
 
   // ── Cliente selecciona una oferta ────────────────────────────────────────────
@@ -632,7 +775,7 @@ export class TripsService {
       const fareConfig = await this.fareService.getConfig();
 
       // Notificar al conductor seleccionado
-      this.gateway.notifyDriver(selectedOffer.driver.user.id, 'trip.offer_accepted', {
+      this.gateway.notifyDriver(selectedOffer.driver.id, 'trip.offer_accepted', {
         trip_id: tripId,
         agreed_fare: agreedFare,
         location_update_interval_sec: fareConfig.location_interval_trip_sec,
@@ -649,7 +792,7 @@ export class TripsService {
 
       for (const ro of rejectedOffers) {
         if (ro.driver?.user) {
-          this.gateway.notifyDriver(ro.driver.user.id, 'trip.offer_rejected', { trip_id: tripId });
+          this.gateway.notifyDriver(ro.driver.id, 'trip.offer_rejected', { trip_id: tripId });
         }
       }
 
@@ -676,6 +819,7 @@ export class TripsService {
   async incrementOffer(tripId: string, userId: string) {
     const trip = await this.tripsRepo.findOne({
       where: { id: tripId, client: { id: userId } },
+      relations: ['client'],
     });
     if (!trip) throw new NotFoundException('Viaje no encontrado');
     if (trip.fare_mode !== FareMode.NEGOTIATED) {
@@ -697,8 +841,77 @@ export class TripsService {
 
     await this.tripsRepo.update(tripId, { client_offer: newOffer as any });
 
-    // Notificar a conductores disponibles que la oferta subió
-    this.gateway.notifyNewTrip({ trip_id: tripId, client_offer: newOffer, event: 'offer_updated' });
+    const clientProfile = await this.clientsRepo.findOne({ where: { user: { id: userId } } });
+    this.gateway.notifyAvailableDrivers('trip.price_updated', {
+      trip_id:             tripId,
+      new_price:           newOffer,
+      client_offer:        newOffer,
+      origin_address:      trip.origin_address,
+      destination_address: trip.destination_address,
+      origin_lat:          parseFloat(trip.origin_lat as any),
+      origin_lng:          parseFloat(trip.origin_lng as any),
+      search_radius_km:    parseFloat(trip.current_search_radius_km as any),
+      suggested_fare:      parseFloat(trip.suggested_fare as any),
+      fare_mode:           trip.fare_mode,
+      distance_km:         parseFloat(trip.estimated_distance_km as any),
+      client_name:         clientProfile?.full_name ?? (trip.client as any)?.full_name ?? null,
+      client_rating:       clientProfile ? parseFloat(clientProfile.rating as any) : null,
+      client_total_trips:  clientProfile?.total_trips ?? 0,
+    });
+
+    return { message: `Oferta actualizada a $${newOffer}`, client_offer: newOffer };
+  }
+
+  async decrementOffer(tripId: string, userId: string) {
+    const trip = await this.tripsRepo.findOne({
+      where: { id: tripId, client: { id: userId } },
+      relations: ['client'],
+    });
+    if (!trip) throw new NotFoundException('Viaje no encontrado');
+    if (trip.fare_mode !== FareMode.NEGOTIATED)
+      throw new BadRequestException('Solo aplica a viajes de precio fijo');
+    if (trip.status !== TripStatus.REQUESTED)
+      throw new BadRequestException('No se puede modificar la oferta en este estado');
+
+    const pendingCount = await this.tripOffersRepo.count({
+      where: { trip_id: tripId, status: OfferStatus.PENDING },
+    });
+    if (pendingCount > 0)
+      throw new BadRequestException('Tienes ofertas pendientes. Selecciona una.');
+
+    const currentOffer  = parseFloat(trip.client_offer as any);
+    const suggestedFare = parseFloat(trip.suggested_fare as any);
+
+    const fareConfig   = await this.fareService.getConfig();
+    const discountPct  = parseFloat(fareConfig.max_negotiation_discount_pct as any);
+    const rawMin       = suggestedFare * (1 - discountPct / 100);
+    const roundedMin   = Math.ceil(rawMin / 0.05) * 0.05;
+    const minimumFare  = +Math.max(roundedMin, 1.50).toFixed(2);
+
+    const newOffer = +(currentOffer - 0.25).toFixed(2);
+
+    if (newOffer < minimumFare)
+      throw new BadRequestException(`La oferta mínima es $${minimumFare.toFixed(2)}`);
+
+    await this.tripsRepo.update(tripId, { client_offer: newOffer as any });
+
+    const clientProfileDecr = await this.clientsRepo.findOne({ where: { user: { id: userId } } });
+    this.gateway.notifyAvailableDrivers('trip.price_updated', {
+      trip_id:             tripId,
+      new_price:           newOffer,
+      client_offer:        newOffer,
+      origin_address:      trip.origin_address,
+      destination_address: trip.destination_address,
+      origin_lat:          parseFloat(trip.origin_lat as any),
+      origin_lng:          parseFloat(trip.origin_lng as any),
+      search_radius_km:    parseFloat(trip.current_search_radius_km as any),
+      suggested_fare:      parseFloat(trip.suggested_fare as any),
+      fare_mode:           trip.fare_mode,
+      distance_km:         parseFloat(trip.estimated_distance_km as any),
+      client_name:         clientProfileDecr?.full_name ?? (trip.client as any)?.full_name ?? null,
+      client_rating:       clientProfileDecr ? parseFloat(clientProfileDecr.rating as any) : null,
+      client_total_trips:  clientProfileDecr?.total_trips ?? 0,
+    });
 
     return { message: `Oferta actualizada a $${newOffer}`, client_offer: newOffer };
   }
@@ -735,8 +948,8 @@ export class TripsService {
       });
       this.notificationsService.sendToUser(trip.client.id, {
         title: '¡Tu taxi llegó!',
-        body: `Tu conductor está esperando. Tienes 5 minutos. Código: ${trip.otp_code}`,
-        data: { trip_id: tripId, event: 'trip.driver_arrived', otp_code: trip.otp_code ?? '' },
+        body: 'Tu conductor está esperando. Tienes 5 minutos. Abre la app para ver el código.',
+        data: { trip_id: tripId, event: 'trip.driver_arrived' },
       });
     }
 
@@ -769,7 +982,7 @@ export class TripsService {
     await this.tripsRepo.update(tripId, { client_confirmed_at: new Date() });
 
     if (trip.driver?.user) {
-      this.gateway.notifyDriver(trip.driver.user.id, 'trip.client_ready', {
+      this.gateway.notifyDriver(trip.driver.id, 'trip.client_ready', {
         trip_id: tripId,
         confirmed_at: new Date().toISOString(),
       });
@@ -788,13 +1001,9 @@ export class TripsService {
       throw new BadRequestException('El viaje debe estar aceptado para iniciarse');
     }
 
-    // Verificación OTP — en dev, '000000' bypasa la verificación
-    if (trip.otp_code) {
-      const isDev = process.env.NODE_ENV !== 'production';
-      const isBypass = isDev && dto.otp_code === '000000';
-      if (!isBypass && trip.otp_code !== dto.otp_code) {
-        throw new BadRequestException('Código OTP incorrecto. Pide al pasajero su código.');
-      }
+    const otpBypass = process.env.NODE_ENV === 'development' && dto.otp_code === '000000';
+    if (trip.otp_code && !otpBypass && trip.otp_code !== dto.otp_code) {
+      throw new BadRequestException('Código OTP incorrecto. Pide al pasajero su código.');
     }
 
     const fareConfig = await this.fareService.getConfig();
@@ -886,6 +1095,11 @@ export class TripsService {
     });
     if (!trip) throw new NotFoundException('Viaje no encontrado');
 
+    if (user.role === UserRole.CLIENT && trip.client?.id !== user.id)
+      throw new ForbiddenException('No eres el cliente de este viaje');
+    if (user.role === UserRole.DRIVER && trip.driver?.user?.id !== user.id)
+      throw new ForbiddenException('No eres el conductor de este viaje');
+
     if ([TripStatus.COMPLETED, TripStatus.CANCELLED].includes(trip.status)) {
       throw new BadRequestException('El viaje ya está finalizado');
     }
@@ -921,13 +1135,11 @@ export class TripsService {
       }
     });
 
-    const fleetConfig = await this.fareService.getConfig();
     this.gateway.notifyTripUpdate(tripId, 'trip.cancelled', {
       trip_id: tripId,
       status: TripStatus.CANCELLED,
       cancelled_by: cancelledBy,
       reason: dto.reason,
-      location_update_interval_sec: fleetConfig.location_interval_fleet_sec,
     });
 
     return { message: 'Viaje cancelado' };
@@ -936,18 +1148,44 @@ export class TripsService {
   // ── Historial ────────────────────────────────────────────────────────────────
 
   async getMyTripsAsClient(userId: string, page = 1, limit = 20) {
-    const [items, total] = await this.tripsRepo.findAndCount({
+    const [rawItems, total] = await this.tripsRepo.findAndCount({
       where: { client: { id: userId } },
       relations: ['driver', 'vehicle'],
       order: { created_at: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });
+    const pf = (v: any) => (v != null ? parseFloat(v) : null);
+    const items = rawItems.map((t) => ({
+      id: t.id,
+      status: t.status,
+      fare_mode: t.fare_mode,
+      source: t.source,
+      origin_address: t.origin_address,
+      origin_lat: pf(t.origin_lat),
+      origin_lng: pf(t.origin_lng),
+      destination_address: t.destination_address,
+      estimated_distance_km: pf(t.estimated_distance_km),
+      estimated_duration_min: t.estimated_duration_min ?? null,
+      suggested_fare: pf(t.suggested_fare),
+      client_offer: pf(t.client_offer),
+      fare_amount: pf(t.fare_amount),
+      payment_status: t.payment_status,
+      cancelled_by: t.cancelled_by ?? null,
+      cancellation_reason: t.cancellation_reason ?? null,
+      driver: t.driver
+        ? { id: (t.driver as any).id, full_name: (t.driver as any).full_name ?? null }
+        : null,
+      vehicle: t.vehicle
+        ? { plate: (t.vehicle as any).plate ?? null, model: (t.vehicle as any).model ?? null }
+        : null,
+      created_at: t.created_at,
+    }));
     return { items, total, page, limit };
   }
 
   async getActiveTrip(userId: string) {
-    return this.tripsRepo.findOne({
+    const trip = await this.tripsRepo.findOne({
       where: {
         client: { id: userId },
         status: In([
@@ -957,9 +1195,20 @@ export class TripsService {
           TripStatus.IN_PROGRESS,
         ]),
       },
-      relations: ['driver', 'vehicle'],
+      relations: ['driver', 'vehicle', 'offers'],
     });
-    // otp_code se incluye — cliente necesita verlo para dárselo al conductor
+    if (!trip) return null;
+
+    const pendingOffer = trip.offers
+      ?.filter(o => o.status === OfferStatus.PENDING)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+
+    // Excluir `offers` del spread — cada offer tiene `trip` de vuelta (referencia circular)
+    const { offers: _offers, ...tripData } = trip as any;
+    return {
+      ...tripData,
+      pending_offer_amount: pendingOffer ? parseFloat(pendingOffer.amount as any) : null,
+    };
   }
 
   async getMyTripsAsDriver(userId: string, page = 1, limit = 20) {
@@ -989,15 +1238,32 @@ export class TripsService {
     return safe;
   }
 
-  async listTrips(status?: TripStatus, page = 1, limit = 20) {
-    const where = status ? { status } : {};
-    const [items, total] = await this.tripsRepo.findAndCount({
-      where,
-      relations: ['client', 'driver', 'vehicle', 'cooperative'],
-      order: { created_at: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+  async listTrips(user: User, status?: TripStatus, page = 1, limit = 20) {
+    const COOP_ROLES_LOCAL = [
+      UserRole.COOPERATIVE_ADMIN,
+      UserRole.COOPERATIVE_OPERATOR,
+      UserRole.COOPERATIVE_SUPERVISOR,
+    ];
+
+    const qb = this.tripsRepo
+      .createQueryBuilder('trip')
+      .leftJoinAndSelect('trip.client', 'client')
+      .leftJoinAndSelect('trip.driver', 'driver')
+      .leftJoinAndSelect('trip.vehicle', 'vehicle')
+      .leftJoinAndSelect('trip.cooperative', 'cooperative')
+      .orderBy('trip.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (status) qb.andWhere('trip.status = :status', { status });
+
+    if (COOP_ROLES_LOCAL.includes(user.role)) {
+      // Fuerza filtro por la cooperativa del JWT — nunca confiar en query params
+      if (!user.cooperative_id) throw new ForbiddenException('No estás asociado a ninguna cooperativa');
+      qb.andWhere('trip.cooperative_id = :coopId', { coopId: user.cooperative_id });
+    }
+
+    const [items, total] = await qb.getManyAndCount();
     return { items, total, page, limit };
   }
 

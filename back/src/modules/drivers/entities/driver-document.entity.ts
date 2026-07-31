@@ -2,11 +2,21 @@ import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDa
 import { Driver } from './driver.entity';
 
 export enum DriverDocumentType {
-  CEDULA = 'cedula',
-  LICENSE = 'license',
-  BACKGROUND_CHECK = 'background_check',
+  CEDULA_FRONT = 'cedula_front',           // Cédula lado frontal
+  CEDULA_BACK = 'cedula_back',             // Cédula lado posterior
+  LICENSE_FRONT = 'license_front',         // Licencia lado frontal
+  LICENSE_BACK = 'license_back',           // Licencia lado posterior
+  BACKGROUND_CHECK = 'background_check',   // Record policial — 15 días de gracia
   PROFILE_PHOTO = 'profile_photo',
 }
+
+// Documentos obligatorios para aprobar al conductor (cédula + licencia)
+export const REQUIRED_DOCS = [
+  DriverDocumentType.CEDULA_FRONT,
+  DriverDocumentType.CEDULA_BACK,
+  DriverDocumentType.LICENSE_FRONT,
+  DriverDocumentType.LICENSE_BACK,
+];
 
 export enum DocumentStatus {
   PENDING = 'pending',

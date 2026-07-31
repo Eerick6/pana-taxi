@@ -1,20 +1,55 @@
 "use client";
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 import { relativeTime } from "@/lib/format";
 import type { AppNotification } from "@/types";
 
+function playNotificationSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.35);
+  } catch { /* browser blocked autoplay — silent */ }
+}
+
+function notifActionUrl(n: AppNotification): string | null {
+  if (n.type === 'wallet') return '/contabilidad?tab=recharges';
+  if (n.type === 'sos') return '/sos';
+  return null;
+}
+
 export default function NotificationDropdown() {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const prevUnread = useRef(0);
+  const firstLoad = useRef(true);
 
   const fetchUnreadCount = useCallback(async () => {
     try {
       const { data } = await api.get('/notifications/me/unread-count');
-      setUnread(data.count ?? 0);
+      const count: number = data.count ?? 0;
+      setUnread((prev) => {
+        if (!firstLoad.current && count > prev) {
+          playNotificationSound();
+        }
+        firstLoad.current = false;
+        prevUnread.current = count;
+        return count;
+      });
     } catch { /* silent */ }
   }, []);
 
@@ -28,7 +63,7 @@ export default function NotificationDropdown() {
 
   useEffect(() => {
     fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 30000);
+    const interval = setInterval(fetchUnreadCount, 20000);
     return () => clearInterval(interval);
   }, [fetchUnreadCount]);
 
@@ -48,17 +83,29 @@ export default function NotificationDropdown() {
     try {
       await api.patch('/notifications/read-all');
       setUnread(0);
+      prevUnread.current = 0;
       setNotifications((prev) => prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })));
     } catch { /* silent */ }
   };
 
-  const markRead = async (id: string) => {
+  const markRead = async (notif: AppNotification) => {
     try {
-      await api.patch(`/notifications/${id}/read`);
-      setNotifications((prev) =>
-        prev.map((n) => n.id === id ? { ...n, read_at: n.read_at ?? new Date().toISOString() } : n)
-      );
-      setUnread((v) => Math.max(0, v - 1));
+      if (!notif.read_at) {
+        await api.patch(`/notifications/${notif.id}/read`);
+        setNotifications((prev) =>
+          prev.map((n) => n.id === notif.id ? { ...n, read_at: new Date().toISOString() } : n)
+        );
+        setUnread((v) => {
+          const next = Math.max(0, v - 1);
+          prevUnread.current = next;
+          return next;
+        });
+      }
+      const url = notifActionUrl(notif);
+      if (url) {
+        setIsOpen(false);
+        router.push(url);
+      }
     } catch { /* silent */ }
   };
 
@@ -70,7 +117,7 @@ export default function NotificationDropdown() {
         aria-label="Notificaciones"
       >
         {unread > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 z-10 flex h-4 min-w-4 items-center justify-center rounded-full bg-error-500 px-1 text-[10px] font-bold text-white">
+          <span className="absolute -right-0.5 -top-0.5 z-10 flex h-4 min-w-4 items-center justify-center rounded-full bg-error-500 px-1 text-[10px] font-bold text-white animate-pulse">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
@@ -117,7 +164,7 @@ export default function NotificationDropdown() {
               notifications.map((n) => (
                 <button
                   key={n.id}
-                  onClick={() => markRead(n.id)}
+                  onClick={() => markRead(n)}
                   className={`w-full flex items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 ${!n.read_at ? 'bg-brand-50/40 dark:bg-brand-500/5' : ''}`}
                 >
                   <span className={`flex-shrink-0 w-2 h-2 rounded-full mt-2 ${!n.read_at ? 'bg-brand-500' : 'bg-gray-200 dark:bg-gray-700'}`} />

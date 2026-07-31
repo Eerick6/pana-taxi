@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToOne, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, Index, OneToOne, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Vehicle } from '../../vehicles/entities/vehicle.entity';
 
@@ -21,6 +21,8 @@ export enum DriverApprovalStatus {
 }
 
 @Entity('drivers')
+@Index('IDX_drivers_approval_online', ['approval_status', 'online_status'])
+@Index('IDX_drivers_online_status', ['online_status'])
 export class Driver {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -66,6 +68,9 @@ export class Driver {
 
   @Column({ nullable: true })
   last_seen_at: Date;
+
+  @Column({ nullable: true })
+  review_requested_at: Date;
 
   @CreateDateColumn()
   created_at: Date;
