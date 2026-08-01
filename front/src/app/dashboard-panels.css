@@ -1,3 +1,5 @@
+@reference "tailwindcss";
+
 /* Third-party library overrides — only loaded in admin/coop panels */
 
 .apexcharts-legend-text {
