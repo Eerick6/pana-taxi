@@ -1,0 +1,15 @@
+# Pana Taxi
+
+Pana Taxi es una plataforma SaaS para cooperativas de taxi en Ecuador. Permite a las cooperativas gestionar conductores, vehículos, viajes y clientes desde un panel web, con aplicaciones móviles para conductores y pasajeros.
+
+## Secciones principales
+
+- [Inicio](/) — Landing page pública con información del servicio y registro de cooperativas
+- [Registro de cooperativa](/registro) — Formulario para que nuevas cooperativas soliciten unirse a la plataforma
+- [Contacto](/contacto) — Formulario de contacto para soporte
+
+## Información
+
+- Servicio disponible en Ecuador, Colombia, Perú, Chile, México, Argentina, Venezuela y Estados Unidos
+- Panel administrativo para cooperativas en [pana-taxi.winpanther.live](https://pana-taxi.winpanther.live)
+- Soporte: panataxi@winpanther.live
