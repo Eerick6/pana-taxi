@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "@/context/SidebarContext";
 import { useAuth } from "@/context/AuthContext";
+import { getCooperativa } from "@/features/cooperativas/api";
 
 const ROLE_LABEL: Record<string, string> = {
   cooperative_admin:      'Administrador',
@@ -20,13 +21,21 @@ const NAV: NavItem[] = [
   { name: 'Socios', icon: '👤', path: '/coop/conductores' },
   { name: 'Vehículos',   icon: '🚖', path: '/coop/vehiculos' },
   { name: 'Viajes',      icon: '🗺️', path: '/coop/viajes' },
-  { name: 'Staff',       icon: '🧑‍💼', path: '/coop/staff', roles: ['cooperative_admin'] },
+  { name: 'Staff',       icon: '🧑‍💼', path: '/coop/staff',          roles: ['cooperative_admin'] },
+  { name: 'Configuración', icon: '⚙️', path: '/coop/configuracion', roles: ['cooperative_admin'] },
 ];
 
 export default function CoopSidebar() {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const { user } = useAuth();
   const pathname = usePathname();
+  const [coopName, setCoopName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user?.cooperative_id) {
+      getCooperativa(user.cooperative_id).then((c) => setCoopName(c.name)).catch(() => {});
+    }
+  }, [user?.cooperative_id]);
 
   const isActive = useCallback((path: string) => {
     if (path === '/coop') return pathname === '/coop';
@@ -65,7 +74,7 @@ export default function CoopSidebar() {
         {expanded && user?.cooperative_id && (
           <div className="mb-4 px-3 py-2 rounded-xl bg-brand-50 dark:bg-brand-500/10 border border-brand-100 dark:border-brand-500/20">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-brand-500 dark:text-brand-400 mb-0.5">Cooperativa</p>
-            <p className="text-xs font-medium text-brand-700 dark:text-brand-300 truncate">{user.cooperative_id.slice(0, 8)}…</p>
+            <p className="text-xs font-medium text-brand-700 dark:text-brand-300 truncate">{coopName ?? '…'}</p>
           </div>
         )}
 
