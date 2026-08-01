@@ -149,7 +149,7 @@ export default function HeroSplit() {
               <p className="text-sm leading-relaxed max-w-[260px]" style={{ color: 'rgba(255,255,255,0.6)' }}>
                 Monitoreo en tiempo real, gestión de conductores y seguridad para toda la cooperativa.
               </p>
-              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
+              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.60)' }}>
                 ¿Eres taxista? Únete a través de tu cooperativa.
               </p>
             </div>
@@ -201,7 +201,7 @@ export default function HeroSplit() {
           <p className="text-sm leading-relaxed mb-1" style={{ color: 'rgba(255,255,255,0.6)' }}>
             Monitoreo en tiempo real, comisiones bajas, gestión total.
           </p>
-          <p className="text-xs mb-4" style={{ color: 'rgba(255,255,255,0.35)' }}>¿Eres taxista? Únete a través de tu cooperativa.</p>
+          <p className="text-xs mb-4" style={{ color: 'rgba(255,255,255,0.60)' }}>¿Eres taxista? Únete a través de tu cooperativa.</p>
           <div className="flex flex-wrap gap-2">
             {BADGES_COOP.map((b) => (
               <span key={b} className="px-2.5 py-1 rounded-full text-xs font-semibold"
