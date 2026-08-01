@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 
 const Y = '#fcbd13';
@@ -51,6 +51,7 @@ function PhoneInput({ value, onChange }: {
         <select
           value={dialCode}
           onChange={(e) => handleDial(e.target.value)}
+          aria-label="Código de país"
           className="h-11 pl-3 pr-7 rounded-xl border border-white/10 bg-white/5 text-sm text-white focus:outline-none focus:border-white/25 transition-colors appearance-none cursor-pointer"
           style={{ minWidth: '110px' }}
         >
@@ -79,6 +80,88 @@ function PhoneInput({ value, onChange }: {
   );
 }
 
+// ── Location picker ───────────────────────────────────────────────────────────
+
+function LocationPicker({ lat, lng, onChange }: {
+  lat: number | null;
+  lng: number | null;
+  onChange: (lat: number, lng: number) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef       = useRef<unknown>(null);
+  const markerRef    = useRef<unknown>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+
+    import('maplibre-gl').then((ml) => {
+      const maplibregl = ml.default ?? ml;
+      const initLat = lat ?? -1.5;
+      const initLng = lng ?? -78.5;
+
+      const map = new maplibregl.Map({
+        container: containerRef.current!,
+        style: 'https://tiles.openfreemap.org/styles/liberty',
+        center: [initLng, initLat],
+        zoom: lat ? 14 : 6,
+      });
+
+      const el = document.createElement('div');
+      el.style.cssText = `width:32px;height:40px;cursor:grab;display:flex;align-items:flex-end;justify-content:center;`;
+      el.innerHTML = `<svg viewBox="0 0 24 32" width="32" height="40" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 0C7.03 0 3 4.03 3 9c0 6.75 9 23 9 23s9-16.25 9-23c0-4.97-4.03-9-9-9z" fill="${Y}"/>
+        <circle cx="12" cy="9" r="4" fill="#fff"/>
+      </svg>`;
+
+      const marker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
+        .setLngLat([initLng, initLat])
+        .addTo(map);
+
+      marker.on('dragend', () => {
+        const pos = marker.getLngLat();
+        onChange(parseFloat(pos.lat.toFixed(7)), parseFloat(pos.lng.toFixed(7)));
+      });
+
+      map.on('click', (e: { lngLat: { lat: number; lng: number } }) => {
+        marker.setLngLat([e.lngLat.lng, e.lngLat.lat]);
+        onChange(parseFloat(e.lngLat.lat.toFixed(7)), parseFloat(e.lngLat.lng.toFixed(7)));
+      });
+
+      mapRef.current    = map;
+      markerRef.current = marker;
+    });
+
+    return () => {
+      if (mapRef.current) {
+        (mapRef.current as { remove: () => void }).remove();
+        mapRef.current = null;
+        markerRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="space-y-2">
+      <div
+        ref={containerRef}
+        style={{ height: 220, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}
+      />
+      {lat && lng ? (
+        <p className="text-[10px] text-gray-500 flex items-center gap-1">
+          <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke={Y} strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0z" />
+          </svg>
+          {lat.toFixed(5)}, {lng.toFixed(5)} — marcador ubicado
+        </p>
+      ) : (
+        <p className="text-[10px] text-gray-600">Haz clic en el mapa o arrastra el marcador para ubicar tu cooperativa</p>
+      )}
+    </div>
+  );
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface CoopData {
@@ -86,6 +169,8 @@ interface CoopData {
   ruc: string;
   address: string;
   phone: string;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 interface AdminData {
@@ -177,6 +262,15 @@ function StepCoop({ data, onChange, onNext }: {
             onChange={(e) => onChange({ address: e.target.value })}
             placeholder="Av. Principal 123, Quito"
             className={inputClass}
+          />
+        </div>
+
+        <div>
+          <label className={labelClass}>Ubicación en el mapa <span className="text-gray-600 font-normal">(opcional)</span></label>
+          <LocationPicker
+            lat={data.latitude}
+            lng={data.longitude}
+            onChange={(lat, lng) => onChange({ latitude: lat, longitude: lng })}
           />
         </div>
       </div>
@@ -589,7 +683,7 @@ function StepSuccess({ email }: { email: string }) {
 
 export default function CooperativaRegistroForm() {
   const [step, setStep] = useState(1);
-  const [coop, setCoop] = useState<CoopData>({ name: '', ruc: '', address: '', phone: '' });
+  const [coop, setCoop] = useState<CoopData>({ name: '', ruc: '', address: '', phone: '', latitude: null, longitude: null });
   const [admin, setAdmin] = useState<AdminData>({ admin_name: '', admin_email: '' });
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState('');

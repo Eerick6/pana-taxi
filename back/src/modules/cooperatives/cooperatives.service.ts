@@ -188,6 +188,8 @@ export class CooperativesService {
     ruc: string;
     address?: string;
     phone?: string;
+    latitude?: number;
+    longitude?: number;
     admin_name: string;
     admin_email: string;
   }) {
@@ -207,6 +209,8 @@ export class CooperativesService {
         ruc: dto.ruc,
         address: dto.address,
         phone: dto.phone,
+        latitude: dto.latitude ?? null,
+        longitude: dto.longitude ?? null,
         status: CooperativeStatus.INACTIVE,
         approval_status: CooperativeApprovalStatus.PENDING,
       }),

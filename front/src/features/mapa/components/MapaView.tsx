@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import api from '@/lib/api';
-import { getCooperativas } from '@/features/cooperativas/api';
+import { getCooperativas, getCooperativa } from '@/features/cooperativas/api';
 import type { Cooperative } from '@/types';
 import { num } from '@/lib/format';
 import { useAuth } from '@/context/AuthContext';
@@ -126,12 +126,22 @@ export default function MapaView({ cooperativeId: lockedCoopId }: MapaViewProps 
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Driver | null>(null);
   const [highlightDriverId, setHighlightDriverId] = useState<string | null>(null);
+  const [coopLocation, setCoopLocation] = useState<{ lat: number; lng: number } | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (authLoading || lockedCoopId) return;
     getCooperativas().then((r) => setCooperativas(r.items ?? [])).catch(() => {});
   }, [authLoading, lockedCoopId]);
+
+  useEffect(() => {
+    if (!lockedCoopId) return;
+    getCooperativa(lockedCoopId).then((coop) => {
+      if (coop.latitude != null && coop.longitude != null) {
+        setCoopLocation({ lat: Number(coop.latitude), lng: Number(coop.longitude) });
+      }
+    }).catch(() => {});
+  }, [lockedCoopId]);
 
   const coopId = lockedCoopId ?? selectedCoopId ?? undefined;
 
@@ -181,10 +191,10 @@ export default function MapaView({ cooperativeId: lockedCoopId }: MapaViewProps 
 
   const withGps = activeDrivers.filter((d) => d.current_lat != null && d.current_lng != null);
 
-  // Map focus
-  const focusLat  = province?.lat  ?? -1.5;
-  const focusLng  = province?.lng  ?? -78.5;
-  const focusZoom = province?.zoom ?? 7;
+  // Map focus — cooperative location takes priority when available
+  const focusLat  = coopLocation?.lat  ?? province?.lat  ?? -1.5;
+  const focusLng  = coopLocation?.lng  ?? province?.lng  ?? -78.5;
+  const focusZoom = coopLocation ? 14 : (province?.zoom ?? 7);
 
   return (
     <div className="space-y-5">

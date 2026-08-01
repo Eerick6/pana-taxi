@@ -23,6 +23,16 @@ export class UpdateCooperativeDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  latitude?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  longitude?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
   @Min(0)
   @Max(100)
   commission_override?: number;

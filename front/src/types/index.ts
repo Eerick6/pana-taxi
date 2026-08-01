@@ -31,6 +31,8 @@ export interface Cooperative {
   rejection_reason: string | null;
   commission_override: number | null;
   monthly_fee_override: number | null;
+  latitude: number | null;
+  longitude: number | null;
   created_at: string;
   updated_at: string;
 }
