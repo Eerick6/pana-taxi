@@ -34,7 +34,13 @@ export class NotificationsService implements OnModuleInit {
       let serviceAccount: object | null = null;
 
       if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+        let raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+        try {
+          serviceAccount = JSON.parse(raw);
+        } catch {
+          // Railway puede almacenar \n como saltos de línea reales — re-escapar
+          serviceAccount = JSON.parse(raw.replace(/\n/g, '\\n'));
+        }
       } else if (process.env.FCM_SERVICE_ACCOUNT_PATH) {
         const raw = fs.readFileSync(process.env.FCM_SERVICE_ACCOUNT_PATH, 'utf8');
         serviceAccount = JSON.parse(raw);
