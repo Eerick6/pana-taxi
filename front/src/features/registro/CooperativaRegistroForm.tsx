@@ -113,8 +113,8 @@ function AddressSearch({ value, onSelect }: {
     if (q.length < 2) { setSuggestions([]); setOpen(false); return; }
     debounceRef.current = setTimeout(async () => {
       try {
-        const params = new URLSearchParams({ q: q.trim(), limit: '6', lang: 'es', bbox: '-81.0,-5.0,-75.0,2.0' });
-        const res  = await fetch(`https://photon.komoot.io/api/?${params}`);
+        const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q.trim())}&limit=6&bbox=-81.0,-5.0,-75.0,2.0`;
+        const res  = await fetch(url);
         const data = await res.json();
         const results = (data.features as Record<string, unknown>[] ?? [])
           .map(photonToSuggestion).filter(Boolean) as GeoSuggestion[];
