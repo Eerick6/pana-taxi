@@ -15,5 +15,6 @@ export async function POST(req: NextRequest) {
 
   const res = NextResponse.json({ message: 'Sesión cerrada' });
   res.cookies.delete('refresh_token');
+  res.cookies.delete('has_session');
   return res;
 }

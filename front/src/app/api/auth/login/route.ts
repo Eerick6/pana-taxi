@@ -32,6 +32,13 @@ export async function POST(req: NextRequest) {
     path: '/',
     maxAge: 60 * 60 * 24 * 30,
   });
+  res.cookies.set('has_session', '1', {
+    httpOnly: false,
+    secure: IS_PROD,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 60 * 60 * 24 * 30,
+  });
 
   return res;
 }

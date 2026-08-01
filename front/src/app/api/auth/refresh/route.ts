@@ -7,7 +7,9 @@ export async function POST(req: NextRequest) {
   const refresh_token = req.cookies.get('refresh_token')?.value;
 
   if (!refresh_token) {
-    return NextResponse.json({ message: 'Sin sesión' }, { status: 401 });
+    const res = NextResponse.json({ message: 'Sin sesión' }, { status: 401 });
+    res.cookies.delete('has_session');
+    return res;
   }
 
   let upstream: Response;
@@ -24,12 +26,20 @@ export async function POST(req: NextRequest) {
   if (!upstream.ok) {
     const res = NextResponse.json({ message: 'Sesión expirada' }, { status: 401 });
     res.cookies.delete('refresh_token');
+    res.cookies.delete('has_session');
     return res;
   }
 
   const { access_token, refresh_token: new_refresh, role } = await upstream.json();
 
   const res = NextResponse.json({ access_token, role });
+  res.cookies.set('has_session', '1', {
+    httpOnly: false,
+    secure: IS_PROD,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 60 * 60 * 24 * 30,
+  });
   res.cookies.set('refresh_token', new_refresh, {
     httpOnly: true,
     secure: IS_PROD,

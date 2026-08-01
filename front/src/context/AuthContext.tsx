@@ -42,6 +42,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     didRestore.current = true;
 
     const restore = async () => {
+      if (!document.cookie.includes('has_session=1')) {
+        setIsLoading(false);
+        return;
+      }
       try {
         const r = await fetch('/api/auth/refresh', { method: 'POST' });
         if (!r.ok) throw new Error('no session');
