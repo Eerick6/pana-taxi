@@ -1,4 +1,4 @@
-@reference "tailwindcss";
+@reference "./globals.css";
 
 /* Third-party library overrides — only loaded in admin/coop panels */
 
