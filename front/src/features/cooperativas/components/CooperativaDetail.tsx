@@ -6,6 +6,7 @@ import type { Cooperative } from '@/types';
 import {
   getCooperativa, approveCooperativa, rejectCooperativa,
   suspendCooperativa, activateCooperativa, setCooperativaFee, deleteCooperativa,
+  updateCooperativa,
   getCooperativaMembers, addCooperativaMember, removeCooperativaMember,
   getCooperativaStands, createCooperativaStand, deleteCooperativaStand, toggleStandActivo,
   getCooperativaFleet, getCooperativaVehiculos,
@@ -53,21 +54,44 @@ function Spinner() {
 // ── Tab: Info ─────────────────────────────────────────────────────────────────
 
 function InfoTab({
-  coop, onAction, canControl,
+  coop, onAction, canControl, isOwner,
 }: {
   coop: Cooperative;
   onAction: (fn: () => Promise<void>) => Promise<void>;
   canControl: boolean;
+  isOwner: boolean;
 }) {
   const [rejectReason, setRejectReason] = useState('');
   const [showReject, setShowReject] = useState(false);
   const [showFee, setShowFee] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const [feeValue, setFeeValue] = useState(coop.monthly_fee_override != null ? String(coop.monthly_fee_override) : '');
+  const [editForm, setEditForm] = useState({
+    name: coop.name,
+    ruc: coop.ruc,
+    phone: coop.phone ?? '',
+    address: coop.address ?? '',
+    commission_override: coop.commission_override != null ? String(coop.commission_override) : '',
+  });
   const [busy, setBusy] = useState(false);
 
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);
     try { await onAction(fn); } finally { setBusy(false); }
+  };
+
+  const handleSaveEdit = async () => {
+    const body: Partial<Cooperative> = {
+      phone: editForm.phone.trim() || undefined,
+      address: editForm.address.trim() || undefined,
+      commission_override: editForm.commission_override !== '' ? parseFloat(editForm.commission_override) : null,
+    };
+    if (isOwner) {
+      body.name = editForm.name.trim();
+      body.ruc = editForm.ruc.trim();
+    }
+    await act(() => updateCooperativa(coop.id, body));
+    setShowEdit(false);
   };
 
   return (
@@ -156,6 +180,13 @@ function InfoTab({
         >
           Editar cuota mensual
         </button>
+        <button
+          onClick={() => { setEditForm({ name: coop.name, ruc: coop.ruc, phone: coop.phone ?? '', address: coop.address ?? '', commission_override: coop.commission_override != null ? String(coop.commission_override) : '' }); setShowEdit(true); }}
+          disabled={busy}
+          className="px-4 py-2 text-sm font-medium rounded-xl border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+        >
+          Editar datos
+        </button>
         {coop.status !== 'active' && (
           <button
             onClick={() => { if (confirm('¿Eliminar esta cooperativa permanentemente?')) act(() => deleteCooperativa(coop.id)); }}
@@ -214,6 +245,106 @@ function InfoTab({
                 disabled={!feeValue}
                 className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 transition-colors"
               >Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit modal */}
+      {showEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Editar cooperativa</h3>
+            <p className="text-sm text-gray-400 mb-5">
+              {isOwner ? 'Puedes editar todos los campos.' : 'El nombre y RUC solo puede cambiarlos el propietario de la plataforma.'}
+            </p>
+            <div className="space-y-4">
+              {/* Name */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">Nombre</label>
+                {isOwner ? (
+                  <input
+                    type="text"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm(f => ({ ...f, name: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                ) : (
+                  <div className="px-3 py-2.5 rounded-xl border border-dashed border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{coop.name}</p>
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">Solicitar cambio al propietario</p>
+                  </div>
+                )}
+              </div>
+              {/* RUC */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">RUC</label>
+                {isOwner ? (
+                  <input
+                    type="text"
+                    value={editForm.ruc}
+                    onChange={(e) => setEditForm(f => ({ ...f, ruc: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                ) : (
+                  <div className="px-3 py-2.5 rounded-xl border border-dashed border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{coop.ruc}</p>
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">Solicitar cambio al propietario</p>
+                  </div>
+                )}
+              </div>
+              {/* Phone */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">Teléfono</label>
+                <input
+                  type="tel"
+                  value={editForm.phone}
+                  onChange={(e) => setEditForm(f => ({ ...f, phone: e.target.value }))}
+                  placeholder="Ej: 0998765432"
+                  className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              {/* Address */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">Dirección</label>
+                <input
+                  type="text"
+                  value={editForm.address}
+                  onChange={(e) => setEditForm(f => ({ ...f, address: e.target.value }))}
+                  placeholder="Ej: Av. Napo y Colón"
+                  className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              {/* Commission */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">Comisión (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={editForm.commission_override}
+                  onChange={(e) => setEditForm(f => ({ ...f, commission_override: e.target.value }))}
+                  placeholder="Dejar vacío para usar la default"
+                  className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+                <p className="text-xs text-gray-400 mt-1">Dejar vacío para usar la comisión predeterminada</p>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowEdit(false)}
+                className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={busy || (isOwner && !editForm.name.trim())}
+                className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 transition-colors"
+              >
+                {busy ? 'Guardando...' : 'Guardar cambios'}
+              </button>
             </div>
           </div>
         </div>
@@ -853,6 +984,7 @@ export default function CooperativaDetail({ id }: { id: string }) {
   const [tab, setTab] = useState<Tab>('info');
 
   const canControl = user?.role === 'owner' || user?.role === 'platform_admin';
+  const isOwner = user?.role === 'owner';
 
   const loadCoop = useCallback(async () => {
     setLoading(true);
@@ -938,7 +1070,7 @@ export default function CooperativaDetail({ id }: { id: string }) {
 
       {/* Tab content */}
       <div>
-        {tab === 'info' && <InfoTab coop={coop} onAction={onAction} canControl={canControl} />}
+        {tab === 'info' && <InfoTab coop={coop} onAction={onAction} canControl={canControl} isOwner={isOwner} />}
         {tab === 'socios' && <SociosTab coopId={id} />}
         {tab === 'vehiculos' && <VehiculosTab coopId={id} />}
         {tab === 'paradas' && <ParadasTab coopId={id} />}
