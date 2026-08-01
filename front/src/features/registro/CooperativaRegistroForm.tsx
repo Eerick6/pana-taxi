@@ -80,11 +80,89 @@ function PhoneInput({ value, onChange }: {
   );
 }
 
-// ── Location picker ───────────────────────────────────────────────────────────
+// ── Mapbox geocoding autocomplete ─────────────────────────────────────────────
 
-function LocationPicker({ lat, lng, onChange }: {
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
+
+interface GeoSuggestion { place_name: string; center: [number, number] }
+
+function AddressSearch({ value, onSelect }: {
+  value: string;
+  onSelect: (address: string, lat: number, lng: number) => void;
+}) {
+  const [query, setQuery]           = useState(value);
+  const [suggestions, setSuggestions] = useState<GeoSuggestion[]>([]);
+  const [open, setOpen]             = useState(false);
+  const debounceRef                 = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const search = (q: string) => {
+    setQuery(q);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (q.length < 3) { setSuggestions([]); setOpen(false); return; }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${MAPBOX_TOKEN}&language=es&types=address,place,poi,locality&limit=5&country=ec,co,pe,cl,mx,ar,ve,us`;
+        const res  = await fetch(url);
+        const data = await res.json();
+        setSuggestions(data.features ?? []);
+        setOpen(true);
+      } catch { /* silent */ }
+    }, 350);
+  };
+
+  const pick = (s: GeoSuggestion) => {
+    setQuery(s.place_name);
+    setSuggestions([]);
+    setOpen(false);
+    onSelect(s.place_name, s.center[1], s.center[0]);
+  };
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+        </svg>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => search(e.target.value)}
+          onFocus={() => suggestions.length > 0 && setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder="Busca la dirección de tu cooperativa..."
+          className={`${inputClass} pl-9`}
+          autoComplete="off"
+        />
+      </div>
+      {open && suggestions.length > 0 && (
+        <ul className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-gray-900 shadow-xl overflow-hidden">
+          {suggestions.map((s, i) => (
+            <li key={i}>
+              <button
+                type="button"
+                onMouseDown={() => pick(s)}
+                className="w-full text-left px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 flex items-start gap-2 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke={Y} strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0z" />
+                </svg>
+                <span className="line-clamp-2">{s.place_name}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ── Map picker (visual confirmation + manual drag) ────────────────────────────
+
+function LocationPicker({ lat, lng, flyTo, onChange }: {
   lat: number | null;
   lng: number | null;
+  flyTo: { lat: number; lng: number } | null;
   onChange: (lat: number, lng: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -93,11 +171,11 @@ function LocationPicker({ lat, lng, onChange }: {
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    const initLat = lat ?? -1.5;
+    const initLng = lng ?? -78.5;
 
     import('maplibre-gl').then((ml) => {
       const maplibregl = ml.default ?? ml;
-      const initLat = lat ?? -1.5;
-      const initLng = lng ?? -78.5;
 
       const map = new maplibregl.Map({
         container: containerRef.current!,
@@ -107,7 +185,7 @@ function LocationPicker({ lat, lng, onChange }: {
       });
 
       const el = document.createElement('div');
-      el.style.cssText = `width:32px;height:40px;cursor:grab;display:flex;align-items:flex-end;justify-content:center;`;
+      el.style.cssText = 'width:32px;height:40px;cursor:grab;display:flex;align-items:flex-end;justify-content:center;';
       el.innerHTML = `<svg viewBox="0 0 24 32" width="32" height="40" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M12 0C7.03 0 3 4.03 3 9c0 6.75 9 23 9 23s9-16.25 9-23c0-4.97-4.03-9-9-9z" fill="${Y}"/>
         <circle cx="12" cy="9" r="4" fill="#fff"/>
@@ -141,11 +219,20 @@ function LocationPicker({ lat, lng, onChange }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fly to geocoded location when autocomplete selects a place
+  useEffect(() => {
+    if (!flyTo || !mapRef.current || !markerRef.current) return;
+    const map    = mapRef.current as { flyTo: (o: object) => void };
+    const marker = markerRef.current as { setLngLat: (c: [number, number]) => void };
+    marker.setLngLat([flyTo.lng, flyTo.lat]);
+    map.flyTo({ center: [flyTo.lng, flyTo.lat], zoom: 15, duration: 1000 });
+  }, [flyTo]);
+
   return (
     <div className="space-y-2">
       <div
         ref={containerRef}
-        style={{ height: 220, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}
+        style={{ height: 200, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}
       />
       {lat && lng ? (
         <p className="text-[10px] text-gray-500 flex items-center gap-1">
@@ -153,10 +240,10 @@ function LocationPicker({ lat, lng, onChange }: {
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0z" />
           </svg>
-          {lat.toFixed(5)}, {lng.toFixed(5)} — marcador ubicado
+          {lat.toFixed(5)}, {lng.toFixed(5)} — ubicación confirmada
         </p>
       ) : (
-        <p className="text-[10px] text-gray-600">Haz clic en el mapa o arrastra el marcador para ubicar tu cooperativa</p>
+        <p className="text-[10px] text-gray-600">Busca la dirección arriba o haz clic en el mapa para ajustar el marcador</p>
       )}
     </div>
   );
@@ -171,6 +258,7 @@ interface CoopData {
   phone: string;
   latitude: number | null;
   longitude: number | null;
+  flyTo: { lat: number; lng: number } | null;
 }
 
 interface AdminData {
@@ -256,20 +344,19 @@ function StepCoop({ data, onChange, onNext }: {
         </div>
 
         <div>
-          <label className={labelClass}>Dirección</label>
-          <input
-            type="text" value={data.address}
-            onChange={(e) => onChange({ address: e.target.value })}
-            placeholder="Av. Principal 123, Quito"
-            className={inputClass}
+          <label className={labelClass}>Dirección <span className="text-gray-600 font-normal">(opcional)</span></label>
+          <AddressSearch
+            value={data.address}
+            onSelect={(address, lat, lng) => onChange({ address, latitude: lat, longitude: lng, flyTo: { lat, lng } })}
           />
         </div>
 
         <div>
-          <label className={labelClass}>Ubicación en el mapa <span className="text-gray-600 font-normal">(opcional)</span></label>
+          <label className={labelClass}>Ubicación en el mapa <span className="text-gray-600 font-normal">(ajusta si es necesario)</span></label>
           <LocationPicker
             lat={data.latitude}
             lng={data.longitude}
+            flyTo={data.flyTo}
             onChange={(lat, lng) => onChange({ latitude: lat, longitude: lng })}
           />
         </div>
@@ -683,7 +770,7 @@ function StepSuccess({ email }: { email: string }) {
 
 export default function CooperativaRegistroForm() {
   const [step, setStep] = useState(1);
-  const [coop, setCoop] = useState<CoopData>({ name: '', ruc: '', address: '', phone: '', latitude: null, longitude: null });
+  const [coop, setCoop] = useState<CoopData>({ name: '', ruc: '', address: '', phone: '', latitude: null, longitude: null, flyTo: null });
   const [admin, setAdmin] = useState<AdminData>({ admin_name: '', admin_email: '' });
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState('');
