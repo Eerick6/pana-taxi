@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import '../dashboard-panels.css';
 import AdminLayoutClient from './_AdminLayoutClient';
 
 export const metadata: Metadata = {

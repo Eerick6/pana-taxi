@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import '../dashboard-panels.css';
 import CoopLayoutClient from './_CoopLayoutClient';
 
 export const metadata: Metadata = {
