@@ -42,6 +42,10 @@ export async function updateCooperativa(id: string, body: Partial<Cooperative>):
   return data;
 }
 
+export async function updateCooperativaProfile(id: string, body: { phone?: string; address?: string; latitude?: number; longitude?: number }): Promise<void> {
+  await api.patch(`/cooperatives/${id}/profile`, body);
+}
+
 export async function setCooperativaFee(id: string, monthly_fee: number): Promise<void> {
   await api.patch(`/cooperatives/${id}/set-fee`, { monthly_fee });
 }

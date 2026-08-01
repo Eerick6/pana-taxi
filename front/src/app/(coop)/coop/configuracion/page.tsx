@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
 import type { Cooperative } from '@/types';
-import { getCooperativa, updateCooperativa } from '@/features/cooperativas/api';
+import { getCooperativa, updateCooperativaProfile } from '@/features/cooperativas/api';
 import { useAuth } from '@/context/AuthContext';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -172,7 +172,7 @@ export default function CoopConfiguracionPage() {
     if (!user?.cooperative_id) return;
     setSaving(true); setError(''); setSaved(false);
     try {
-      await updateCooperativa(user.cooperative_id, {
+      await updateCooperativaProfile(user.cooperative_id, {
         phone:     form.phone     || undefined,
         address:   form.address   || undefined,
         latitude:  form.latitude  ?? undefined,

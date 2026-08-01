@@ -313,6 +313,13 @@ export class CooperativesService {
     return { ...coop, member_count };
   }
 
+  async updateProfile(id: string, dto: { phone?: string; address?: string; latitude?: number; longitude?: number }) {
+    const coop = await this.coopRepo.findOne({ where: { id } });
+    if (!coop) throw new NotFoundException('Cooperativa no encontrada');
+    await this.coopRepo.update(id, dto);
+    return { message: 'Perfil actualizado' };
+  }
+
   async update(id: string, dto: UpdateCooperativeDto) {
     const coop = await this.coopRepo.findOne({ where: { id } });
     if (!coop) throw new NotFoundException('Cooperativa no encontrada');

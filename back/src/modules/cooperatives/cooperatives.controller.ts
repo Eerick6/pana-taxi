@@ -13,6 +13,7 @@ import {
   ParseUUIDPipe,
   ParseIntPipe,
   DefaultValuePipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CooperativesService } from './cooperatives.service';
@@ -25,7 +26,8 @@ import { RejectCooperativeDocumentDto } from './dto/reject-cooperative-document.
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { UserRole } from '../users/entities/user.entity';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { UserRole, User } from '../users/entities/user.entity';
 
 const PLATFORM_ROLES = [UserRole.OWNER, UserRole.PLATFORM_ADMIN];
 const READ_ROLES = [UserRole.OWNER, UserRole.PLATFORM_ADMIN, UserRole.SUPPORT];
@@ -82,6 +84,17 @@ export class CooperativesController {
   @Roles(...READ_ROLES, UserRole.COOPERATIVE_ADMIN)
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.cooperativesService.findOne(id);
+  }
+
+  @Patch(':id/profile')
+  @Roles(UserRole.COOPERATIVE_ADMIN)
+  updateProfile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { phone?: string; address?: string; latitude?: number; longitude?: number },
+    @CurrentUser() user: User,
+  ) {
+    if (user.cooperative_id !== id) throw new ForbiddenException('No puedes modificar otra cooperativa');
+    return this.cooperativesService.updateProfile(id, dto);
   }
 
   @Patch(':id')
