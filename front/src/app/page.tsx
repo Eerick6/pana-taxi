@@ -88,7 +88,7 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto px-6 h-16 grid grid-cols-3 items-center">
           {/* Left: logo */}
           <Link href="/" className="flex items-center gap-3 justify-self-start">
-            <Image src="/images/logo/logo.webp" alt="" width={32} height={32} className="rounded-xl" />
+            <Image src="/images/logo/logo.webp" alt="" width={32} height={32} className="rounded-xl" priority />
             <span className="text-sm font-bold text-white tracking-tight">Pana Taxi</span>
           </Link>
           {/* Center: nav links */}

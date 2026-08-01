@@ -37,7 +37,7 @@ export default function HeroSplit() {
         </div>
 
         <div className="flex items-center justify-center gap-4 mb-4">
-          <Image src="/images/logo/logo.webp" alt="Pana Taxi" width={64} height={64} className="rounded-2xl" />
+          <Image src="/images/logo/logo.webp" alt="Pana Taxi" width={64} height={64} className="rounded-2xl" priority />
         </div>
 
         <h1
