@@ -80,41 +80,55 @@ function PhoneInput({ value, onChange }: {
   );
 }
 
-// ── Mapbox geocoding autocomplete ─────────────────────────────────────────────
+// ── Photon (OSM) geocoding autocomplete ──────────────────────────────────────
 
-const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
+interface GeoSuggestion { label: string; lat: number; lng: number }
 
-interface GeoSuggestion { place_name: string; center: [number, number] }
+function photonToSuggestion(f: Record<string, unknown>): GeoSuggestion | null {
+  const props  = f['properties'] as Record<string, unknown> ?? {};
+  const coords = (f['geometry'] as Record<string, unknown>)?.['coordinates'] as number[] ?? [];
+  if (coords.length < 2) return null;
+  const name   = (props['name']   as string) ?? '';
+  const street = (props['street'] as string) ?? '';
+  const city   = (props['city'] ?? props['county'] ?? props['state'] ?? '') as string;
+  const main   = name || street;
+  if (!main) return null;
+  const parts  = [name && street ? street : '', city].filter(Boolean);
+  const label  = parts.length ? `${main}, ${parts.join(', ')}` : main;
+  return { label, lat: coords[1], lng: coords[0] };
+}
 
 function AddressSearch({ value, onSelect }: {
   value: string;
   onSelect: (address: string, lat: number, lng: number) => void;
 }) {
-  const [query, setQuery]           = useState(value);
+  const [query, setQuery]             = useState(value);
   const [suggestions, setSuggestions] = useState<GeoSuggestion[]>([]);
-  const [open, setOpen]             = useState(false);
-  const debounceRef                 = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [open, setOpen]               = useState(false);
+  const debounceRef                   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const search = (q: string) => {
     setQuery(q);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (q.length < 3) { setSuggestions([]); setOpen(false); return; }
+    if (q.length < 2) { setSuggestions([]); setOpen(false); return; }
     debounceRef.current = setTimeout(async () => {
       try {
-        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${MAPBOX_TOKEN}&language=es&types=address,place,poi,locality&limit=5&country=ec,co,pe,cl,mx,ar,ve,us`;
-        const res  = await fetch(url);
+        const params = new URLSearchParams({ q: q.trim(), limit: '6', lang: 'es', bbox: '-81.0,-5.0,-75.0,2.0' });
+        const res  = await fetch(`https://photon.komoot.io/api/?${params}`);
         const data = await res.json();
-        setSuggestions(data.features ?? []);
-        setOpen(true);
+        const results = (data.features as Record<string, unknown>[] ?? [])
+          .map(photonToSuggestion).filter(Boolean) as GeoSuggestion[];
+        setSuggestions(results);
+        setOpen(results.length > 0);
       } catch { /* silent */ }
     }, 350);
   };
 
   const pick = (s: GeoSuggestion) => {
-    setQuery(s.place_name);
+    setQuery(s.label);
     setSuggestions([]);
     setOpen(false);
-    onSelect(s.place_name, s.center[1], s.center[0]);
+    onSelect(s.label, s.lat, s.lng);
   };
 
   return (
@@ -147,7 +161,7 @@ function AddressSearch({ value, onSelect }: {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0z" />
                 </svg>
-                <span className="line-clamp-2">{s.place_name}</span>
+                <span className="line-clamp-2">{s.label}</span>
               </button>
             </li>
           ))}
