@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /coop/
+Disallow: /signin
+Disallow: /forgot-password
+Disallow: /resend-invite
+Disallow: /registro/
+
+Sitemap: https://panataxiapp.com/sitemap.xml
