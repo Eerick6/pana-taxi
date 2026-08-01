@@ -17,7 +17,7 @@ export async function getStandQueue(id: string): Promise<{ driver_id: string; fu
   return data;
 }
 
-export async function createStand(body: { name: string; address?: string; lat: number; lng: number; capacity?: number; cooperative_id: string }): Promise<Stand> {
+export async function createStand(body: { name: string; address?: string; lat: number; lng: number; capacity?: number; cooperative_id?: string }): Promise<Stand> {
   const { data } = await api.post('/stands', body);
   return data;
 }

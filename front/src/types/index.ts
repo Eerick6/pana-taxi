@@ -158,6 +158,7 @@ export interface Stand {
   is_active: boolean;
   cooperative?: { id: string; name: string } | null;
   cooperative_id: string;
+  active_drivers?: number;
   created_at: string;
   updated_at?: string;
 }
