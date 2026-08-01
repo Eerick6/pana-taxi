@@ -40,6 +40,7 @@ function PhoneInput({ value, onChange }: { value: string; onChange: (v: string) 
         <select
           value={dialCode}
           onChange={(e) => handleDial(e.target.value)}
+          aria-label="Código de país"
           className="h-11 pl-3 pr-7 rounded-xl border border-white/10 bg-white/5 text-sm text-white focus:outline-none focus:border-white/25 transition-colors appearance-none cursor-pointer"
           style={{ minWidth: '110px' }}
         >
@@ -157,7 +158,7 @@ export default function ContactSection() {
                 </svg>
               </div>
               <div>
-                <p className="text-xs font-medium text-gray-500 mb-0.5">WhatsApp</p>
+                <p className="text-xs font-medium text-gray-400 mb-0.5">WhatsApp</p>
                 <a
                   href={waHref}
                   target="_blank"
@@ -223,8 +224,8 @@ export default function ContactSection() {
               <PhoneInput value={form.phone} onChange={(v) => setForm((f) => ({ ...f, phone: v }))} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1.5">Número de conductores aproximado</label>
-              <select value={form.driver_count_range} onChange={set('driver_count_range')} className="w-full h-11 px-4 rounded-xl border border-white/10 bg-[#0f172a] text-sm text-gray-300 focus:outline-none focus:border-white/20 transition-colors">
+              <label htmlFor="driver-count-range" className="block text-xs font-medium text-gray-400 mb-1.5">Número de conductores aproximado</label>
+              <select id="driver-count-range" value={form.driver_count_range} onChange={set('driver_count_range')} className="w-full h-11 px-4 rounded-xl border border-white/10 bg-[#0f172a] text-sm text-gray-300 focus:outline-none focus:border-white/20 transition-colors">
                 <option value="">Selecciona un rango</option>
                 <option>1 – 20 conductores</option>
                 <option>21 – 50 conductores</option>
@@ -248,9 +249,9 @@ export default function ContactSection() {
               {status === 'sending' && <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>}
               {status === 'sending' ? 'Enviando...' : 'Enviar solicitud'}
             </button>
-            <p className="text-xs text-gray-600 text-center">
+            <p className="text-xs text-gray-400 text-center">
               Al enviar aceptas nuestra{' '}
-              <a href="/privacidad" className="underline hover:text-gray-400 transition-colors">política de privacidad</a>.
+              <a href="/privacidad" className="underline hover:text-gray-300 transition-colors">política de privacidad</a>.
             </p>
           </form>
         )}

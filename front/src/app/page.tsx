@@ -88,7 +88,7 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto px-6 h-16 grid grid-cols-3 items-center">
           {/* Left: logo */}
           <Link href="/" className="flex items-center gap-3 justify-self-start">
-            <Image src="/images/logo/logo.webp" alt="Pana Taxi" width={32} height={32} className="rounded-xl" />
+            <Image src="/images/logo/logo.webp" alt="" width={32} height={32} className="rounded-xl" />
             <span className="text-sm font-bold text-white tracking-tight">Pana Taxi</span>
           </Link>
           {/* Center: nav links */}
@@ -104,6 +104,7 @@ export default function LandingPage() {
         </div>
       </header>
 
+      <main>
       {/* ── Hero ── */}
       <HeroSplit />
 
@@ -199,12 +200,12 @@ export default function LandingPage() {
                 <a href="#" className="inline-flex items-center gap-2.5 px-5 py-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-sm font-semibold text-white">
                   <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
                   App Store
-                  <span className="text-xs text-gray-500 font-normal">Próximamente</span>
+                  <span className="text-xs text-gray-400 font-normal">Próximamente</span>
                 </a>
                 <a href="#" className="inline-flex items-center gap-2.5 px-5 py-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-sm font-semibold text-white">
                   <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M3.18 23.76c.3.16.64.22.99.16l13.2-7.62-2.83-2.83-11.36 10.29zM.5 1.28C.19 1.6 0 2.1 0 2.72v18.56c0 .63.19 1.12.5 1.44l.08.07 10.4-10.4v-.24L.58 1.21.5 1.28zm17.64 9.47L15.04 8.6 3.18.24c-.35-.2-.69-.23-.99-.08L13.55 11.5l4.59-2.75zm-2.89 5.56l-4.59 2.75.08.07 13.2 7.62c.3.06.64 0 .94-.16l.08-.08-13.31-7.62-.4-.58z"/></svg>
                   Google Play
-                  <span className="text-xs text-gray-500 font-normal">Próximamente</span>
+                  <span className="text-xs text-gray-400 font-normal">Próximamente</span>
                 </a>
               </div>
             </div>
@@ -477,16 +478,18 @@ export default function LandingPage() {
         </div>
       </section>
 
+      </main>
+
       {/* ── Footer ── */}
       <footer className="border-t border-white/5">
         <div className="max-w-6xl mx-auto px-6 pt-14 pb-8">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10 mb-12">
             <div className="lg:col-span-2">
               <div className="flex items-center gap-3 mb-4">
-                <Image src="/images/logo/logo.webp" alt="Pana Taxi" width={36} height={36} className="rounded-xl" />
+                <Image src="/images/logo/logo.webp" alt="" width={36} height={36} className="rounded-xl" />
                 <span className="text-base font-bold text-white">Pana Taxi</span>
               </div>
-              <p className="text-sm text-gray-500 leading-relaxed max-w-xs mb-5">
+              <p className="text-sm text-gray-400 leading-relaxed max-w-xs mb-5">
                 Plataforma de gestión integral para cooperativas de taxi en Ecuador.
                 Más que un taxi, un pana.
               </p>
@@ -494,8 +497,8 @@ export default function LandingPage() {
             </div>
 
             <div>
-              <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-4">Plataforma</h4>
-              <ul className="space-y-2.5 text-sm text-gray-500">
+              <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-4">Plataforma</p>
+              <ul className="space-y-2.5 text-sm text-gray-400">
                 <li><a href="#funcionalidades" className="hover:text-gray-300 transition-colors">Funcionalidades</a></li>
                 <li><a href="#como-funciona" className="hover:text-gray-300 transition-colors">Cómo funciona</a></li>
                 <li><Link href="/signin" className="hover:text-gray-300 transition-colors">Iniciar sesión</Link></li>
@@ -504,8 +507,8 @@ export default function LandingPage() {
             </div>
 
             <div>
-              <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-4">Legal</h4>
-              <ul className="space-y-2.5 text-sm text-gray-500">
+              <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-4">Legal</p>
+              <ul className="space-y-2.5 text-sm text-gray-400">
                 <li><Link href="/terminos" className="hover:text-gray-300 transition-colors">Términos y condiciones</Link></li>
                 <li><Link href="/privacidad" className="hover:text-gray-300 transition-colors">Política de privacidad</Link></li>
                 <li><a href="#contacto" className="hover:text-gray-300 transition-colors">Contacto</a></li>
@@ -514,8 +517,8 @@ export default function LandingPage() {
           </div>
 
           <div className="border-t border-white/5 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <p className="text-xs text-gray-600">© {new Date().getFullYear()} Pana Taxi. Todos los derechos reservados.</p>
-            <div className="flex items-center gap-4 text-xs text-gray-600">
+            <p className="text-xs text-gray-500">© {new Date().getFullYear()} Pana Taxi. Todos los derechos reservados.</p>
+            <div className="flex items-center gap-4 text-xs text-gray-500">
               <Link href="/terminos" className="hover:text-gray-400 transition-colors">Términos</Link>
               <Link href="/privacidad" className="hover:text-gray-400 transition-colors">Privacidad</Link>
               <span>Quito, Ecuador 🇪🇨</span>
