@@ -48,6 +48,12 @@
     "tailwindcss": "^4.1.17",
     "typescript": "^5.9.3"
   },
+  "browserslist": [
+    "chrome >= 100",
+    "safari >= 15",
+    "firefox >= 91",
+    "edge >= 100"
+  ],
   "overrides": {
     "@react-jvectormap/core": {
       "react": "^16.8.0 || ^17 || ^18 || ^19",
