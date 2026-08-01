@@ -199,14 +199,7 @@ function LocationPicker({ lat, lng, flyTo, onChange }: {
         zoom: lat ? 14 : 6,
       });
 
-      const el = document.createElement('div');
-      el.style.cssText = 'width:32px;height:40px;cursor:grab;display:flex;align-items:flex-end;justify-content:center;';
-      el.innerHTML = `<svg viewBox="0 0 24 32" width="32" height="40" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M12 0C7.03 0 3 4.03 3 9c0 6.75 9 23 9 23s9-16.25 9-23c0-4.97-4.03-9-9-9z" fill="${Y}"/>
-        <circle cx="12" cy="9" r="4" fill="#fff"/>
-      </svg>`;
-
-      const marker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
+      const marker = new maplibregl.Marker({ color: Y, draggable: true })
         .setLngLat([initLng, initLat])
         .addTo(map);
 
