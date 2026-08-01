@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import Link from 'next/link';
 
 const Y = '#fcbd13';
