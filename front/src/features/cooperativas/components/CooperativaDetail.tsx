@@ -90,7 +90,7 @@ function InfoTab({
       body.name = editForm.name.trim();
       body.ruc = editForm.ruc.trim();
     }
-    await act(() => updateCooperativa(coop.id, body));
+    await act(async () => { await updateCooperativa(coop.id, body); });
     setShowEdit(false);
   };
 
