@@ -273,7 +273,7 @@ export default function LandingPage() {
                 <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg border border-white/10 bg-white/10">👤</div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-white">Carlos M.</p>
-                  <p className="text-xs text-gray-500 truncate">Coop. Central de Taxis · Toyota Yaris · PBX-1234</p>
+                  <p className="text-xs text-gray-400 truncate">Coop. Central de Taxis · Toyota Yaris · PBX-1234</p>
                 </div>
                 <div className="flex items-center gap-1 text-xs font-semibold" style={{ color: Y }}>
                   <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
@@ -432,7 +432,7 @@ export default function LandingPage() {
               ].map((c) => (
                 <div key={c.label} className="rounded-xl bg-white/5 p-3 border border-white/5">
                   <p className={`text-xl font-bold tabular-nums ${c.c}`} style={c.label === 'Ingresos del mes' ? { color: Y } : {}}>{c.value}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{c.label}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{c.label}</p>
                 </div>
               ))}
             </div>
@@ -448,7 +448,7 @@ export default function LandingPage() {
               ].map((t) => (
                 <div key={t.driver} className="flex items-center gap-2 py-2 text-xs border-b border-white/5 last:border-0">
                   <span className="text-gray-300 w-16 flex-shrink-0">{t.driver}</span>
-                  <span className="text-gray-500 flex-1 truncate">{t.dest}</span>
+                  <span className="text-gray-400 flex-1 truncate">{t.dest}</span>
                   <span className="font-semibold text-white w-12 text-right">{t.fare}</span>
                   <span className={`w-20 text-right ${t.sc}`} style={t.st === 'Aceptado' ? { color: Y } : {}}>{t.st}</span>
                 </div>
@@ -517,10 +517,10 @@ export default function LandingPage() {
           </div>
 
           <div className="border-t border-white/5 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <p className="text-xs text-gray-500">© {new Date().getFullYear()} Pana Taxi. Todos los derechos reservados.</p>
-            <div className="flex items-center gap-4 text-xs text-gray-500">
-              <Link href="/terminos" className="hover:text-gray-400 transition-colors">Términos</Link>
-              <Link href="/privacidad" className="hover:text-gray-400 transition-colors">Privacidad</Link>
+            <p className="text-xs text-gray-400">© {new Date().getFullYear()} Pana Taxi. Todos los derechos reservados.</p>
+            <div className="flex items-center gap-4 text-xs text-gray-400">
+              <Link href="/terminos" className="hover:text-gray-300 transition-colors">Términos</Link>
+              <Link href="/privacidad" className="hover:text-gray-300 transition-colors">Privacidad</Link>
               <span>Quito, Ecuador 🇪🇨</span>
             </div>
           </div>

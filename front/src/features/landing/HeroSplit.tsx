@@ -85,7 +85,7 @@ export default function HeroSplit() {
           </div>
 
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.25em] mb-3" style={{ color: Y }}>
+            <p className="text-[10px] font-bold uppercase tracking-[0.25em] mb-3" style={{ color: DARK }}>
               Para pasajeros
             </p>
             <h2 className="text-5xl font-black leading-[1.05] mb-4" style={{ color: DARK }}>
@@ -177,7 +177,7 @@ export default function HeroSplit() {
           style={{ backgroundColor: '#ffffff' }}
         >
           <div className="text-3xl mb-4">🚕</div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.25em] mb-2" style={{ color: Y }}>Para pasajeros</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] mb-2" style={{ color: DARK }}>Para pasajeros</p>
           <h2 className="text-3xl font-black mb-3" style={{ color: DARK }}>Viaja seguro.</h2>
           <p className="text-sm leading-relaxed mb-4" style={{ color: 'rgba(0,0,0,0.55)' }}>
             Solo taxis de cooperativas legales. GPS activo y botón SOS en cada viaje.
