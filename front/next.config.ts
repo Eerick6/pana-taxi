@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  experimental: {
+    optimizeCss: true,
+  },
   transpilePackages: ['maplibre-gl'],
   webpack(config) {
     config.module.rules.push({
