@@ -75,8 +75,6 @@ export class TripsService {
     private accountingService: AccountingService,
   ) {}
 
-  private readonly _priceUpdateTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
   // ── Crear viaje ──────────────────────────────────────────────────────────────
 
   async createTrip(user: User, dto: CreateTripDto): Promise<Trip> {
@@ -173,23 +171,7 @@ export class TripsService {
           this.notificationsService.sendToUsers(userIds, {
             title: '¡Nuevo viaje disponible!',
             body: `${trip.origin_address} → ${trip.destination_address} · ${fareLabel}`,
-            data: {
-              type:              'trip_new',
-              trip_id:           trip.id,
-              event:             'trip.new',
-              fare_mode:         fareMode,
-              client_offer:      trip.client_offer ? parseFloat(trip.client_offer as any).toFixed(2) : '',
-              origin_lat:        parseFloat(trip.origin_lat as any).toFixed(6),
-              origin_lng:        parseFloat(trip.origin_lng as any).toFixed(6),
-              search_radius_km:  parseFloat(fareConfig.search_radius_km as any).toFixed(2),
-              origin_address:    trip.origin_address ?? '',
-              destination_address: trip.destination_address ?? '',
-              suggested_fare:    estimate.total.toFixed(2),
-              distance_km:       estimate.distance_km.toFixed(2),
-              client_name:       clientProfile?.full_name ?? '',
-              client_rating:     clientProfile ? parseFloat(clientProfile.rating as any).toFixed(1) : '',
-              client_total_trips: String(clientProfile?.total_trips ?? 0),
-            },
+            data: { type: 'trip_new', trip_id: trip.id, event: 'trip.new' },
           });
         })
         .catch(() => {});
@@ -507,7 +489,7 @@ export class TripsService {
 
     const trip = await this.tripsRepo.findOne({
       where: { id: tripId },
-      relations: ['client', 'cooperative'],
+      relations: ['client'],
     });
     if (!trip) throw new NotFoundException('Viaje no encontrado');
     if (trip.fare_mode !== FareMode.NEGOTIATED) {
@@ -517,7 +499,7 @@ export class TripsService {
       throw new ConflictException('El viaje ya no está disponible para ofertas');
     }
 
-    const fareConfig = await this.fareService.getConfig(trip.cooperative?.id ?? undefined);
+    const fareConfig = await this.fareService.getConfig();
     const suggested = parseFloat(trip.suggested_fare as any);
     const clientPrice = parseFloat(trip.client_offer as any) ?? suggested;
 
@@ -860,7 +842,7 @@ export class TripsService {
     await this.tripsRepo.update(tripId, { client_offer: newOffer as any });
 
     const clientProfile = await this.clientsRepo.findOne({ where: { user: { id: userId } } });
-    this._schedulePriceUpdate(tripId, {
+    this.gateway.notifyAvailableDrivers('trip.price_updated', {
       trip_id:             tripId,
       new_price:           newOffer,
       client_offer:        newOffer,
@@ -883,7 +865,7 @@ export class TripsService {
   async decrementOffer(tripId: string, userId: string) {
     const trip = await this.tripsRepo.findOne({
       where: { id: tripId, client: { id: userId } },
-      relations: ['client', 'cooperative'],
+      relations: ['client'],
     });
     if (!trip) throw new NotFoundException('Viaje no encontrado');
     if (trip.fare_mode !== FareMode.NEGOTIATED)
@@ -900,7 +882,7 @@ export class TripsService {
     const currentOffer  = parseFloat(trip.client_offer as any);
     const suggestedFare = parseFloat(trip.suggested_fare as any);
 
-    const fareConfig   = await this.fareService.getConfig(trip.cooperative?.id ?? undefined);
+    const fareConfig   = await this.fareService.getConfig();
     const discountPct  = parseFloat(fareConfig.max_negotiation_discount_pct as any);
     const rawMin       = suggestedFare * (1 - discountPct / 100);
     const roundedMin   = Math.ceil(rawMin / 0.05) * 0.05;
@@ -914,7 +896,7 @@ export class TripsService {
     await this.tripsRepo.update(tripId, { client_offer: newOffer as any });
 
     const clientProfileDecr = await this.clientsRepo.findOne({ where: { user: { id: userId } } });
-    this._schedulePriceUpdate(tripId, {
+    this.gateway.notifyAvailableDrivers('trip.price_updated', {
       trip_id:             tripId,
       new_price:           newOffer,
       client_offer:        newOffer,
@@ -932,18 +914,6 @@ export class TripsService {
     });
 
     return { message: `Oferta actualizada a $${newOffer}`, client_offer: newOffer };
-  }
-
-  private _schedulePriceUpdate(tripId: string, payload: object): void {
-    const existing = this._priceUpdateTimers.get(tripId);
-    if (existing) clearTimeout(existing);
-    this._priceUpdateTimers.set(
-      tripId,
-      setTimeout(() => {
-        this._priceUpdateTimers.delete(tripId);
-        this.gateway.notifyAvailableDrivers('trip.price_updated', payload);
-      }, 5000),
-    );
   }
 
   // ── Conductor marca llegada al punto de recogida ─────────────────────────────
@@ -1036,7 +1006,7 @@ export class TripsService {
       throw new BadRequestException('Código OTP incorrecto. Pide al pasajero su código.');
     }
 
-    const fareConfig = await this.fareService.getConfig(trip.cooperative?.id ?? undefined);
+    const fareConfig = await this.fareService.getConfig();
     const baseFare = parseFloat(fareConfig.base_fare as any);
 
     await this.tripsRepo.update(tripId, {
@@ -1076,7 +1046,7 @@ export class TripsService {
 
     if (isNaN(fare) || fare <= 0) throw new BadRequestException('Tarifa inválida');
 
-    const fareConfig = await this.fareService.getConfig(trip.cooperative?.id ?? undefined);
+    const fareConfig = await this.fareService.getConfig();
     const minimumFare = parseFloat(fareConfig.minimum_fare as any);
     if (fare < minimumFare) fare = minimumFare;
 
@@ -1171,12 +1141,6 @@ export class TripsService {
       cancelled_by: cancelledBy,
       reason: dto.reason,
     });
-
-    // Si estaba en REQUESTED, notificar a conductores disponibles para que
-    // cierren el overlay — ellos nunca entran a ROOM.trip hasta aceptar
-    if (trip.status === TripStatus.REQUESTED) {
-      this.gateway.notifyAvailableDrivers('trip.taken', { trip_id: tripId });
-    }
 
     return { message: 'Viaje cancelado' };
   }
@@ -1320,7 +1284,7 @@ export class TripsService {
     });
     if (!trip) return;
 
-    const config = await this.fareService.getConfig(trip.cooperative?.id ?? undefined);
+    const config = await this.fareService.getConfig();
     const newAmount = this.fareService.updateMeter(
       parseFloat(trip.meter_amount as any) || 0,
       distanceKm,
@@ -1343,8 +1307,7 @@ export class TripsService {
       return parseFloat(coopOverridePct as any) / 100;
     }
     const config = await this.configRepo.findOne({ where: { key: 'commission_rate' } });
-    const raw = parseFloat(config?.value ?? '');
-    const pct = isNaN(raw) ? DEFAULT_COMMISSION_RATE_PCT : raw;
+    const pct = config ? parseFloat(config.value) : DEFAULT_COMMISSION_RATE_PCT;
     return pct / 100;
   }
 
