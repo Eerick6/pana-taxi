@@ -977,7 +977,7 @@ function FlotaTab({ coopId }: { coopId: string }) {
 
 // ── Tab: Tarifas ──────────────────────────────────────────────────────────────
 
-const FARE_FIELDS = [
+const FARE_FIELDS: { key: string; label: string; prefix?: string; suffix?: string; step: string }[] = [
   { key: 'base_fare',         label: 'Bajada de bandera',       prefix: '$', step: '0.01' },
   { key: 'price_per_km',      label: 'Precio por km (día)',      prefix: '$', step: '0.001' },
   { key: 'minimum_fare',      label: 'Carrera mínima (día)',     prefix: '$', step: '0.01' },
@@ -991,7 +991,7 @@ const FARE_FIELDS = [
   { key: 'radius_expansion_km', label: 'Expansión por intervalo',suffix: 'km', step: '0.5' },
   { key: 'radius_expansion_interval_sec', label: 'Intervalo de expansión', suffix: 's', step: '15' },
   { key: 'max_negotiation_discount_pct', label: 'Descuento máx. negociación', suffix: '%', step: '1' },
-] as const;
+];
 
 function TarifasTab({ coopId }: { coopId: string }) {
   const [values, setValues] = useState<Record<string, string>>({});
