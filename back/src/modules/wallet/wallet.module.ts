@@ -9,11 +9,13 @@ import { BankAccount } from './entities/bank-account.entity';
 import { Driver } from '../drivers/entities/driver.entity';
 import { User } from '../users/entities/user.entity';
 import { StorageModule } from '../storage/storage.module';
+import { GatewayModule } from '../gateway/gateway.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([DriverWallet, WalletTransaction, Recharge, BankAccount, Driver, User]),
     StorageModule,
+    GatewayModule,
   ],
   providers: [WalletService],
   controllers: [WalletController],

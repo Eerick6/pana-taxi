@@ -6,9 +6,12 @@ class AppEnv {
   static const bool isDev  = _flavor != 'prod';
   static const bool isProd = _flavor == 'prod';
 
-  static const String baseUrl = _flavor == 'prod'
-      ? 'https://api.panataxis.com'
-      : 'http://10.0.2.2:3002';
+  static const String baseUrl = String.fromEnvironment(
+    'API_URL',
+    defaultValue: _flavor == 'prod'
+        ? 'https://pana-taxi-production.up.railway.app'
+        : 'http://10.0.2.2:3002',
+  );
 
   static const String mapboxToken = String.fromEnvironment(
     'MAPBOX_TOKEN',

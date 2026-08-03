@@ -587,6 +587,7 @@ export class DriversService {
     if (doc.status === DocumentStatus.APPROVED) throw new BadRequestException('El documento ya está aprobado');
 
     await this.documentsRepo.update(documentId, { status: DocumentStatus.APPROVED, rejection_reason: null });
+    this.gateway.notifyDriver(driverId, 'document.approved', { document_id: documentId });
     return { message: 'Documento aprobado' };
   }
 
@@ -645,8 +646,8 @@ export class DriversService {
       )
       .getMany();
 
-    // ±~150m de ruido para evitar stalking de conductores por clientes
-    const fuzz = (v: number) => v + (Math.random() - 0.5) * 0.003;
+    // ±~50m de ruido para evitar stalking de conductores por clientes
+    const fuzz = (v: number) => v + (Math.random() - 0.5) * 0.0009;
     return drivers.map(d => ({
       id: d.id,
       lat: fuzz(parseFloat(d.current_lat as any)),

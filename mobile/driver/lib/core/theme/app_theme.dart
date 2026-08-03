@@ -8,10 +8,11 @@ class AppTheme {
   AppTheme._();
 
   static ThemeData get light {
-    const colorScheme = ColorScheme(
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: AppColors.primary,
       brightness: Brightness.light,
       primary: AppColors.primary,
-      onPrimary: AppColors.secondary,   // texto negro sobre amarillo
+      onPrimary: AppColors.secondary,
       secondary: AppColors.secondary,
       onSecondary: AppColors.white,
       error: AppColors.error,

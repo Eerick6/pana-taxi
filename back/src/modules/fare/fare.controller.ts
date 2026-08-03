@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Body, Query, Param, UseGuards } from '@nestjs/common';
 import { FareService } from './fare.service';
 import { SetFareConfigDto } from './dto/set-fare-config.dto';
 import { JwtGuard } from '../auth/guards/jwt.guard';
@@ -23,6 +23,20 @@ export class FareController {
   @Roles(UserRole.OWNER)
   setConfig(@Body() dto: SetFareConfigDto) {
     return this.fareService.setConfig(dto);
+  }
+
+  // Ver configuración de tarifas de una cooperativa (con fallback a global)
+  @Get('config/:cooperativeId')
+  @Roles(UserRole.OWNER, UserRole.PLATFORM_ADMIN)
+  getCoopConfig(@Param('cooperativeId') cooperativeId: string) {
+    return this.fareService.getConfig(cooperativeId);
+  }
+
+  // Guardar configuración de tarifas de una cooperativa específica
+  @Patch('config/:cooperativeId')
+  @Roles(UserRole.OWNER, UserRole.PLATFORM_ADMIN)
+  setCoopConfig(@Param('cooperativeId') cooperativeId: string, @Body() dto: SetFareConfigDto) {
+    return this.fareService.setCoopConfig(cooperativeId, dto);
   }
 
   // Calcular tarifa estimada para una ruta (llamado desde la app antes de pedir el taxi)

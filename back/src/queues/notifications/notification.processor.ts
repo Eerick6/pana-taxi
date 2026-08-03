@@ -54,16 +54,27 @@ export class NotificationProcessor extends WorkerHost {
     }
 
     const isTripAlert = data.data?.['type'] === 'trip_new';
+    // Trip alerts: data-only (no notification field) + high priority → Android always
+    // delivers to onBackgroundMessage even in Doze mode, never intercepted by the OS.
+    // Other messages: normal notification message.
     const androidNotif = isTripAlert
-      ? { priority: 'high' as const, notification: { channelId: 'trip_alert', sound: 'trip_alert', defaultSound: false } }
+      ? { priority: 'high' as const }
       : { priority: 'high' as const };
-    const apns = { payload: { aps: { sound: isTripAlert ? 'trip_alert.wav' : 'default', badge: 1 } } };
-    const base = {
-      notification: { title: data.title, body: data.body },
-      data: data.data ?? {},
-      android: androidNotif,
-      apns,
-    };
+    const apns = isTripAlert
+      ? { payload: { aps: { contentAvailable: true, sound: 'trip_alert.wav', badge: 1 } } }
+      : { payload: { aps: { sound: 'default', badge: 1 } } };
+    const base = isTripAlert
+      ? {
+          data: { ...data.data ?? {}, title: data.title, body: data.body },
+          android: androidNotif,
+          apns,
+        }
+      : {
+          notification: { title: data.title, body: data.body },
+          data: data.data ?? {},
+          android: androidNotif,
+          apns,
+        };
 
     try {
       if (tokens.length === 1) {

@@ -18,12 +18,29 @@ interface FieldDef {
   max?: number;
 }
 
-const FIELDS: FieldDef[] = [
-  { key: 'base_fare', label: 'Tarifa Base', description: 'Costo mínimo al iniciar un viaje', prefix: '$', step: '0.01', min: 0 },
-  { key: 'per_km_rate', label: 'Tarifa por KM', description: 'Costo por kilómetro recorrido', prefix: '$', step: '0.001', min: 0 },
-  { key: 'per_min_rate', label: 'Tarifa por Minuto', description: 'Costo por minuto en ruta', prefix: '$', step: '0.001', min: 0 },
-  { key: 'minimum_fare', label: 'Tarifa Mínima', description: 'Valor mínimo cobrable', prefix: '$', step: '0.01', min: 0 },
-  { key: 'platform_commission_pct', label: 'Comisión Plataforma', description: 'Porcentaje sobre cada viaje', suffix: '%', step: '0.1', min: 0, max: 100 },
+const FARE_FIELDS: FieldDef[] = [
+  { key: 'base_fare',        label: 'Bajada de bandera',    description: 'Costo fijo al iniciar un viaje',               prefix: '$', step: '0.01',  min: 0 },
+  { key: 'price_per_km',     label: 'Tarifa por KM (día)',  description: 'Precio por kilómetro en horario diurno',        prefix: '$', step: '0.001', min: 0 },
+  { key: 'price_per_minute', label: 'Tarifa por Minuto',    description: 'Costo por minuto en ruta o detenido',           prefix: '$', step: '0.001', min: 0 },
+  { key: 'minimum_fare',     label: 'Carrera mínima (día)', description: 'Valor mínimo cobrable en horario diurno',       prefix: '$', step: '0.01',  min: 0 },
+];
+
+const NIGHT_FIELDS: FieldDef[] = [
+  { key: 'night_price_per_km',  label: 'Tarifa por KM (noche)',  description: 'Precio por kilómetro en horario nocturno', prefix: '$', step: '0.001', min: 0 },
+  { key: 'night_minimum_fare',  label: 'Carrera mínima (noche)', description: 'Valor mínimo cobrable en horario nocturno', prefix: '$', step: '0.01',  min: 0 },
+  { key: 'night_start_hour',    label: 'Inicio horario nocturno', description: 'Hora en que empieza la tarifa nocturna (0–23)', suffix: 'h', step: '1', min: 0, max: 23 },
+  { key: 'night_end_hour',      label: 'Fin horario nocturno',    description: 'Hora en que termina la tarifa nocturna (0–23)', suffix: 'h', step: '1', min: 0, max: 23 },
+];
+
+const RADIUS_FIELDS: FieldDef[] = [
+  { key: 'search_radius_km',           label: 'Radio inicial',         description: 'Radio de búsqueda al crear el viaje',                    suffix: 'km',  step: '0.5', min: 0.5, max: 20 },
+  { key: 'radius_max_km',              label: 'Radio máximo',          description: 'Límite hasta el que puede crecer el radio',               suffix: 'km',  step: '1',   min: 1,   max: 200 },
+  { key: 'radius_expansion_km',        label: 'Expansión por paso',    description: 'Cuántos km crece el radio en cada intervalo',             suffix: 'km',  step: '0.5', min: 0.5, max: 50 },
+  { key: 'radius_expansion_interval_sec', label: 'Intervalo de expansión', description: 'Cada cuántos segundos expande el radio sin conductor', suffix: 's',   step: '15',  min: 15,  max: 3600 },
+];
+
+const NEGOTIATION_FIELDS: FieldDef[] = [
+  { key: 'max_negotiation_discount_pct', label: 'Descuento máximo negociado', description: 'Límite de descuento que puede pedir el cliente en modo InDrive (% sobre tarifa sugerida)', suffix: '%', step: '1', min: 0, max: 50 },
 ];
 
 interface SocialEntry { enabled: boolean; url?: string; }
@@ -336,6 +353,29 @@ function CoopProfileSection({ coopId }: { coopId: string }) {
   );
 }
 
+function FareField({ f, form, onChange }: {
+  f: FieldDef;
+  form: FareConfig;
+  onChange: (key: keyof FareConfig, val: number) => void;
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{f.label}</label>
+      <p className="text-xs text-gray-400 mb-2">{f.description}</p>
+      <div className="relative">
+        {f.prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-400">{f.prefix}</span>}
+        <input
+          type="number" step={f.step ?? '1'} min={f.min} max={f.max}
+          value={form[f.key] ?? ''}
+          onChange={(e) => onChange(f.key, parseFloat(e.target.value) || 0)}
+          className={`w-full py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500 ${f.prefix ? 'pl-7 pr-3' : f.suffix ? 'pl-3 pr-8' : 'px-3'}`}
+        />
+        {f.suffix && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400">{f.suffix}</span>}
+      </div>
+    </div>
+  );
+}
+
 export default function ConfigView() {
   const { user, isCoopStaff } = useAuth();
   const [config, setConfig] = useState<FareConfig | null>(null);
@@ -422,66 +462,99 @@ export default function ConfigView() {
         <CoopProfileSection coopId={user.cooperative_id} />
       )}
 
-      {/* ── Tarifas ── */}
-      <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
-        <div className="mb-6">
-          <h2 className="text-base font-semibold text-gray-800 dark:text-white">Configuración de Tarifas</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Tasas aplicadas al cálculo de viajes en modo taxímetro</p>
-        </div>
-
-        {loading ? (
+      {/* ── Tarifas y radio ── */}
+      {loading ? (
+        <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.from({ length: 5 }).map((_, i) => (
+            {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="animate-pulse">
                 <div className="h-3 w-24 rounded bg-gray-100 dark:bg-gray-800 mb-2" />
                 <div className="h-10 w-full rounded-xl bg-gray-100 dark:bg-gray-800" />
               </div>
             ))}
           </div>
-        ) : form ? (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {FIELDS.map((f) => (
-                <div key={f.key}>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{f.label}</label>
-                  <p className="text-xs text-gray-400 mb-2">{f.description}</p>
-                  <div className="relative">
-                    {f.prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-400">{f.prefix}</span>}
-                    <input
-                      type="number" step={f.step ?? '1'} min={f.min} max={f.max}
-                      value={form[f.key]}
-                      onChange={(e) => setForm((prev) => prev ? ({ ...prev, [f.key]: parseFloat(e.target.value) || 0 }) : prev)}
-                      className={`w-full py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500 ${f.prefix ? 'pl-7 pr-3' : f.suffix ? 'pl-3 pr-7' : 'px-3'}`}
-                    />
-                    {f.suffix && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-400">{f.suffix}</span>}
-                  </div>
-                </div>
+        </div>
+      ) : form ? (
+        <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
+
+          {/* Tarifa diurna */}
+          <div className="p-6 space-y-4">
+            <div>
+              <h2 className="text-base font-semibold text-gray-800 dark:text-white">Tarifas diurnas</h2>
+              <p className="text-sm text-gray-400 mt-0.5">Aplican en el horario configurado abajo</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              {FARE_FIELDS.map((f) => (
+                <FareField key={f.key} f={f} form={form} onChange={(key, val) => setForm((prev) => prev ? ({ ...prev, [key]: val }) : prev)} />
               ))}
             </div>
-            <div className="flex items-center gap-3 mt-6 pt-6 border-t border-gray-100 dark:border-gray-800">
-              <button
-                onClick={handleSaveFare}
-                disabled={!isDirty || saving}
-                className="px-6 py-2.5 text-sm font-semibold rounded-xl bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50 transition-colors flex items-center gap-2"
-              >
-                {saving && <Spinner />}
-                {saving ? 'Guardando...' : 'Guardar cambios'}
-              </button>
-              {isDirty && !saving && (
-                <button
-                  onClick={() => setForm(config)}
-                  className="px-4 py-2.5 text-sm font-medium rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                >
-                  Descartar
-                </button>
-              )}
-              {saved && <span className="text-sm font-medium text-success-600 dark:text-success-400">✓ Guardado</span>}
+          </div>
+
+          {/* Tarifa nocturna */}
+          <div className="p-6 space-y-4">
+            <div>
+              <h2 className="text-base font-semibold text-gray-800 dark:text-white">Tarifas nocturnas</h2>
+              <p className="text-sm text-gray-400 mt-0.5">Se aplican automáticamente según el horario de inicio/fin</p>
             </div>
-          </>
-        ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              {NIGHT_FIELDS.map((f) => (
+                <FareField key={f.key} f={f} form={form} onChange={(key, val) => setForm((prev) => prev ? ({ ...prev, [key]: val }) : prev)} />
+              ))}
+            </div>
+          </div>
+
+          {/* Búsqueda de conductores */}
+          <div className="p-6 space-y-4">
+            <div>
+              <h2 className="text-base font-semibold text-gray-800 dark:text-white">Búsqueda de conductores</h2>
+              <p className="text-sm text-gray-400 mt-0.5">El sistema empieza con el radio inicial y lo expande cada intervalo hasta el máximo si no hay conductor disponible</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              {RADIUS_FIELDS.map((f) => (
+                <FareField key={f.key} f={f} form={form} onChange={(key, val) => setForm((prev) => prev ? ({ ...prev, [key]: val }) : prev)} />
+              ))}
+            </div>
+          </div>
+
+          {/* Negociación */}
+          <div className="p-6 space-y-4">
+            <div>
+              <h2 className="text-base font-semibold text-gray-800 dark:text-white">Modo negociado (InDrive)</h2>
+              <p className="text-sm text-gray-400 mt-0.5">Límite de descuento que puede proponer el cliente sobre la tarifa sugerida</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              {NEGOTIATION_FIELDS.map((f) => (
+                <FareField key={f.key} f={f} form={form} onChange={(key, val) => setForm((prev) => prev ? ({ ...prev, [key]: val }) : prev)} />
+              ))}
+            </div>
+          </div>
+
+          {/* Botones guardar */}
+          <div className="px-6 py-4 flex items-center gap-3">
+            <button
+              onClick={handleSaveFare}
+              disabled={!isDirty || saving}
+              className="px-6 py-2.5 text-sm font-semibold rounded-xl bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50 transition-colors flex items-center gap-2"
+            >
+              {saving && <Spinner />}
+              {saving ? 'Guardando...' : 'Guardar cambios'}
+            </button>
+            {isDirty && !saving && (
+              <button
+                onClick={() => setForm(config)}
+                className="px-4 py-2.5 text-sm font-medium rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                Descartar
+              </button>
+            )}
+            {saved && <span className="text-sm font-medium text-success-600 dark:text-success-400">✓ Guardado</span>}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
           <div className="py-8 text-center text-sm text-gray-400">No se pudo cargar la configuración</div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ── Redes sociales y contacto ── */}
       <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
@@ -541,8 +614,8 @@ export default function ConfigView() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
           { icon: '🗺️', title: 'Modo Taxímetro', desc: 'El costo se calcula en tiempo real usando tarifa base + km + minutos. El conductor no puede modificarlo.' },
-          { icon: '🤝', title: 'Modo Negociado', desc: 'El cliente propone un precio, el conductor puede aceptar o hacer contraoferta. Mayor flexibilidad.' },
-          { icon: '📊', title: 'Comisión', desc: 'La plataforma retiene el % configurado de cada viaje completado. Aplica sobre la tarifa final acordada.' },
+          { icon: '🤝', title: 'Modo Negociado (InDrive)', desc: 'El cliente propone un precio, el conductor puede aceptar o hacer contraoferta. El descuento máximo lo defines tú.' },
+          { icon: '📡', title: 'Radio de búsqueda', desc: 'Empieza chico y crece automáticamente cada intervalo. Conductores fuera del radio no ven el viaje hasta que el radio los alcance.' },
         ].map((c) => (
           <div key={c.title} className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5">
             <div className="text-2xl mb-3">{c.icon}</div>

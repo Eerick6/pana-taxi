@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../data/models/trip_model.dart';
 import '../../data/providers/trip_provider.dart';
+import '../../../ratings/presentation/rating_sheet.dart';
 
 class TripActivePage extends ConsumerStatefulWidget {
   const TripActivePage({super.key, required this.tripId});
@@ -95,9 +97,15 @@ class _TripView extends ConsumerStatefulWidget {
 
 class _TripViewState extends ConsumerState<_TripView> {
   MapLibreMapController? _mapController;
-  double? _etaMinutes;      // ETA from Mapbox when going to pickup
+  double? _etaMinutes;
   Timer?  _waitTimer;
   int     _waitSecondsLeft = 0;
+  final   _externalDio = Dio();
+
+  // Taxímetro en vivo
+  double _meterDisplay   = 0;
+  double _meterIncPerSec = 0;
+  Timer? _meterTimer;
 
   @override
   void initState() {
@@ -107,11 +115,17 @@ class _TripViewState extends ConsumerState<_TripView> {
         (_) => _startWaitCountdown(widget.trip.waitTimerExpiresAt),
       );
     }
+    // Inicializar display con el valor que ya tiene el viaje (base_fare o último meter_amount)
+    if (widget.trip.isMeterMode) {
+      _meterDisplay = widget.trip.fare ?? 0;
+    }
   }
 
   @override
   void dispose() {
     _waitTimer?.cancel();
+    _meterTimer?.cancel();
+    _externalDio.close(force: true);
     super.dispose();
   }
 
@@ -186,7 +200,7 @@ class _TripViewState extends ConsumerState<_TripView> {
     }
 
     try {
-      final dio = Dio();
+      final dio = _externalDio;
       final url = 'https://api.mapbox.com/directions/v5/mapbox/driving-traffic/'
           '$startLng,$startLat;$endLng,$endLat'
           '?geometries=geojson&overview=full&access_token=${AppConfig.mapboxToken}';
@@ -262,6 +276,22 @@ class _TripViewState extends ConsumerState<_TripView> {
   Widget build(BuildContext context) {
     final trip = widget.trip;
 
+    // Taxímetro en vivo — sincroniza cada vez que el backend manda trip.meter_update
+    if (trip.status == 'in_progress' && trip.isMeterMode) {
+      ref.listen<({double amount, double incPerSec})>(liveMeterProvider, (_, next) {
+        if (!mounted) return;
+        _meterTimer?.cancel();
+        setState(() {
+          _meterDisplay   = next.amount;
+          _meterIncPerSec = next.incPerSec;
+        });
+        _meterTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+          if (!mounted) { _meterTimer?.cancel(); return; }
+          setState(() => _meterDisplay += _meterIncPerSec);
+        });
+      });
+    }
+
     final (actionLabel, actionColor, action) = switch (trip.status) {
       'accepted' => (
           'Llegué al punto de recogida',
@@ -281,8 +311,17 @@ class _TripViewState extends ConsumerState<_TripView> {
           'Finalizar viaje',
           AppColors.primary,
           () async {
-            final fare = trip.fare ?? 0.0;
+            final fare = trip.isMeterMode ? _meterDisplay : (trip.fare ?? 0.0);
             await ref.read(activeTripProvider.notifier).completeTrip(trip.id, fare);
+            if (!context.mounted) return;
+            await showRatingSheet(
+              context: context,
+              ref: ref,
+              title: '¿Cómo fue el pasajero?',
+              subtitle: 'Tu calificación ayuda a mejorar el servicio',
+              direction: 'driver_to_client',
+              tripId: trip.id,
+            );
             if (context.mounted) context.go('/home');
           },
         ),
@@ -304,7 +343,7 @@ class _TripViewState extends ConsumerState<_TripView> {
             },
             myLocationEnabled: true,
             myLocationTrackingMode: MyLocationTrackingMode.none,
-            myLocationRenderMode: MyLocationRenderMode.compass,
+            myLocationRenderMode: MyLocationRenderMode.normal,
             trackCameraPosition: true,
           ),
 
@@ -377,7 +416,9 @@ class _TripViewState extends ConsumerState<_TripView> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(trip.clientName, style: AppTextStyles.labelLg),
-                            if (trip.fare != null)
+                            if (trip.status == 'in_progress' && trip.isMeterMode)
+                              _LiveMeterDisplay(amount: _meterDisplay)
+                            else if (trip.fare != null)
                               Text('\$${trip.fare!.toStringAsFixed(2)}', style: AppTextStyles.h3.copyWith(color: AppColors.primaryText)),
                           ],
                         ),
@@ -426,6 +467,31 @@ class _TripViewState extends ConsumerState<_TripView> {
 }
 
 // ── Reusable widgets ──────────────────────────────────────────────────────────
+
+class _LiveMeterDisplay extends StatelessWidget {
+  const _LiveMeterDisplay({required this.amount});
+  final double amount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text(
+          '\$${amount.toStringAsFixed(2)}',
+          style: AppTextStyles.h2.copyWith(
+            color: Colors.green.shade700,
+            fontWeight: FontWeight.w800,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text('taxímetro', style: AppTextStyles.caption.copyWith(color: AppColors.gray400)),
+      ],
+    );
+  }
+}
 
 class _StatusBadge extends StatelessWidget {
   const _StatusBadge({required this.status});

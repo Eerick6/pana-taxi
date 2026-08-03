@@ -9,11 +9,13 @@ import { Driver } from '../drivers/entities/driver.entity';
 import { Cooperative } from '../cooperatives/entities/cooperative.entity';
 import { CooperativeOwner } from '../cooperatives/entities/cooperative-owner.entity';
 import { StorageModule } from '../storage/storage.module';
+import { GatewayModule } from '../gateway/gateway.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Vehicle, VehicleAssignment, VehicleDocument, Driver, Cooperative, CooperativeOwner]),
     StorageModule,
+    GatewayModule,
   ],
   providers: [VehiclesService],
   controllers: [VehiclesController],

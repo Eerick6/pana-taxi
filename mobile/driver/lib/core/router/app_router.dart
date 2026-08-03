@@ -23,6 +23,8 @@ import '../../features/wallet/presentation/pages/wallet_page.dart';
 import '../../features/profile/presentation/pages/profile_page.dart';
 import '../../features/trip/presentation/pages/driver_trips_history_page.dart';
 import '../../features/notifications/presentation/pages/notifications_page.dart';
+import '../../features/auth/presentation/pages/forgot_password_page.dart';
+import '../../features/auth/presentation/pages/reset_password_page.dart';
 
 // El router es estático — la navegación la maneja el SplashPage.
 // No se recrea con cada cambio de auth para evitar resets de navegación.
@@ -50,7 +52,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           return OtpPage(phone: extra as String);
         },
       ),
-      GoRoute(path: '/auth/onboarding', builder: (_, _) => const OnboardingPage()),
+      GoRoute(path: '/auth/onboarding',       builder: (_, _) => const OnboardingPage()),
+      GoRoute(path: '/auth/forgot-password',  builder: (_, _) => const ForgotPasswordPage()),
+      GoRoute(
+        path: '/auth/reset-password',
+        builder: (_, state) => ResetPasswordPage(email: state.extra as String? ?? ''),
+      ),
 
       // ── Main shell (4 tabs: Mapa | Mensajes | Billetera | Perfil) ────────────
       ShellRoute(

@@ -171,6 +171,10 @@ class TripsApi {
     await _dio.patch('/trips/$tripId/cancel', data: {'reason': 'Cliente canceló'});
   }
 
+  Future<void> clientReady(String tripId) async {
+    await _dio.patch('/trips/$tripId/client-ready');
+  }
+
   Future<FareEstimate> getFareEstimate({
     required double originLat,
     required double originLng,

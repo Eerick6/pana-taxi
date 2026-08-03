@@ -226,10 +226,18 @@ export interface AuditLog {
 // ── Fare Config ────────────────────────────────────────────────────────────
 export interface FareConfig {
   base_fare: number;
-  per_km_rate: number;
-  per_min_rate: number;
+  price_per_km: number;
+  price_per_minute: number;
   minimum_fare: number;
-  platform_commission_pct: number;
+  night_price_per_km: number;
+  night_minimum_fare: number;
+  night_start_hour: number;
+  night_end_hour: number;
+  search_radius_km: number;
+  radius_max_km: number;
+  radius_expansion_km: number;
+  radius_expansion_interval_sec: number;
+  max_negotiation_discount_pct: number;
 }
 
 // ── Auth ───────────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import {
   getCooperativaFleet, getCooperativaVehiculos,
   approveVehiculo, rejectVehiculo, suspendVehiculo, activateVehiculo, deleteVehiculo,
   getCooperativaSocios, aprobarSocio, rechazarSocio,
+  getCoopFareConfig, setCoopFareConfig,
   type CoopMember, type CoopStand, type FleetDriver, type FleetResponse, type CoopVehicle, type CoopSocio,
 } from '../api';
 import { dateStr } from '@/lib/format';
@@ -40,7 +41,7 @@ const ONLINE_BADGE: Record<string, string> = {
   offline: 'bg-gray-100 text-gray-500',
 };
 
-type Tab = 'info' | 'paradas' | 'vehiculos' | 'equipo' | 'socios' | 'flota';
+type Tab = 'info' | 'paradas' | 'vehiculos' | 'equipo' | 'socios' | 'flota' | 'tarifas';
 
 function Spinner() {
   return (
@@ -974,6 +975,102 @@ function FlotaTab({ coopId }: { coopId: string }) {
   );
 }
 
+// ── Tab: Tarifas ──────────────────────────────────────────────────────────────
+
+const FARE_FIELDS = [
+  { key: 'base_fare',         label: 'Bajada de bandera',       prefix: '$', step: '0.01' },
+  { key: 'price_per_km',      label: 'Precio por km (día)',      prefix: '$', step: '0.001' },
+  { key: 'minimum_fare',      label: 'Carrera mínima (día)',     prefix: '$', step: '0.01' },
+  { key: 'price_per_minute',  label: 'Precio por minuto',        prefix: '$', step: '0.001' },
+  { key: 'night_price_per_km',label: 'Precio por km (noche)',    prefix: '$', step: '0.001' },
+  { key: 'night_minimum_fare',label: 'Carrera mínima (noche)',   prefix: '$', step: '0.01' },
+  { key: 'night_start_hour',  label: 'Inicio tarifa nocturna',   suffix: 'h', step: '1' },
+  { key: 'night_end_hour',    label: 'Fin tarifa nocturna',      suffix: 'h', step: '1' },
+  { key: 'search_radius_km',  label: 'Radio inicial de búsqueda',suffix: 'km', step: '0.5' },
+  { key: 'radius_max_km',     label: 'Radio máximo',             suffix: 'km', step: '1' },
+  { key: 'radius_expansion_km', label: 'Expansión por intervalo',suffix: 'km', step: '0.5' },
+  { key: 'radius_expansion_interval_sec', label: 'Intervalo de expansión', suffix: 's', step: '15' },
+  { key: 'max_negotiation_discount_pct', label: 'Descuento máx. negociación', suffix: '%', step: '1' },
+] as const;
+
+function TarifasTab({ coopId }: { coopId: string }) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const cfg = await getCoopFareConfig(coopId);
+      const mapped: Record<string, string> = {};
+      for (const f of FARE_FIELDS) mapped[f.key] = String((cfg as Record<string, unknown>)[f.key] ?? '');
+      setValues(mapped);
+    } catch { /* leave empty */ }
+    setLoading(false);
+  }, [coopId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const body: Record<string, number> = {};
+      for (const f of FARE_FIELDS) {
+        const v = parseFloat(values[f.key]);
+        if (!isNaN(v)) body[f.key] = v;
+      }
+      await setCoopFareConfig(coopId, body);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  if (loading) {
+    return <div className="grid grid-cols-2 gap-3">{[...Array(8)].map((_, i) => <div key={i} className="h-16 rounded-xl bg-gray-100 dark:bg-gray-800 animate-pulse" />)}</div>;
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-start gap-2 p-3 rounded-xl bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 text-xs">
+        <span className="text-sm mt-0.5">ℹ️</span>
+        <span>Estas tarifas aplican exclusivamente a los viajes de esta cooperativa. Si no tiene configuración propia, hereda los valores globales de la plataforma.</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {FARE_FIELDS.map(({ key, label, prefix, suffix, step }) => (
+          <div key={key}>
+            <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">{label}</label>
+            <div className="flex items-center rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 overflow-hidden focus-within:border-brand-400 dark:focus-within:border-brand-500 transition-colors">
+              {prefix && <span className="px-3 text-xs text-gray-400 border-r border-gray-200 dark:border-gray-700">{prefix}</span>}
+              <input
+                type="number"
+                step={step}
+                min={0}
+                value={values[key] ?? ''}
+                onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
+                className="flex-1 px-3 py-2.5 text-sm text-gray-800 dark:text-white bg-transparent focus:outline-none"
+              />
+              {suffix && <span className="px-3 text-xs text-gray-400 border-l border-gray-200 dark:border-gray-700">{suffix}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50 transition-colors flex items-center gap-2"
+        >
+          {saving && <Spinner />}
+          Guardar tarifas
+        </button>
+        {saved && <span className="text-xs text-success-600 dark:text-success-400 font-medium">Tarifas guardadas</span>}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function CooperativaDetail({ id }: { id: string }) {
@@ -1000,6 +1097,7 @@ export default function CooperativaDetail({ id }: { id: string }) {
 
   const TABS: { key: Tab; label: string; icon: string }[] = [
     { key: 'info', label: 'Información', icon: '📋' },
+    { key: 'tarifas', label: 'Tarifas', icon: '💰' },
     { key: 'socios', label: 'Socios', icon: '🤝' },
     { key: 'vehiculos', label: 'Vehículos', icon: '🚖' },
     { key: 'paradas', label: 'Paradas', icon: '📍' },
@@ -1071,6 +1169,7 @@ export default function CooperativaDetail({ id }: { id: string }) {
       {/* Tab content */}
       <div>
         {tab === 'info' && <InfoTab coop={coop} onAction={onAction} canControl={canControl} isOwner={isOwner} />}
+        {tab === 'tarifas' && <TarifasTab coopId={id} />}
         {tab === 'socios' && <SociosTab coopId={id} />}
         {tab === 'vehiculos' && <VehiculosTab coopId={id} />}
         {tab === 'paradas' && <ParadasTab coopId={id} />}

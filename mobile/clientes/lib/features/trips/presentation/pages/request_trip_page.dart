@@ -101,6 +101,7 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
   List<SearchSuggestion> _suggestions = [];
   bool _suggesting = false;
   Timer? _debounce;
+  Timer? _geocodeDebounce;
 
   @override
   void initState() {
@@ -117,6 +118,7 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
     _searchCtrl.dispose();
     _searchFocus.dispose();
     _debounce?.cancel();
+    _geocodeDebounce?.cancel();
     super.dispose();
   }
 
@@ -308,7 +310,7 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
       return;
     }
     setState(() => _suggesting = true);
-    _debounce = Timer(const Duration(milliseconds: 400), () async {
+    _debounce = Timer(const Duration(milliseconds: 200), () async {
       final origin  = ref.read(tripRouteProvider).origin;
       final results = await ref.read(geocodingServiceProvider).suggest(
         v,
@@ -376,7 +378,6 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
     setState(() {
       _pinPickMode     = true;
       _pinPickIsOrigin = isOrigin;
-      // Pre-cargar la dirección actual para que el botón arranque activo
       _pinPickAddress  = current?.displayName;
       _pinPickLoading  = false;
     });
@@ -384,7 +385,8 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
 
   Future<void> _onMapIdle() async {
     if (!_pinPickMode) return;
-    _geocodeCamera();
+    _geocodeDebounce?.cancel();
+    _geocodeDebounce = Timer(const Duration(milliseconds: 600), _geocodeCamera);
   }
 
   Future<void> _geocodeCamera() async {
@@ -392,12 +394,20 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
     final pos = _ctrl?.cameraPosition?.target;
     if (pos == null) return;
     setState(() => _pinPickLoading = true);
+
+    // Mover el símbolo existente al centro de la cámara (sin overlay extra)
+    final ll = LatLng(pos.latitude, pos.longitude);
+    if (_pinPickIsOrigin && _originSym != null) {
+      await _ctrl?.updateSymbol(_originSym!, SymbolOptions(geometry: ll));
+    } else if (!_pinPickIsOrigin && _destSym != null) {
+      await _ctrl?.updateSymbol(_destSym!, SymbolOptions(geometry: ll));
+    }
+
     final addr = await ref
         .read(geocodingServiceProvider)
         .reverseGeocode(pos.latitude, pos.longitude);
     if (!mounted) return;
     setState(() {
-      // Si el geocode falla, mantener la dirección anterior para no bloquear el botón
       if (addr != null) _pinPickAddress = addr;
       _pinPickLoading = false;
     });
@@ -492,48 +502,6 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
 
           // ── Overlay pin pick inline ──────────────────────────────────────
           if (_pinPickMode) ...[
-            // Pin central fijo
-            IgnorePointer(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 62, height: 62,
-                      decoration: BoxDecoration(
-                        color: _pinPickIsOrigin
-                            ? const Color(0xFF34A853)
-                            : const Color(0xFFEA4335),
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.28),
-                            blurRadius: 10, offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(Icons.location_on, color: Colors.white, size: 34),
-                    ),
-                    CustomPaint(
-                      size: const Size(20, 11),
-                      painter: _PinTriangle(
-                        _pinPickIsOrigin
-                            ? const Color(0xFF34A853)
-                            : const Color(0xFFEA4335),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Container(
-                      width: 12, height: 5,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
             // Botón atrás
             Positioned(
               top: MediaQuery.of(context).padding.top + 8,
@@ -777,24 +745,6 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
       ),
     );
   }
-}
-
-// ── Triángulo del pin picker ──────────────────────────────────────────────────
-
-class _PinTriangle extends CustomPainter {
-  const _PinTriangle(this.color);
-  final Color color;
-  @override
-  void paint(Canvas canvas, Size size) {
-    final path = Path()
-      ..moveTo(0, 0)
-      ..lineTo(size.width, 0)
-      ..lineTo(size.width / 2, size.height)
-      ..close();
-    canvas.drawPath(path, Paint()..color = color);
-  }
-  @override
-  bool shouldRepaint(_PinTriangle old) => old.color != color;
 }
 
 // ── Fila editable (origen / destino) ─────────────────────────────────────────

@@ -20,6 +20,29 @@ import '../providers/active_trip_provider.dart';
 
 // ── Map helpers ───────────────────────────────────────────────────────────────
 
+Uint8List? _originPinCache;
+Uint8List? _destPinCache;
+Uint8List? _taxiIconBytesCache;
+
+Future<Uint8List> _getOriginPin() async =>
+    _originPinCache ??= await _buildTearDropPin(const Color(0xFF34A853));
+Future<Uint8List> _getDestPin() async =>
+    _destPinCache ??= await _buildTearDropPin(const Color(0xFFEA4335), w: 64, h: 90);
+Future<Uint8List> _getTaxiIconBytes() async =>
+    _taxiIconBytesCache ??= await _buildTaxiIconBytes();
+
+Future<Uint8List> _buildTaxiIconBytes() async {
+  final data = await rootBundle.load('assets/images/logo.webp');
+  final codec = await ui.instantiateImageCodec(
+    data.buffer.asUint8List(),
+    targetWidth: 56,
+    targetHeight: 56,
+  );
+  final frame = await codec.getNextFrame();
+  final bd = await frame.image.toByteData(format: ui.ImageByteFormat.png);
+  return bd!.buffer.asUint8List();
+}
+
 Future<Uint8List> _buildTearDropPin(Color color, {double w = 56, double h = 78}) async {
   final cx    = w / 2;
   final headR = w * 0.36;
@@ -81,9 +104,7 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
   final Map<String, DateTime> _offerArrivals = {};
   Timer? _driverTimer;
 
-  // Timer de espera
-  Duration _elapsed = Duration.zero;
-  Timer?   _elapsedTimer;
+  DateTime? _tripCreatedAt;
 
   // Círculo pulsante
   late AnimationController _pulseCtrl;
@@ -96,18 +117,10 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
   void initState() {
     super.initState();
     _trip = widget.initialTrip;
-
-    // Timer de espera desde creación del viaje
-    final createdAt = widget.initialTrip.createdAt;
-    if (createdAt != null) {
-      _elapsed = DateTime.now().difference(createdAt);
-    }
-    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _elapsed += const Duration(seconds: 1));
-    });
+    _tripCreatedAt = widget.initialTrip.createdAt;
 
     // Conductores cercanos cada 5 s (solo mapa, no crítico)
-    _driverTimer = Timer.periodic(const Duration(seconds: 5), (_) => _refreshDrivers());
+    _driverTimer = Timer.periodic(const Duration(seconds: 20), (_) => _refreshDrivers());
 
     // Socket en tiempo real para ofertas y cambios de estado
     _initSocket();
@@ -158,7 +171,6 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
   @override
   void dispose() {
     _socketActive = false;
-    _elapsedTimer?.cancel();
     _driverTimer?.cancel();
     _pulseAnim.removeListener(_onPulseTick);
     _pulseCtrl.dispose();
@@ -174,11 +186,11 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     if (c == null) return;
     _mapReady = true;
 
-    // Construir imágenes en paralelo antes de tocar el mapa
+    // Construir imágenes en paralelo antes de tocar el mapa (cacheadas)
     final results = await Future.wait([
-      _buildTearDropPin(const Color(0xFF34A853)),
-      _buildTearDropPin(const Color(0xFFEA4335), w: 64, h: 90),
-      _buildTaxiIconBytes(),
+      _getOriginPin(),
+      _getDestPin(),
+      _getTaxiIconBytes(),
     ]);
     await c.addImage('origin-pin', results[0]);
     await c.addImage('dest-pin',   results[1]);
@@ -364,26 +376,7 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     }).toList(),
   };
 
-  // ── Canvas images ─────────────────────────────────────────────────────────
-
-  Future<Uint8List> _buildTaxiIconBytes() async {
-    // Cargar el WebP del logo (fondo transparente, solo el amarillo)
-    final data = await rootBundle.load('assets/images/logo.webp');
-    final codec = await ui.instantiateImageCodec(
-      data.buffer.asUint8List(),
-      targetWidth: 56,
-      targetHeight: 56,
-    );
-    final frame = await codec.getNextFrame();
-    final bd = await frame.image.toByteData(format: ui.ImageByteFormat.png);
-    return bd!.buffer.asUint8List();
-  }
-
-  String get _elapsedLabel {
-    final m = _elapsed.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = _elapsed.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
+  // _buildTaxiIconBytes movido a módulo-nivel (ver arriba) para cacheo
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
@@ -442,10 +435,7 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
                         _isNegotiated ? 'Esperando ofertas…' : 'Buscando conductor…',
                         style: AppTextStyles.label,
                       ),
-                      Text(
-                        'Tiempo de espera: $_elapsedLabel',
-                        style: AppTextStyles.caption.copyWith(color: AppColors.gray400),
-                      ),
+                      _ElapsedLabel(createdAt: _tripCreatedAt),
                     ],
                   ),
                 ),
@@ -1158,29 +1148,76 @@ class _RouteRow extends StatelessWidget {
   );
 }
 
+// Timer extraído a su propio widget — solo él se reconstruye cada segundo
+class _ElapsedLabel extends StatefulWidget {
+  const _ElapsedLabel({this.createdAt});
+  final DateTime? createdAt;
+
+  @override
+  State<_ElapsedLabel> createState() => _ElapsedLabelState();
+}
+
+class _ElapsedLabelState extends State<_ElapsedLabel> {
+  late Duration _elapsed;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _elapsed = widget.createdAt != null
+        ? DateTime.now().difference(widget.createdAt!)
+        : Duration.zero;
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _elapsed += const Duration(seconds: 1));
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = _elapsed.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = _elapsed.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return Text(
+      'Tiempo de espera: $m:$s',
+      style: AppTextStyles.caption.copyWith(color: AppColors.gray400),
+    );
+  }
+}
+
 class _AdjustButton extends StatelessWidget {
   const _AdjustButton({required this.icon, this.onTap});
-  final IconData    icon;
+  final IconData      icon;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
-    child: Container(
-      width: 28, height: 28,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: onTap != null ? AppColors.primary : AppColors.gray100,
+    behavior: HitTestBehavior.opaque,
+    child: SizedBox(
+      width: 48, height: 48,
+      child: Center(
+        child: Container(
+          width: 28, height: 28,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: onTap != null ? AppColors.primary : AppColors.gray100,
+          ),
+          child: Icon(icon, size: 16, color: onTap != null ? Colors.black : AppColors.gray500),
+        ),
       ),
-      child: Icon(icon, size: 16, color: onTap != null ? Colors.black : AppColors.gray500),
     ),
   );
 }
 
 class _CancelButton extends StatelessWidget {
   const _CancelButton({required this.cancelling, required this.onCancel});
-  final bool          cancelling;
-  final VoidCallback  onCancel;
+  final bool         cancelling;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -1191,7 +1228,7 @@ class _CancelButton extends StatelessWidget {
         side: const BorderSide(color: AppColors.error),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
-      onPressed: cancelling ? null : onCancel,
+      onPressed: cancelling ? null : () => _confirm(context),
       child: cancelling
           ? const SizedBox(width: 18, height: 18,
               child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error))
@@ -1199,4 +1236,26 @@ class _CancelButton extends StatelessWidget {
               style: AppTextStyles.label.copyWith(color: AppColors.error)),
     ),
   );
+
+  Future<void> _confirm(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Cancelar solicitud?'),
+        content: const Text('Se cancelará tu búsqueda de conductor.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Sí, cancelar'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) onCancel();
+  }
 }

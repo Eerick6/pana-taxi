@@ -9,9 +9,8 @@ import {
   NavigationControl,
   LngLatBounds,
 } from 'maplibre-gl';
-import { io, Socket } from 'socket.io-client';
 import { useAuth } from '@/context/AuthContext';
-import { getAccessToken } from '@/lib/api';
+import { useSocket } from '@/context/SocketContext';
 import api from '@/lib/api';
 
 interface Driver {
@@ -150,11 +149,11 @@ function elapsed(startedAt: string | null): string {
 
 export default function MapboxLiveMap({ drivers, tripRequests = [], focusLat, focusLng, focusZoom, provinceLabel, highlightDriverId }: Props) {
   const { user } = useAuth();
+  const { socket } = useSocket();
   const containerRef    = useRef<HTMLDivElement>(null);
   const mapRef          = useRef<MaplibreMap | null>(null);
   const markerMapRef    = useRef<Map<string, MarkerEntry>>(new Map());
   const clientMarkersRef = useRef<Map<string, ClientMarkerEntry>>(new Map());
-  const socketRef       = useRef<Socket | null>(null);
   const driversRef      = useRef<Driver[]>(drivers);
   const meterPollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -510,33 +509,20 @@ export default function MapboxLiveMap({ drivers, tripRequests = [], focusLat, fo
     else map.once('load', syncClientMarkers);
   }, [syncClientMarkers]);
 
-  // ── WebSocket real-time location ──────────────────────────────────────────
+  // ── WebSocket real-time location — usa el socket compartido ─────────────────
   useEffect(() => {
-    if (!user) return;
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3002';
-    const token = getAccessToken();
-    if (!token) return;
+    if (!socket || !user) return;
 
-    const socket = io(apiUrl, {
-      auth: { token },
-      transports: ['websocket'],
-      reconnectionDelay: 3000,
-      reconnectionDelayMax: 10000,
-    });
-
-    socket.on('connect', () => { console.debug('[map-ws] connected', socket.id); });
-    socket.on('connect_error', (err) => { console.debug('[map-ws] error', err.message); });
-
-    socket.on('driver.location', (payload: { driver_id: string; lat: number; lng: number }) => {
+    const handler = (payload: { driver_id: string; lat: number; lng: number }) => {
       const entry = markerMapRef.current.get(payload.driver_id);
       if (!entry) return;
       entry.marker.setLngLat([payload.lng, payload.lat]);
       entry.driver = { ...entry.driver, current_lat: payload.lat, current_lng: payload.lng };
-    });
+    };
 
-    socketRef.current = socket;
-    return () => { socket.disconnect(); socketRef.current = null; };
-  }, [user]);
+    socket.on('driver.location', handler);
+    return () => { socket.off('driver.location', handler); };
+  }, [socket, user]);
 
   // ── Panel meter display ───────────────────────────────────────────────────
   const panel = selectedPanel;

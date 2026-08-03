@@ -204,6 +204,19 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 ),
               ),
 
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => context.push('/forgot-password'),
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                  child: Text(
+                    '¿Olvidaste tu contraseña?',
+                    style: AppTextStyles.body.copyWith(color: AppColors.secondary),
+                  ),
+                ),
+              ),
+
               const Spacer(),
 
               // ── Botón login ──────────────────────────────────────────────

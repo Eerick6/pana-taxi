@@ -54,6 +54,11 @@ class _ProfileContent extends ConsumerWidget {
           expandedHeight: 200,
           pinned: true,
           backgroundColor: AppColors.secondary,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.white, size: 20),
+            onPressed: () => context.pop(),
+          ),
+          title: Text(profile.fullName, style: AppTextStyles.labelLg.copyWith(color: AppColors.white)),
           flexibleSpace: FlexibleSpaceBar(
             background: Container(
               color: AppColors.secondary,
@@ -221,7 +226,7 @@ class _StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final (label, color) = switch (status) {
       'online' => ('En línea', Colors.green),
-      'busy' => ('Ocupado', AppColors.primary),
+      'busy' => ('Ocupado', const Color(0xFFE65100)),
       _ => ('Desconectado', AppColors.gray400),
     };
     return Container(

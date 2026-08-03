@@ -19,16 +19,18 @@ export class TripsScheduler {
   // Expande el radio de búsqueda para viajes sin conductor
   @Interval(15_000)
   async expandSearchRadii(): Promise<void> {
-    const config = await this.fareService.getConfig();
-    const intervalMs = config.radius_expansion_interval_sec * 1_000;
-    const expandKm = parseFloat(config.radius_expansion_km as any);
-    const maxKm = parseFloat(config.radius_max_km as any);
-
     const pendingTrips = await this.tripsRepo.find({
       where: { status: TripStatus.REQUESTED },
+      relations: ['cooperative'],
     });
 
     for (const trip of pendingTrips) {
+      // Config de la cooperativa del viaje (caché — sin query DB)
+      const config = await this.fareService.getConfig(trip.cooperative?.id ?? undefined);
+      const intervalMs = config.radius_expansion_interval_sec * 1_000;
+      const expandKm = parseFloat(config.radius_expansion_km as any);
+      const maxKm = parseFloat(config.radius_max_km as any);
+
       const currentRadius =
         trip.current_search_radius_km != null
           ? parseFloat(trip.current_search_radius_km as any)

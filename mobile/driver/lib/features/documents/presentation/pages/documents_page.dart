@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../../../core/network/dio_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../data/models/document_model.dart';
@@ -78,7 +79,7 @@ class DocumentsPage extends ConsumerWidget {
                     width: double.infinity,
                     height: 52,
                     child: OutlinedButton.icon(
-                      onPressed: () => _showRequestReviewDialog(context),
+                      onPressed: () => _requestReview(context, ref),
                       icon: const Icon(Icons.send_outlined, size: 18),
                       label: const Text('Solicitar revisión de perfil'),
                       style: OutlinedButton.styleFrom(
@@ -95,23 +96,28 @@ class DocumentsPage extends ConsumerWidget {
     );
   }
 
-  void _showRequestReviewDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text('Solicitud enviada'),
-        content: const Text(
-          'El equipo de Pana Taxi revisará tus documentos pronto. Te notificaremos cuando tu perfil sea aprobado.',
+  Future<void> _requestReview(BuildContext context, WidgetRef ref) async {
+    try {
+      final dio = ref.read(dioProvider);
+      final res = await dio.patch('/drivers/me/request-review');
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res.data['message'] as String? ?? 'Solicitud enviada.'),
+          backgroundColor: AppColors.success,
+          behavior: SnackBarBehavior.floating,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Entendido'),
-          ),
-        ],
-      ),
-    );
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo enviar la solicitud. Intenta de nuevo.'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _pickAndUpload(BuildContext context, WidgetRef ref, String type) async {

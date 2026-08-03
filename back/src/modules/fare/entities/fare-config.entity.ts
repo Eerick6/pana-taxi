@@ -2,12 +2,16 @@ import {
   Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn,
 } from 'typeorm';
 
-// Configuración global de tarifas — refleja la regulación ANT.
-// Única fila en la tabla. Las comisiones por cooperativa van en la entidad Cooperative.
+// Configuración de tarifas por cooperativa (o global cuando cooperative_id IS NULL).
+// La fila global (cooperative_id = null) aplica a todas las coops sin config propia.
 @Entity('fare_configs')
 export class FareConfig {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  // null → configuración global; uuid → configuración específica de esa cooperativa
+  @Column({ type: 'varchar', length: 36, nullable: true, unique: true })
+  cooperative_id: string | null;
 
   // ── Tarifa diurna (06:00–22:00) ─────────────────────────────────────────────
 
@@ -49,11 +53,11 @@ export class FareConfig {
   slow_speed_threshold_kmh: number;
 
   // Radio inicial para mostrar viajes al conductor (km)
-  @Column({ type: 'decimal', precision: 6, scale: 2, default: '5.00' })
+  @Column({ type: 'decimal', precision: 6, scale: 2, default: '1.00' })
   search_radius_km: number;
 
   // Radio máximo al que puede crecer (km)
-  @Column({ type: 'decimal', precision: 6, scale: 2, default: '20.00' })
+  @Column({ type: 'decimal', precision: 6, scale: 2, default: '10.00' })
   radius_max_km: number;
 
   // Cuántos km crece el radio en cada expansión
@@ -61,7 +65,7 @@ export class FareConfig {
   radius_expansion_km: number;
 
   // Cada cuántos segundos expande el radio si no hay conductor
-  @Column({ type: 'smallint', default: 60 })
+  @Column({ type: 'smallint', default: 30 })
   radius_expansion_interval_sec: number;
 
   // Descuento máximo que puede ofrecer el cliente en modo negociación (%)

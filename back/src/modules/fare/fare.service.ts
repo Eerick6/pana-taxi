@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { FareConfig } from './entities/fare-config.entity';
 import { SetFareConfigDto } from './dto/set-fare-config.dto';
 import axios from 'axios';
@@ -30,12 +30,10 @@ export interface FareEstimate {
 
 @Injectable()
 export class FareService {
-  // Caché en memoria — la config de tarifas cambia raramente (ajustes del dueño)
-  // pero se lee en cada ping GPS de cada conductor en viaje.
-  private configCache: FareConfig | null = null;
-  private configCacheExpiry = 0;
-  // Los precios (km, minuto, base) son regulados por la ANT y cambian rarísimo.
-  // El caché dura 30 días; se actualiza inmediatamente cuando el dueño lo cambia vía setConfig().
+  // Caché en memoria keyed by 'global' o cooperativeId.
+  // Los precios son regulados por la ANT y cambian rarísimo — TTL 30 días.
+  // Se invalida inmediatamente en cada setConfig / setCoopConfig.
+  private configCaches = new Map<string, { config: FareConfig; expiry: number }>();
   private static readonly CONFIG_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
   constructor(
@@ -45,24 +43,45 @@ export class FareService {
 
   // ── Configuración ────────────────────────────────────────────────────────────
 
-  async getConfig(): Promise<FareConfig> {
-    if (this.configCache && Date.now() < this.configCacheExpiry) {
-      return this.configCache;
+  // Devuelve la config de la coop si existe, si no la global.
+  async getConfig(cooperativeId?: string): Promise<FareConfig> {
+    if (cooperativeId) {
+      const coopCached = this.configCaches.get(cooperativeId);
+      if (coopCached && Date.now() < coopCached.expiry) return coopCached.config;
+      const coopConfig = await this.configRepo.findOne({ where: { cooperative_id: cooperativeId } });
+      if (coopConfig) {
+        this.configCaches.set(cooperativeId, { config: coopConfig, expiry: Date.now() + FareService.CONFIG_TTL_MS });
+        return coopConfig;
+      }
     }
-    const config = await this.configRepo.findOne({ where: {} })
-      ?? await this.configRepo.save(this.configRepo.create());
-    this.configCache = config;
-    this.configCacheExpiry = Date.now() + FareService.CONFIG_TTL_MS;
+    return this.getGlobalConfig();
+  }
+
+  private async getGlobalConfig(): Promise<FareConfig> {
+    const globalCached = this.configCaches.get('global');
+    if (globalCached && Date.now() < globalCached.expiry) return globalCached.config;
+    const config = await this.configRepo.findOne({ where: { cooperative_id: IsNull() } })
+      ?? await this.configRepo.save(this.configRepo.create({ cooperative_id: null }));
+    this.configCaches.set('global', { config, expiry: Date.now() + FareService.CONFIG_TTL_MS });
     return config;
   }
 
   async setConfig(dto: SetFareConfigDto): Promise<FareConfig> {
-    const config = await this.getConfig();
+    const config = await this.getGlobalConfig();
     Object.assign(config, dto);
     const saved = await this.configRepo.save(config);
-    // Actualizar caché inmediatamente para que los conductores activos vean el cambio
-    this.configCache = saved;
-    this.configCacheExpiry = Date.now() + FareService.CONFIG_TTL_MS;
+    this.configCaches.set('global', { config: saved, expiry: Date.now() + FareService.CONFIG_TTL_MS });
+    return saved;
+  }
+
+  async setCoopConfig(cooperativeId: string, dto: SetFareConfigDto): Promise<FareConfig> {
+    let config = await this.configRepo.findOne({ where: { cooperative_id: cooperativeId } });
+    if (!config) {
+      config = this.configRepo.create({ cooperative_id: cooperativeId });
+    }
+    Object.assign(config, dto);
+    const saved = await this.configRepo.save(config);
+    this.configCaches.set(cooperativeId, { config: saved, expiry: Date.now() + FareService.CONFIG_TTL_MS });
     return saved;
   }
 
@@ -80,14 +99,14 @@ export class FareService {
 
     try {
       // Mapbox usa orden lng,lat (no lat,lng)
-      // driving-traffic usa datos de tráfico en tiempo real para distancia y duración reales
+      // driving (sin tráfico) — suficiente para taxis urbanos, responde ~3x más rápido que driving-traffic
       // overview=full + geometries=geojson devuelven la geometría de ruta completa
       const coords = `${originLng},${originLat};${destLng},${destLat}`;
       const res = await axios.get(
-        `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}`,
+        `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}`,
         {
           params: { access_token: token, overview: 'full', geometries: 'geojson' },
-          timeout: 5000,
+          timeout: 3000,
         },
       );
 

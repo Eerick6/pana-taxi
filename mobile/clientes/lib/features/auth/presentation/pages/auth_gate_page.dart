@@ -72,23 +72,32 @@ class _AuthGatePageState extends ConsumerState<AuthGatePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF101828),
+      backgroundColor: AppColors.secondary,
       body: Center(
-        child: _askingBiometric
-            ? Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.fingerprint,
-                      size: 64, color: AppColors.primary),
-                  const SizedBox(height: 20),
-                  Text(
-                    'Verificando identidad…',
-                    style: AppTextStyles.body
-                        .copyWith(color: AppColors.white),
-                  ),
-                ],
-              )
-            : const CircularProgressIndicator(color: AppColors.primary),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Image.asset('assets/images/logo.webp', width: 110, height: 110),
+            const SizedBox(height: 24),
+            Text('Pana Taxi',
+                style: AppTextStyles.h1.copyWith(color: AppColors.white)),
+            const SizedBox(height: 6),
+            Text('Tu taxi de confianza',
+                style: AppTextStyles.body.copyWith(color: AppColors.gray500)),
+            const SizedBox(height: 56),
+            if (_askingBiometric)
+              const Icon(Icons.fingerprint, size: 36, color: AppColors.primary)
+            else
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.primary,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

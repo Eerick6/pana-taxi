@@ -16,8 +16,14 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../data/datasources/trips_api.dart';
 import '../../domain/entities/active_trip.dart';
+import '../providers/active_trip_provider.dart';
+import '../widgets/trip_rating_sheet.dart';
+import '../../../chat/data/repositories/chat_repository.dart';
 
 // ── Canvas: taxi marker (circle con ícono de taxi) ───────────────────────────
+
+Uint8List? _taxiDotCache;
+Future<Uint8List> _getTaxiDot() async => _taxiDotCache ??= await _buildTaxiDot();
 
 Future<Uint8List> _buildTaxiDot() async {
   const size = 48.0;
@@ -66,6 +72,12 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
   bool     _mapReady = false;
   bool     _routeDrawn = false;
 
+  // Taxímetro en tiempo real (solo fareMode == 'meter' + in_progress)
+  double   _meterAmount = 0;
+  double   _meterIncPerSec = 0;
+  Timer?   _meterTimer;
+  bool     _clientReadySent = false;
+
   @override
   void initState() {
     super.initState();
@@ -76,6 +88,7 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
   @override
   void dispose() {
     _waitTimer?.cancel();
+    _meterTimer?.cancel();
     final socket = ref.read(socketClientProvider);
     socket.leaveTripRoom(widget.tripId);
     socket.off('trip.driver_arrived');
@@ -83,6 +96,8 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
     socket.off('trip.completed');
     socket.off('trip.cancelled');
     socket.off('driver.location');
+    socket.off('trip.meter_update');
+    socket.off('trip.rerouted');
     super.dispose();
   }
 
@@ -104,6 +119,14 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
   }
 
   Future<void> _loadTrip() async {
+    // Usar dato ya cacheado en el provider — evita request duplicado al arrancar
+    final cached = ref.read(activeTripProvider).valueOrNull;
+    if (cached != null) {
+      setState(() => _trip = cached);
+      if (_mapReady) _drawRoute();
+      return;
+    }
+    // Fallback: fetch directo si el provider aún no tiene datos
     final trip = await ref.read(tripsApiProvider).getActiveTrip();
     if (mounted && trip != null) {
       setState(() => _trip = trip);
@@ -155,19 +178,59 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
       if (_mapReady) _drawRoute();
     });
 
-    socket.on('trip.completed', (_) {
+    socket.on('trip.completed', (_) async {
+      if (!mounted) return;
+      final tripId = _trip?.id ?? widget.tripId;
+      await showTripRatingSheet(context, ref, tripId);
       if (mounted) context.go('/home');
     });
 
     socket.on('trip.cancelled', (_) {
       if (mounted) context.go('/home');
     });
+
+    socket.on('trip.rerouted', (data) async {
+      if (data is! Map || !mounted) return;
+      final geomRaw = data['route_geometry'];
+      if (geomRaw is! Map) return;
+      final geom = geomRaw as Map<String, dynamic>;
+      final ctrl = _mapController;
+      if (ctrl == null) return;
+      await ctrl.clearLines();
+      _routeDrawn = false;
+      final rawCoords = (geom['type'] == 'LineString')
+          ? geom['coordinates'] as List?
+          : (geom['geometry'] as Map?)?['coordinates'] as List?;
+      if (rawCoords == null || rawCoords.isEmpty) return;
+      final latLngs = rawCoords
+          .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
+          .toList();
+      await ctrl.addLine(LineOptions(geometry: latLngs, lineColor: '#ffffff', lineWidth: 10.0, lineOpacity: 1.0, lineJoin: 'round'));
+      await ctrl.addLine(LineOptions(geometry: latLngs, lineColor: '#4264fb', lineWidth: 6.0, lineOpacity: 1.0, lineJoin: 'round'));
+      _routeDrawn = true;
+    });
+
+    socket.on('trip.meter_update', (data) {
+      if (data is! Map || !mounted) return;
+      final amount = (data['meter_amount'] as num?)?.toDouble();
+      final inc    = (data['increment_per_second'] as num?)?.toDouble() ?? 0.0;
+      if (amount == null) return;
+      setState(() {
+        _meterAmount    = amount;
+        _meterIncPerSec = inc;
+      });
+      _meterTimer?.cancel();
+      _meterTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) { _meterTimer?.cancel(); return; }
+        setState(() => _meterAmount += _meterIncPerSec);
+      });
+    });
   }
 
   Future<void> _onMapCreated(MapLibreMapController ctrl) async {
     _mapController = ctrl;
     // Registrar imagen del taxi
-    final taxiBytes = await _buildTaxiDot();
+    final taxiBytes = await _getTaxiDot();
     await ctrl.addImage('taxi-dot', taxiBytes);
     _mapReady = true;
     if (_trip != null) _drawRoute();
@@ -287,7 +350,17 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
             bottom: 0, left: 0, right: 0,
             child: trip == null
                 ? const SizedBox.shrink()
-                : _BottomPanel(trip: trip, bottomPad: botPad),
+                : _BottomPanel(
+                    trip: trip,
+                    bottomPad: botPad,
+                    meterAmount: _meterAmount,
+                    onClientReady: _clientReadySent ? null : () async {
+                      setState(() => _clientReadySent = true);
+                      try {
+                        await ref.read(tripsApiProvider).clientReady(widget.tripId);
+                      } catch (_) {}
+                    },
+                  ),
           ),
         ],
       ),
@@ -327,9 +400,16 @@ class _StatusBanner extends StatelessWidget {
 // ── Bottom Panel ──────────────────────────────────────────────────────────────
 
 class _BottomPanel extends ConsumerStatefulWidget {
-  const _BottomPanel({required this.trip, required this.bottomPad});
+  const _BottomPanel({
+    required this.trip,
+    required this.bottomPad,
+    required this.meterAmount,
+    this.onClientReady,
+  });
   final ActiveTrip trip;
   final double bottomPad;
+  final double meterAmount;
+  final VoidCallback? onClientReady;
 
   @override
   ConsumerState<_BottomPanel> createState() => _BottomPanelState();
@@ -359,6 +439,12 @@ class _BottomPanelState extends ConsumerState<_BottomPanel> {
           _DriverCard(trip: trip),
           const SizedBox(height: 12),
 
+          // Taxímetro en tiempo real (solo meter + in_progress)
+          if (trip.status == 'in_progress' && trip.fareMode == 'meter' && widget.meterAmount > 0) ...[
+            _MeterDisplay(amount: widget.meterAmount),
+            const SizedBox(height: 12),
+          ],
+
           // Route
           _RouteRow(trip: trip),
 
@@ -366,6 +452,25 @@ class _BottomPanelState extends ConsumerState<_BottomPanel> {
           if (trip.otpCode != null && trip.status == 'accepted') ...[
             const SizedBox(height: 12),
             _OtpCard(otp: trip.otpCode!),
+          ],
+
+          // Ya voy button (driver_arrived)
+          if (trip.status == 'driver_arrived' && widget.onClientReady != null) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity, height: 44,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.success,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: 0,
+                ),
+                onPressed: widget.onClientReady,
+                icon: const Icon(Icons.directions_walk, size: 18),
+                label: const Text('Ya voy al taxi'),
+              ),
+            ),
           ],
 
           // Cancel button (solo en accepted)
@@ -418,12 +523,12 @@ class _BottomPanelState extends ConsumerState<_BottomPanel> {
 
 // ── Driver Card ───────────────────────────────────────────────────────────────
 
-class _DriverCard extends StatelessWidget {
+class _DriverCard extends ConsumerWidget {
   const _DriverCard({required this.trip});
   final ActiveTrip trip;
 
   @override
-  Widget build(BuildContext context) => Row(children: [
+  Widget build(BuildContext context, WidgetRef ref) => Row(children: [
     CircleAvatar(
       radius: 28,
       backgroundColor: AppColors.gray100,
@@ -453,6 +558,24 @@ class _DriverCard extends StatelessWidget {
           ),
       ]),
     ),
+    // Botón de chat
+    if (['accepted', 'driver_arrived', 'in_progress'].contains(trip.status))
+      GestureDetector(
+        onTap: () async {
+          try {
+            final convId = await ref.read(chatRepositoryProvider).openTripConversation(trip.id);
+            if (context.mounted) {
+              context.push('/chat/$convId', extra: {'driverName': trip.driverName ?? 'Conductor'});
+            }
+          } catch (_) {}
+        },
+        child: Container(
+          margin: const EdgeInsets.only(right: 4),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: AppColors.info.withValues(alpha: 0.15), shape: BoxShape.circle),
+          child: const Icon(Icons.chat_bubble_outline_rounded, color: AppColors.info, size: 20),
+        ),
+      ),
     if (trip.driverPhone != null) _CallButton(phone: trip.driverPhone!),
   ]);
 }
@@ -513,6 +636,36 @@ class _RouteRow extends StatelessWidget {
           style: AppTextStyles.caption, maxLines: 1, overflow: TextOverflow.ellipsis,
         )),
       ]),
+    ]),
+  );
+}
+
+// ── Meter Display ─────────────────────────────────────────────────────────────
+
+class _MeterDisplay extends StatelessWidget {
+  const _MeterDisplay({required this.amount});
+  final double amount;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    decoration: BoxDecoration(
+      color: AppColors.secondary.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: AppColors.secondary.withValues(alpha: 0.25)),
+    ),
+    child: Row(children: [
+      const Icon(Icons.speed_rounded, color: AppColors.secondary, size: 20),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Taxímetro', style: AppTextStyles.caption.copyWith(color: AppColors.secondary)),
+          Text(
+            '\$${amount.toStringAsFixed(2)}',
+            style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: AppColors.secondary),
+          ),
+        ]),
+      ),
     ]),
   );
 }

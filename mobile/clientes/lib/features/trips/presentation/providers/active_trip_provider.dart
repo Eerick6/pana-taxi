@@ -3,23 +3,16 @@ import '../../../../core/storage/secure_storage.dart';
 import '../../data/datasources/trips_api.dart';
 import '../../domain/entities/active_trip.dart';
 
-// autoDispose: el polling se detiene cuando el usuario sale de la pantalla que lo observa
-// Solo está activo en home_page (SOS button) y auth_gate (redirect al reabrir la app)
+// Un solo fetch al arrancar. Las actualizaciones llegan por socket desde home_page.dart
+// (trip.accepted → ref.invalidate, trip.cancelled → ref.invalidate).
+// autoDispose: se detiene automáticamente cuando no hay consumidores activos.
 final activeTripProvider =
-    StreamProvider.autoDispose<ActiveTrip?>((ref) async* {
-  final api     = ref.read(tripsApiProvider);
-  final storage = ref.read(secureStorageProvider);
-  while (true) {
-    final token = await storage.getAccessToken();
-    if (token != null) {
-      try {
-        yield await api.getActiveTrip();
-      } catch (_) {
-        yield null;
-      }
-    } else {
-      yield null;
-    }
-    await Future.delayed(const Duration(seconds: 10));
+    FutureProvider.autoDispose<ActiveTrip?>((ref) async {
+  final token = await ref.read(secureStorageProvider).getAccessToken();
+  if (token == null) return null;
+  try {
+    return await ref.read(tripsApiProvider).getActiveTrip();
+  } catch (_) {
+    return null;
   }
 });

@@ -1,12 +1,11 @@
 "use client";
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { io, Socket } from "socket.io-client";
 import flatpickr from "flatpickr";
 import "flatpickr/dist/flatpickr.css";
 import { Spanish } from "flatpickr/dist/l10n/es";
 import api from "@/lib/api";
-import { getAccessToken } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useSocket } from "@/context/SocketContext";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -285,7 +284,7 @@ function MsgBubble({ msg, convParticipantAId }: { msg: AdminMessage; convPartici
 
 export default function AdminChatPanel() {
   const { user } = useAuth();
-  const socketRef = useRef<Socket | null>(null);
+  const { socket } = useSocket();
 
   const [convs, setConvs] = useState<AdminConversation[]>([]);
   const [total, setTotal] = useState(0);
@@ -378,60 +377,58 @@ export default function AdminChatPanel() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ── WebSocket ──────────────────────────────────────────────────────────────
+  // Ref para la conversación activa — evita recrear el listener en cada cambio
+  const selectedConvRef = useRef<AdminConversation | null>(null);
+  useEffect(() => { selectedConvRef.current = selectedConv; }, [selectedConv]);
+
+  // ── WebSocket — usa el socket compartido del SocketContext ──────────────────
   useEffect(() => {
-    if (!user) return;
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3002";
-    const token = getAccessToken();
-    const socket = io(apiUrl, { auth: { token }, transports: ["websocket"] });
+    if (!socket || !user) return;
 
-    socket.on(
-      "chat.message",
-      (payload: {
-        message_id: string;
-        conversation_id: string;
-        sender_id: string;
-        sender_name: string;
-        content: string;
-        created_at: string;
-      }) => {
-        setConvs((prev) =>
-          prev
-            .map((c) =>
-              c.id === payload.conversation_id
-                ? {
-                    ...c,
-                    last_message_at: payload.created_at,
-                    message_count: c.message_count + 1,
-                    last_message: { content: payload.content, created_at: payload.created_at },
-                  }
-                : c
-            )
-            .sort((a, b) => (b.last_message_at ?? "").localeCompare(a.last_message_at ?? ""))
-        );
+    const handler = (payload: {
+      message_id: string;
+      conversation_id: string;
+      sender_id: string;
+      sender_name: string;
+      content: string;
+      created_at: string;
+    }) => {
+      setConvs((prev) =>
+        prev
+          .map((c) =>
+            c.id === payload.conversation_id
+              ? {
+                  ...c,
+                  last_message_at: payload.created_at,
+                  message_count: c.message_count + 1,
+                  last_message: { content: payload.content, created_at: payload.created_at },
+                }
+              : c
+          )
+          .sort((a, b) => (b.last_message_at ?? "").localeCompare(a.last_message_at ?? ""))
+      );
 
-        if (selectedConv?.id === payload.conversation_id) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: payload.message_id,
-              conversation_id: payload.conversation_id,
-              content: payload.content,
-              created_at: payload.created_at,
-              sender: {
-                id: payload.sender_id,
-                email: payload.sender_name,
-                full_name: payload.sender_name,
-              },
+      if (selectedConvRef.current?.id === payload.conversation_id) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: payload.message_id,
+            conversation_id: payload.conversation_id,
+            content: payload.content,
+            created_at: payload.created_at,
+            sender: {
+              id: payload.sender_id,
+              email: payload.sender_name,
+              full_name: payload.sender_name,
             },
-          ]);
-        }
+          },
+        ]);
       }
-    );
+    };
 
-    socketRef.current = socket;
-    return () => { socket.disconnect(); socketRef.current = null; };
-  }, [user, selectedConv]);
+    socket.on("chat.message", handler);
+    return () => { socket.off("chat.message", handler); };
+  }, [socket, user]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (

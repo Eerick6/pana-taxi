@@ -8,19 +8,25 @@ class GeocodingService {
   GeocodingService()
       : _photon = Dio(BaseOptions(
           baseUrl: 'https://photon.komoot.io',
-          connectTimeout: const Duration(seconds: 8),
-          receiveTimeout: const Duration(seconds: 8),
+          connectTimeout: const Duration(seconds: 4),
+          receiveTimeout: const Duration(seconds: 4),
           headers: {'User-Agent': 'PanaTaxi/1.0'},
         )),
         _nominatim = Dio(BaseOptions(
           baseUrl: 'https://nominatim.openstreetmap.org',
-          connectTimeout: const Duration(seconds: 10),
-          receiveTimeout: const Duration(seconds: 10),
+          connectTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
           headers: {'User-Agent': 'PanaTaxi/1.0'},
         ));
 
   final Dio _photon;
   final Dio _nominatim;
+
+  // Caché de reverse geocode — evita llamadas repetidas cuando el pin no se movió
+  double? _cachedLat;
+  double? _cachedLng;
+  String? _cachedAddr;
+  static const _cacheThresholdM = 30.0; // metros
 
   // Autocomplete via Photon (OSM) — gratis, sin API key, retorna POIs + calles + coords directas.
   Future<List<SearchSuggestion>> suggest(
@@ -112,6 +118,11 @@ class GeocodingService {
 
   // Reverse geocoding via Nominatim — gratis, sin API key, sin plugin nativo.
   Future<String?> reverseGeocode(double lat, double lng) async {
+    // Retornar caché si el pin no se movió más de 30m
+    if (_cachedLat != null && _cachedLng != null && _cachedAddr != null) {
+      final dist = _haversineM(_cachedLat!, _cachedLng!, lat, lng);
+      if (dist < _cacheThresholdM) return _cachedAddr;
+    }
     try {
       final res = await _nominatim.get<Map<String, dynamic>>(
         '/reverse',
@@ -125,11 +136,23 @@ class GeocodingService {
         if ((addr['city']         as String?)?.isNotEmpty == true) addr['city']         as String
             else if ((addr['town'] as String?)?.isNotEmpty == true) addr['town']        as String,
       ];
-      return parts.isEmpty ? null : parts.join(', ');
+      final result = parts.isEmpty ? null : parts.join(', ');
+      if (result != null) {
+        _cachedLat = lat;
+        _cachedLng = lng;
+        _cachedAddr = result;
+      }
+      return result;
     } catch (e) {
       if (kDebugMode) debugPrint('[GeocodingService] reverseGeocode error: $e');
       return null;
     }
+  }
+
+  // Manhattan distance en metros — suficiente para el umbral de 30m del caché
+  double _haversineM(double lat1, double lng1, double lat2, double lng2) {
+    const degToM = 111000.0;
+    return ((lat2 - lat1).abs() + (lng2 - lng1).abs()) * degToM;
   }
 }
 

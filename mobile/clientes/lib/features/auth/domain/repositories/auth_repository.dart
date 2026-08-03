@@ -35,6 +35,12 @@ abstract class AuthRepository {
     required String code,
   });
 
+  /// Sends a password reset code to the given email.
+  Future<void> forgotPassword(String email);
+
+  /// Resets password using the code sent to email.
+  Future<void> resetPassword(String email, String token, String password);
+
   /// Uploads profile photo. Returns the stored URL.
   Future<String> uploadPhoto(List<int> bytes, String filename);
 }

@@ -1307,7 +1307,8 @@ export class TripsService {
       return parseFloat(coopOverridePct as any) / 100;
     }
     const config = await this.configRepo.findOne({ where: { key: 'commission_rate' } });
-    const pct = config ? parseFloat(config.value) : DEFAULT_COMMISSION_RATE_PCT;
+    const rawPct = config ? parseFloat(config.value) : NaN;
+    const pct = isNaN(rawPct) ? DEFAULT_COMMISSION_RATE_PCT : rawPct;
     return pct / 100;
   }
 

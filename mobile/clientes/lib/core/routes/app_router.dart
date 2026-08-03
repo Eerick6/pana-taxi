@@ -16,6 +16,10 @@ import '../../features/trips/domain/entities/active_trip.dart';
 import '../../features/trips/presentation/pages/confirm_trip_page.dart';
 import '../../features/trips/presentation/pages/searching_page.dart';
 import '../../features/trips/presentation/pages/active_trip_page.dart';
+import '../../features/auth/presentation/pages/forgot_password_page.dart';
+import '../../features/auth/presentation/pages/reset_password_page.dart';
+import '../../features/notifications/presentation/pages/notifications_page.dart';
+import '../../features/chat/presentation/pages/trip_chat_page.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/',
@@ -47,6 +51,14 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/register',
       builder: (context, state) => const RegisterPage(),
+    ),
+    GoRoute(
+      path: '/forgot-password',
+      builder: (context, state) => const ForgotPasswordPage(),
+    ),
+    GoRoute(
+      path: '/reset-password',
+      builder: (context, state) => ResetPasswordPage(email: state.extra as String? ?? ''),
     ),
     GoRoute(
       path: '/home',
@@ -93,6 +105,20 @@ final appRouter = GoRouter(
       path: '/trip/:id',
       builder: (context, state) =>
           ActiveTripPage(tripId: state.pathParameters['id']!),
+    ),
+    GoRoute(
+      path: '/notifications',
+      builder: (context, state) => const NotificationsPage(),
+    ),
+    GoRoute(
+      path: '/chat/:conversationId',
+      builder: (context, state) {
+        final extra = state.extra as Map<String, dynamic>?;
+        return TripChatPage(
+          conversationId: state.pathParameters['conversationId']!,
+          driverName: extra?['driverName'] as String?,
+        );
+      },
     ),
   ],
 );

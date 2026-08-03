@@ -2,6 +2,7 @@ class TripModel {
   const TripModel({
     required this.id,
     required this.status,
+    required this.fareMode,
     required this.originAddress,
     required this.destinationAddress,
     required this.originLat,
@@ -19,6 +20,7 @@ class TripModel {
 
   final String    id;
   final String    status;
+  final String    fareMode;
   final String    originAddress;
   final String    destinationAddress;
   final double    originLat;
@@ -32,6 +34,8 @@ class TripModel {
   final double?   distance;
   final int?      durationMinutes;
   final DateTime? waitTimerExpiresAt;
+
+  bool get isMeterMode => fareMode == 'meter';
 
   bool get isActive => ['accepted', 'driver_arrived', 'in_progress'].contains(status);
 
@@ -66,6 +70,7 @@ class TripModel {
     return TripModel(
       id: json['id'] as String,
       status: json['status'] as String,
+      fareMode: json['fare_mode'] as String? ?? 'meter',
       originAddress: json['origin_address'] as String? ?? '',
       destinationAddress: json['destination_address'] as String? ?? '',
       originLat: toDouble(json['origin_lat']),

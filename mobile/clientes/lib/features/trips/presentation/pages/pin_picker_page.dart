@@ -32,6 +32,29 @@ class _PinPickerPageState extends ConsumerState<PinPickerPage> {
   double? _lng;
   String? _address;
   bool _loading = false;
+  bool _moving  = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _lat = widget.initialLat;
+    _lng = widget.initialLng;
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    if (!mounted || _loading) return;
+    final pos = _ctrl?.cameraPosition?.target;
+    if (pos == null) return;
+    _lat = pos.latitude;
+    _lng = pos.longitude;
+    if (!_moving) setState(() => _moving = true);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -41,45 +64,60 @@ class _PinPickerPageState extends ConsumerState<PinPickerPage> {
     return Scaffold(
       body: Stack(
         children: [
-          // ── Mapa ──────────────────────────────────────────────────────────
+          // ── Mapa ─────────────────────────────────────────────────────────
           MapLibreMap(
-            onMapCreated: (c) { _ctrl = c; },
+            onMapCreated: (c) {
+              _ctrl = c;
+              c.addListener(_onControllerChanged);
+            },
             onCameraIdle: _onIdle,
             initialCameraPosition: CameraPosition(
               target: LatLng(initLat, initLng),
               zoom:   15,
             ),
-            styleString:        'https://tiles.openfreemap.org/styles/liberty',
-            myLocationEnabled:  false,
+            styleString:         'https://tiles.openfreemap.org/styles/liberty',
+            myLocationEnabled:   false,
             trackCameraPosition: true,
           ),
 
-          // ── Pin fijo en el centro — IgnorePointer para no bloquear el mapa ──
+          // ── Pin fijo en el centro ─────────────────────────────────────────
           IgnorePointer(
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    width: 58, height: 58,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEA4335),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.28),
-                          blurRadius: 10, offset: const Offset(0, 4),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 120),
+                    transform: Matrix4.translationValues(0, _moving ? -14 : 0, 0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 58, height: 58,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEA4335),
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: _moving ? 0.38 : 0.28),
+                                blurRadius: _moving ? 18 : 10,
+                                offset: Offset(0, _moving ? 8 : 4),
+                              ),
+                            ],
+                          ),
+                          child: const Icon(Icons.location_on, color: Colors.white, size: 32),
                         ),
+                        CustomPaint(size: const Size(18, 10), painter: _TrianglePainter()),
                       ],
                     ),
-                    child: const Icon(Icons.location_on, color: Colors.white, size: 32),
                   ),
-                  CustomPaint(size: const Size(18, 10), painter: _TrianglePainter()),
                   const SizedBox(height: 4),
-                  Container(
-                    width: 12, height: 5,
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 120),
+                    width: _moving ? 8 : 12,
+                    height: 5,
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.18),
+                      color: Colors.black.withValues(alpha: _moving ? 0.10 : 0.18),
                       borderRadius: BorderRadius.circular(4),
                     ),
                   ),
@@ -129,20 +167,22 @@ class _PinPickerPageState extends ConsumerState<PinPickerPage> {
                 children: [
                   Text(widget.panelTitle, style: AppTextStyles.caption.copyWith(color: AppColors.gray400)),
                   const SizedBox(height: 6),
-                  _loading
-                      ? Row(children: [
-                          const SizedBox(
-                            width: 16, height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
-                          ),
-                          const SizedBox(width: 10),
-                          Text('Buscando dirección…', style: AppTextStyles.body.copyWith(color: AppColors.gray400)),
-                        ])
-                      : Text(
-                          _address ?? 'Mueve el mapa para elegir',
-                          style: AppTextStyles.body,
-                          maxLines: 2,
-                        ),
+                  _moving
+                      ? Text('Moviendo…', style: AppTextStyles.body.copyWith(color: AppColors.gray400))
+                      : _loading
+                          ? Row(children: [
+                              const SizedBox(
+                                width: 16, height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                              ),
+                              const SizedBox(width: 10),
+                              Text('Buscando dirección…', style: AppTextStyles.body.copyWith(color: AppColors.gray400)),
+                            ])
+                          : Text(
+                              _address ?? 'Mueve el mapa para elegir',
+                              style: AppTextStyles.body,
+                              maxLines: 2,
+                            ),
                   const SizedBox(height: 16),
                   SizedBox(
                     width: double.infinity,
@@ -162,6 +202,7 @@ class _PinPickerPageState extends ConsumerState<PinPickerPage> {
               ),
             ),
           ),
+
         ],
       ),
     );
@@ -170,7 +211,9 @@ class _PinPickerPageState extends ConsumerState<PinPickerPage> {
   Future<void> _onIdle() async {
     final pos = _ctrl?.cameraPosition?.target;
     if (pos == null) return;
-    setState(() { _loading = true; });
+    _lat = pos.latitude;
+    _lng = pos.longitude;
+    setState(() { _moving = false; _loading = true; });
 
     final address = await ref
         .read(geocodingServiceProvider)

@@ -80,13 +80,15 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   // ── Init: configurar Redis adapter si está disponible ───────────────────────
 
   async afterInit(server: Server) {
+    // Dar acceso al server WS a NotificationsService para emitir notification.new
+    this.notificationsService.setWsServer(server);
+
     if (!process.env.REDIS_URL) {
       this.logger.warn('REDIS_URL no configurado — Socket.IO en modo single-instance (no escala horizontal)');
       return;
     }
     try {
       const { createAdapter } = await import('@socket.io/redis-adapter');
-      // pub = the shared injected client, sub = a dedicated duplicate for subscriptions
       const sub = this.redis.duplicate();
       sub.on('error', (err) => this.logger.error(`Redis sub error: ${err.message}`));
       server.adapter(createAdapter(this.redis, sub));
@@ -196,19 +198,19 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       socket.to(ROOM.coop(coopId)).emit('driver.location', payload);
     }
 
-    // Config (caché 1 min) y viaje activo en paralelo — única query real por ping
-    const [config, activeTrip] = await Promise.all([
-      this.fareService.getConfig(),
-      this.tripsRepo.findOne({
-        where: {
-          driver: { id: driverId },
-          status: In([TripStatus.ACCEPTED, TripStatus.DRIVER_ARRIVED, TripStatus.IN_PROGRESS]),
-        },
-        relations: ['cooperative'],
-      }),
-    ]);
+    // Viaje activo primero — necesitamos cooperative_id para elegir config de tarifa
+    const activeTrip = await this.tripsRepo.findOne({
+      where: {
+        driver: { id: driverId },
+        status: In([TripStatus.ACCEPTED, TripStatus.DRIVER_ARRIVED, TripStatus.IN_PROGRESS]),
+      },
+      relations: ['cooperative'],
+    });
 
     if (!activeTrip) return { ok: true };
+
+    // Config de la cooperativa del viaje (caché en memoria — sin query DB)
+    const config = await this.fareService.getConfig(activeTrip.cooperative?.id ?? undefined);
 
     socket.to(ROOM.trip(activeTrip.id)).emit('driver.location', payload);
 
@@ -232,13 +234,16 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         this.tripsRepo.update(activeTrip.id, { meter_amount: newMeter as any })
           .catch(err => this.logger.error(`Meter write failed: ${err.message}`));
 
-        socket.to(ROOM.trip(activeTrip.id)).emit('trip.meter_update', {
+        const meterPayload = {
           trip_id: activeTrip.id,
           meter_amount: newMeter,
           increment_per_second: incrementPerSecond,
           speed_kmh: speedKmh,
           is_stopped: speedKmh < threshold,
-        });
+        };
+        // Al room del viaje (cliente) y de vuelta al conductor (excluido del .to())
+        socket.to(ROOM.trip(activeTrip.id)).emit('trip.meter_update', meterPayload);
+        socket.emit('trip.meter_update', meterPayload);
       }
 
       // ── Detección de desvío ──────────────────────────────────────────────────
@@ -377,8 +382,15 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
 
   notifyNewTrip(payload: Record<string, unknown> & { trip_id?: string }, cooperativeId?: string) {
     if (cooperativeId) {
-      this.server.to(ROOM.coop(cooperativeId)).emit('trip.new', payload);
+      const room = ROOM.coop(cooperativeId);
+      this.server.in(room).allSockets().then(ids =>
+        this.logger.log(`trip.new → coop room ${room}: ${ids.size} sockets`),
+      ).catch(() => {});
+      this.server.to(room).emit('trip.new', payload);
     } else {
+      this.server.in(ROOM.available).allSockets().then(ids =>
+        this.logger.log(`trip.new → available: ${ids.size} sockets`),
+      ).catch(() => {});
       this.server.to(ROOM.available).emit('trip.new', payload);
     }
 

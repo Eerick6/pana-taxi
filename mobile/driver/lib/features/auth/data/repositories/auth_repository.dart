@@ -133,6 +133,28 @@ class AuthRepository {
     }
   }
 
+  Future<void> forgotPassword(String email) async {
+    try {
+      await dio.post('/auth/password/forgot', data: {'email': email});
+    } on DioException catch (e) {
+      final msg = e.response?.data?['message'];
+      throw Exception(msg is List ? msg.first : msg ?? 'Error al enviar correo');
+    }
+  }
+
+  Future<void> resetPassword(String email, String token, String password) async {
+    try {
+      await dio.post('/auth/password/reset', data: {
+        'email':    email,
+        'token':    token,
+        'password': password,
+      });
+    } on DioException catch (e) {
+      final msg = e.response?.data?['message'];
+      throw Exception(msg is List ? msg.first : msg ?? 'Token inválido o expirado');
+    }
+  }
+
   Future<void> logout() async {
     try {
       await dio.post('/auth/logout');

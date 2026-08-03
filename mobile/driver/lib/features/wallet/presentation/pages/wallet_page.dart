@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +9,7 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../data/models/wallet_model.dart';
 import '../../data/providers/wallet_provider.dart';
 import '../../data/repositories/wallet_repository.dart';
+import '../../../../core/network/socket_client.dart';
 
 // ── Date formatting helpers (no locale → no hot-reload crash) ─────────────────
 
@@ -42,23 +42,47 @@ class WalletPage extends ConsumerStatefulWidget {
 }
 
 class _WalletPageState extends ConsumerState<WalletPage> {
-  Timer? _refreshTimer;
-
   @override
   void initState() {
     super.initState();
-    // Auto-refresh cada 30s para reflejar aprobaciones del admin sin recargar manualmente
-    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (!mounted) return;
-      ref.invalidate(walletProvider);
-      ref.invalidate(transactionsProvider);
-      ref.invalidate(myRechargesProvider);
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _listenSocket());
+  }
+
+  void _listenSocket() {
+    final socket = ref.read(socketClientProvider);
+    socket.on('wallet.recharge_approved', _onApproved);
+    socket.on('wallet.recharge_rejected', _onRejected);
+  }
+
+  void _onApproved(dynamic data) {
+    if (!mounted) return;
+    ref.invalidate(walletProvider);
+    ref.invalidate(transactionsProvider);
+    ref.invalidate(myRechargesProvider);
+    final amount = (data as Map<String, dynamic>?)?['amount'] ?? '';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Recarga de \$$amount aprobada y acreditada'),
+      backgroundColor: Colors.green,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  void _onRejected(dynamic data) {
+    if (!mounted) return;
+    ref.invalidate(myRechargesProvider);
+    final reason = (data as Map<String, dynamic>?)?['reason'] ?? 'Recarga rechazada';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(reason.toString()),
+      backgroundColor: AppColors.error,
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
+    final socket = ref.read(socketClientProvider);
+    socket.off('wallet.recharge_approved');
+    socket.off('wallet.recharge_rejected');
     super.dispose();
   }
 

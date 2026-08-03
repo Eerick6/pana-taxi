@@ -35,24 +35,30 @@ class AuthNotifier extends AsyncNotifier<UserModel?> {
 
   Future<void> loginWithPhone(String phone, String password) async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      return ref.read(authRepositoryProvider).loginWithPhone(phone, password);
-    });
+    final result = await AsyncValue.guard(
+      () => ref.read(authRepositoryProvider).loginWithPhone(phone, password),
+    );
+    state = result;
+    if (result.hasError) throw result.error!;
   }
 
   Future<void> loginWithBiometric() async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
+    final result = await AsyncValue.guard(() async {
       await ref.read(authRepositoryProvider).loginWithBiometric();
       return ref.read(authRepositoryProvider).getMe();
     });
+    state = result;
+    if (result.hasError) throw result.error!;
   }
 
   Future<void> verifyOtp(String phone, String otp) async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      return ref.read(authRepositoryProvider).verifyOtp(phone, otp);
-    });
+    final result = await AsyncValue.guard(
+      () => ref.read(authRepositoryProvider).verifyOtp(phone, otp),
+    );
+    state = result;
+    if (result.hasError) throw result.error!;
   }
 
   Future<void> logout() async {

@@ -7,8 +7,10 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/network/socket_client.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../../profile/data/providers/profile_provider.dart';
 import '../../../trip/presentation/widgets/trip_alert_overlay.dart';
+import '../../../documents/data/providers/document_provider.dart';
 import '../../../vehicles/data/providers/vehicle_provider.dart';
 import '../widgets/home_bottom_panel.dart';
 import '../widgets/home_pending_screen.dart';
@@ -47,6 +49,9 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     _locationSub?.cancel();
     TripAlertManager.dismiss();
     final socket = ref.read(socketClientProvider);
+    socket.off('driver.approved');
+    socket.off('vehicle.approved');
+    socket.off('document.approved');
     socket.off('trip.new');
     socket.off('trip.taken');
     socket.off('trip.radius_expanded');
@@ -60,15 +65,35 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
   void _listenForTrips() {
     final socket = ref.read(socketClientProvider);
 
-    socket.on('trip.new', (data) {
+    socket.on('driver.approved', (_) {
       if (!mounted) return;
-      if (data is! Map) return;
+      ref.read(driverProfileProvider.notifier).refresh();
+    });
+
+    socket.on('vehicle.approved', (_) {
+      if (!mounted) return;
+      ref.read(myVehiclesGuardProvider.notifier).refresh();
+    });
+
+    socket.on('document.approved', (_) {
+      if (!mounted) return;
+      ref.invalidate(documentsProvider);
+    });
+
+    socket.on('trip.new', (data) {
+      debugPrint('[trip.new] received: $data');
+      if (!mounted) { debugPrint('[trip.new] skip: not mounted'); return; }
+      if (data is! Map) { debugPrint('[trip.new] skip: data is not Map'); return; }
       final map = Map<String, dynamic>.from(data);
       final alert = TripAlertData.fromEvent(map);
-      if (alert == null) return;
-      if (TripAlertManager.isShowing) return;
+      if (alert == null) { debugPrint('[trip.new] skip: fromEvent returned null'); return; }
+      if (TripAlertManager.isShowing) { debugPrint('[trip.new] skip: overlay already showing'); return; }
       final pos = _pendingPosition;
-      if (pos != null && !driverWithinRadius(pos.latitude, pos.longitude, alert)) return;
+      if (pos != null && !driverWithinRadius(pos.latitude, pos.longitude, alert)) {
+        debugPrint('[trip.new] skip: outside radius. driver=(${pos.latitude},${pos.longitude}) origin=(${alert.originLat},${alert.originLng}) radius=${alert.searchRadiusKm}km');
+        return;
+      }
+      debugPrint('[trip.new] showing alert for trip ${alert.tripId}');
       TripAlertManager.show(
         context: context,
         alert: alert,
@@ -99,21 +124,23 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     });
 
     socket.on('trip.price_updated', (data) {
+      debugPrint('[price_updated] received: $data');
       if (!mounted || data is! Map) return;
       final map   = Map<String, dynamic>.from(data);
       final alert = TripAlertData.fromEvent(map);
-      if (alert == null) return;
+      if (alert == null) { debugPrint('[price_updated] fromEvent returned null'); return; }
 
-      // Overlay showing for a different trip — don't interrupt
       if (TripAlertManager.isShowing && TripAlertManager.currentTripId != alert.tripId) return;
 
-      // Dismissed drivers: check radius before re-alerting
       if (!TripAlertManager.isShowing) {
         final pos = _pendingPosition;
-        if (pos != null && !driverWithinRadius(pos.latitude, pos.longitude, alert)) return;
+        if (pos != null && !driverWithinRadius(pos.latitude, pos.longitude, alert)) {
+          debugPrint('[price_updated] skip: outside radius');
+          return;
+        }
       }
 
-      // Re-show overlay (dismiss() is called inside show() — resets timer and price)
+      debugPrint('[price_updated] showing overlay for trip ${alert.tripId} price=${alert.clientOffer}');
       TripAlertManager.show(
         context: context,
         alert: alert,
@@ -183,10 +210,42 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     );
   }
 
-  void _toggleStatus() => _showOwnerStartDaySheet();
+  void _toggleStatus() {
+    final isOnline = ref.read(driverProfileProvider).value?.isOnline ?? false;
+    if (isOnline) {
+      _endOwnerDay();
+    } else {
+      _showOwnerStartDaySheet();
+    }
+  }
+
+  Future<void> _endOwnerDay() async {
+    try {
+      await ref.read(driverProfileProvider.notifier).endDay();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Jornada terminada. ¡Hasta pronto!'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString().replaceAll('Exception: ', '')),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
 
   Future<void> _showOwnerStartDaySheet() async {
-    final vehicles = ref.read(myVehiclesProvider).value
+    final vehicles = ref.read(myVehiclesGuardProvider).value
             ?.where((v) => v.approvalStatus == 'approved')
             .toList() ??
         [];
@@ -227,7 +286,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
               if (_pendingPosition != null) _flyTo(_pendingPosition!);
             },
             myLocationEnabled: true,
-            myLocationRenderMode: MyLocationRenderMode.compass,
+            myLocationRenderMode: MyLocationRenderMode.normal,
             trackCameraPosition: false,
           ),
 

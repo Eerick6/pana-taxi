@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../../core/config/app_config.dart';
+import 'package:dio/dio.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/services/push_notification_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -15,7 +17,7 @@ import '../../data/providers/auth_provider.dart';
 
 class OtpPage extends ConsumerStatefulWidget {
   const OtpPage({super.key, required this.phone, this.devCode});
-  final String phone;
+  final String  phone;
   final String? devCode;
 
   @override
@@ -23,61 +25,74 @@ class OtpPage extends ConsumerStatefulWidget {
 }
 
 class _OtpPageState extends ConsumerState<OtpPage> {
-  final _controllers = List.generate(6, (_) => TextEditingController());
-  final _focusNodes = List.generate(6, (_) => FocusNode());
-  int _countdown = 60;
+  static const _length = 6;
+
+  final _controllers = List.generate(_length, (_) => TextEditingController());
+  final _focusNodes  = List.generate(_length, (_) => FocusNode());
+
+  bool   _loading   = false;
+  bool   _resending = false;
+  int    _countdown = 60;
   Timer? _timer;
-  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
     _startCountdown();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focusNodes[0].requestFocus());
-  }
-
-  void _startCountdown() {
-    _countdown = 60;
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (_countdown == 0) {
-        t.cancel();
-      } else {
-        setState(() => _countdown--);
-      }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNodes[0].requestFocus();
     });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
-    for (final c in _controllers) { c.dispose(); }
-    for (final f in _focusNodes) { f.dispose(); }
+    for (final c in _controllers) c.dispose();
+    for (final f in _focusNodes)  f.dispose();
     super.dispose();
   }
 
-  String get _otp => _controllers.map((c) => c.text).join();
+  void _startCountdown() {
+    _countdown = 60;
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) { t.cancel(); return; }
+      setState(() => _countdown--);
+      if (_countdown <= 0) t.cancel();
+    });
+  }
 
-  void _onDigitEntered(int index, String value) {
-    if (value.length == 1 && index < 5) {
+  String get _code => _controllers.map((c) => c.text).join();
+
+  void _onDigit(int index, String digit) {
+    _controllers[index].text = digit;
+    if (index < _length - 1) {
       _focusNodes[index + 1].requestFocus();
+    } else {
+      _focusNodes[index].unfocus();
+      if (_code.length == _length) _verify();
     }
-    if (_otp.length == 6) _verify();
   }
 
   void _onBackspace(int index) {
-    if (_controllers[index].text.isEmpty && index > 0) {
-      _focusNodes[index - 1].requestFocus();
-      _controllers[index - 1].clear();
-    }
+    _controllers[index].clear();
+    if (index > 0) _focusNodes[index - 1].requestFocus();
+  }
+
+  void _snack(String msg, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: isError ? AppColors.error : AppColors.secondary,
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   Future<void> _verify() async {
-    if (_otp.length < 6) return;
+    final code = _code;
+    if (code.length != _length) return;
     setState(() => _loading = true);
     try {
-      await ref.read(authStateProvider.notifier).verifyOtp(widget.phone, _otp);
-      // Limpiar caché de todos los providers del usuario anterior
+      await ref.read(authStateProvider.notifier).verifyOtp(widget.phone, code);
       ref.invalidate(driverProfileProvider);
       ref.invalidate(vehicleRequestsProvider);
       ref.invalidate(myApplicationsProvider);
@@ -87,38 +102,53 @@ class _OtpPageState extends ConsumerState<OtpPage> {
       final dio = ref.read(dioProvider);
       await PushNotificationService.instance.initialize(dio);
       if (mounted) context.go('/home');
-    } catch (_) {
-      if (mounted) {
-        // Limpiar campos en error
-        for (final c in _controllers) { c.clear(); }
-        _focusNodes[0].requestFocus();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Código incorrecto. Intenta de nuevo.'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      _clearBoxes();
+      _snack(_errorMessage(e), isError: true);
     }
   }
 
   Future<void> _resend() async {
+    setState(() => _resending = true);
     try {
       await ref.read(authStateProvider.notifier).requestOtp(widget.phone);
+      if (!mounted) return;
       _startCountdown();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Código reenviado')),
-        );
+      _snack('Código reenviado');
+    } catch (e) {
+      if (mounted) _snack(_errorMessage(e), isError: true);
+    } finally {
+      if (mounted) setState(() => _resending = false);
+    }
+  }
+
+  String _errorMessage(Object e) {
+    if (e is DioException) {
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.connectionError) {
+        return 'Sin conexión. Verifica tu red e intenta de nuevo.';
       }
-    } catch (_) {}
+      final statusCode = e.response?.statusCode;
+      if (statusCode == 401 || statusCode == 400) {
+        return 'Código incorrecto o expirado. Solicita uno nuevo.';
+      }
+    }
+    final msg = e.toString().replaceAll('Exception: ', '');
+    return msg.isNotEmpty ? msg : 'Ocurrió un error inesperado';
+  }
+
+  void _clearBoxes() {
+    for (final c in _controllers) c.clear();
+    _focusNodes[0].requestFocus();
   }
 
   @override
   Widget build(BuildContext context) {
-    final displayPhone = widget.phone.replaceRange(6, 10, '****');
+    final display     = widget.phone.replaceRange(6, 10, '****');
+    final showDevHint = AppConfig.isDev && (widget.devCode?.isNotEmpty ?? false);
 
     return Scaffold(
       backgroundColor: AppColors.white,
@@ -131,63 +161,100 @@ class _OtpPageState extends ConsumerState<OtpPage> {
       ),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 16),
               Text('Verificar número', style: AppTextStyles.h2),
               const SizedBox(height: 8),
               Text(
-                'Ingresa el código de 6 dígitos enviado a $displayPhone',
+                'Ingresa el código de 6 dígitos enviado a $display',
                 style: AppTextStyles.body.copyWith(color: AppColors.gray500),
               ),
-              const SizedBox(height: 40),
 
-              // OTP inputs
+              if (showDevHint) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.primary.withOpacity(0.4)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.developer_mode, size: 16, color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'DEV — código: ${widget.devCode}  (o usa 000000)',
+                          style: AppTextStyles.caption.copyWith(color: AppColors.primaryText),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 36),
+
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: List.generate(6, (i) => _OtpBox(
-                  controller: _controllers[i],
-                  focusNode: _focusNodes[i],
-                  onChanged: (v) => _onDigitEntered(i, v),
-                  onBackspace: () => _onBackspace(i),
-                  loading: _loading,
-                )),
+                children: List.generate(
+                  _length,
+                  (i) => _OtpBox(
+                    controller: _controllers[i],
+                    focusNode:  _focusNodes[i],
+                    onDigit:     (d) => _onDigit(i, d),
+                    onBackspace: ()  => _onBackspace(i),
+                  ),
+                ),
               ),
 
               const SizedBox(height: 32),
 
-              // Reenviar
               Center(
                 child: _countdown > 0
                     ? Text(
                         'Reenviar código en $_countdown s',
                         style: AppTextStyles.label.copyWith(color: AppColors.gray400),
                       )
-                    : TextButton(
-                        onPressed: _resend,
-                        child: Text(
-                          'Reenviar código',
-                          style: AppTextStyles.label.copyWith(color: AppColors.primaryText),
-                        ),
+                    : GestureDetector(
+                        onTap: _resending ? null : _resend,
+                        child: _resending
+                            ? const SizedBox(
+                                width: 18, height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: AppColors.secondary),
+                              )
+                            : Text(
+                                'Reenviar código',
+                                style: AppTextStyles.label.copyWith(
+                                  color: AppColors.primaryText,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
                       ),
               ),
 
-              const SizedBox(height: 24),
+              const Spacer(),
 
-              ElevatedButton(
-                onPressed: (_loading || _otp.length < 6) ? null : _verify,
-                child: _loading
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text('Verificar'),
+              SizedBox(
+                width: double.infinity,
+                height: 54,
+                child: ElevatedButton(
+                  onPressed: (_loading || _code.length != _length) ? null : _verify,
+                  style: ElevatedButton.styleFrom(
+                    disabledBackgroundColor: AppColors.gray200,
+                  ),
+                  child: _loading
+                      ? const SizedBox(
+                          width: 22, height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5, color: Colors.white),
+                        )
+                      : const Text('Verificar'),
+                ),
               ),
             ],
           ),
@@ -197,69 +264,62 @@ class _OtpPageState extends ConsumerState<OtpPage> {
   }
 }
 
-class _OtpBox extends StatelessWidget {
+class _OtpBox extends StatefulWidget {
   const _OtpBox({
     required this.controller,
     required this.focusNode,
-    required this.onChanged,
+    required this.onDigit,
     required this.onBackspace,
-    required this.loading,
   });
 
   final TextEditingController controller;
-  final FocusNode focusNode;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onBackspace;
-  final bool loading;
+  final FocusNode             focusNode;
+  final ValueChanged<String>  onDigit;
+  final VoidCallback          onBackspace;
 
+  @override
+  State<_OtpBox> createState() => _OtpBoxState();
+}
+
+class _OtpBoxState extends State<_OtpBox> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: 46,
       height: 56,
-      child: KeyboardListener(
-        focusNode: FocusNode(),
-        onKeyEvent: (e) {
-          if (e is KeyDownEvent &&
-              e.logicalKey == LogicalKeyboardKey.backspace) {
-            onBackspace();
+      child: TextField(
+        controller:   widget.controller,
+        focusNode:    widget.focusNode,
+        textAlign:    TextAlign.center,
+        keyboardType: TextInputType.number,
+        maxLength:    1,
+        style: AppTextStyles.h3.copyWith(color: AppColors.primaryText),
+        onChanged: (value) {
+          if (value.isEmpty) {
+            widget.onBackspace();
+          } else {
+            final digit = value.replaceAll(RegExp(r'\D'), '');
+            if (digit.isNotEmpty) widget.onDigit(digit[0]);
           }
         },
-        child: TextFormField(
-          controller: controller,
-          focusNode: focusNode,
-          enabled: !loading,
-          textAlign: TextAlign.center,
-          keyboardType: TextInputType.number,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(1),
-          ],
-          style: AppTextStyles.h3.copyWith(color: AppColors.primaryText),
-          decoration: InputDecoration(
-            contentPadding: EdgeInsets.zero,
-            filled: true,
-            fillColor: controller.text.isEmpty
-                ? AppColors.gray50
-                : AppColors.primaryLight,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.gray200),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.primary, width: 2),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: controller.text.isNotEmpty
-                    ? AppColors.primary
-                    : AppColors.gray200,
-              ),
-            ),
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        decoration: InputDecoration(
+          counterText: '',
+          contentPadding: EdgeInsets.zero,
+          filled:    true,
+          fillColor: AppColors.gray50,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.gray200),
           ),
-          onChanged: onChanged,
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.gray200),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.primary, width: 2),
+          ),
         ),
       ),
     );

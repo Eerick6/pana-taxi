@@ -81,13 +81,13 @@ class TripAlertData {
 class TripAlertManager {
   TripAlertManager._();
 
-  static OverlayEntry?          _entry;
-  static AudioPlayer?           _player;
-  static Timer?                 _timer;
+  static OverlayEntry?           _entry;
+  static AudioPlayer?            _player;
+  static Timer?                  _timer;
   static _TripAlertOverlayState? _state;
-  static String?                _currentTripId;
+  static String?                 _currentTripId;
 
-  static bool   get isShowing    => _entry != null;
+  static bool    get isShowing     => _entry != null;
   static String? get currentTripId => _currentTripId;
 
   static Future<void> show({
@@ -98,16 +98,6 @@ class TripAlertManager {
   }) async {
     dismiss();
 
-    final overlay = Overlay.of(context);
-
-    _player = AudioPlayer();
-    try {
-      await _player!.setReleaseMode(ReleaseMode.loop);
-      await _player!.play(AssetSource('sounds/trip_alert.wav'));
-      // Detener después de 8s — el conductor ya fue alertado, no hace falta el loop infinito
-      Future.delayed(const Duration(seconds: 8), () { _player?.stop(); });
-    } catch (_) {}
-
     _currentTripId = alert.tripId;
     _entry = OverlayEntry(
       builder: (_) => _TripAlertOverlay(
@@ -117,16 +107,22 @@ class TripAlertManager {
         onDismiss:  dismiss,
       ),
     );
-    overlay.insert(_entry!);
+
+    _player = AudioPlayer();
+    try {
+      await _player!.setReleaseMode(ReleaseMode.loop);
+      await _player!.play(AssetSource('sounds/trip_alert.wav'));
+      Future.delayed(const Duration(seconds: 8), () { _player?.stop(); });
+    } catch (_) {}
+
+    Overlay.of(context).insert(_entry!);
     _timer = Timer(const Duration(seconds: 25), dismiss);
   }
 
-  // Llamado por home_page cuando llega trip.offer_ignored
   static void notifyOfferIgnored({required bool canReOffer}) {
     _state?.onOfferIgnored(canReOffer: canReOffer);
   }
 
-  // Llamado por home_page cuando llega trip.price_updated
   static void notifyPriceUpdated(double newPrice) {
     _state?.onPriceUpdated(newPrice);
   }
@@ -210,7 +206,7 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
       _waiting      = false;
       _offerIgnored = true;
       _canReOffer   = canReOffer;
-      _showCounter  = canReOffer;   // abre el input para que cambie el precio
+      _showCounter  = canReOffer;
       _seconds      = 25;
     });
     _countdown = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -440,8 +436,9 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
                             Expanded(
                               child: TextField(
                                 controller: _counterCtrl,
+                                autofocus: true,
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
+                                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
                                 decoration: InputDecoration(
                                   prefixText: '\$ ',
                                   hintText: (_currentPrice ?? alert.displayFare).toStringAsFixed(2),

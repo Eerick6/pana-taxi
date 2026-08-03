@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
+import { useSocket } from "@/context/SocketContext";
 import { relativeTime } from "@/lib/format";
 import type { AppNotification } from "@/types";
 
@@ -21,28 +22,35 @@ function notifActionUrl(n: AppNotification): string | null {
 
 export default function NotificationDropdown() {
   const router = useRouter();
+  const { socket } = useSocket();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const prevUnread = useRef(0);
   const firstLoad = useRef(true);
 
-  const fetchUnreadCount = useCallback(async () => {
-    try {
-      const { data } = await api.get('/notifications/me/unread-count');
-      const count: number = data.count ?? 0;
-      setUnread((prev) => {
-        if (!firstLoad.current && count > prev) {
-          playNotificationSound();
-        }
-        firstLoad.current = false;
-        prevUnread.current = count;
-        return count;
-      });
-    } catch { /* silent */ }
+  // Carga inicial del conteo de no leídas (solo una vez al montar)
+  useEffect(() => {
+    api.get('/notifications/me/unread-count')
+      .then(({ data }) => { setUnread(data.count ?? 0); firstLoad.current = false; })
+      .catch(() => {});
   }, []);
+
+  // Escucha notification.new del socket — sin polling
+  useEffect(() => {
+    if (!socket) return;
+
+    const handler = (notif: AppNotification) => {
+      playNotificationSound();
+      setUnread((v) => v + 1);
+      // Si el dropdown está abierto, agrega la notif al tope de la lista
+      setNotifications((prev) => (prev.length > 0 ? [notif, ...prev] : prev));
+    };
+
+    socket.on('notification.new', handler);
+    return () => { socket.off('notification.new', handler); };
+  }, [socket]);
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -51,12 +59,6 @@ export default function NotificationDropdown() {
       setNotifications(data.items ?? []);
     } finally { setLoading(false); }
   }, []);
-
-  useEffect(() => {
-    fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 20000);
-    return () => clearInterval(interval);
-  }, [fetchUnreadCount]);
 
   useEffect(() => {
     if (isOpen) fetchNotifications();
@@ -74,7 +76,6 @@ export default function NotificationDropdown() {
     try {
       await api.patch('/notifications/read-all');
       setUnread(0);
-      prevUnread.current = 0;
       setNotifications((prev) => prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })));
     } catch { /* silent */ }
   };
@@ -86,17 +87,10 @@ export default function NotificationDropdown() {
         setNotifications((prev) =>
           prev.map((n) => n.id === notif.id ? { ...n, read_at: new Date().toISOString() } : n)
         );
-        setUnread((v) => {
-          const next = Math.max(0, v - 1);
-          prevUnread.current = next;
-          return next;
-        });
+        setUnread((v) => Math.max(0, v - 1));
       }
       const url = notifActionUrl(notif);
-      if (url) {
-        setIsOpen(false);
-        router.push(url);
-      }
+      if (url) { setIsOpen(false); router.push(url); }
     } catch { /* silent */ }
   };
 

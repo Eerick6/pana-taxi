@@ -4,6 +4,7 @@ import './globals.css';
 import { SidebarProvider } from '@/context/SidebarContext';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { AuthProvider } from '@/context/AuthContext';
+import { SocketProvider } from '@/context/SocketContext';
 
 export const metadata: Metadata = {
   title: 'Pana Taxi',
@@ -27,7 +28,9 @@ export default function RootLayout({
       <body className={`${outfit.className} dark:bg-gray-900`} suppressHydrationWarning>
         <ThemeProvider>
           <AuthProvider>
-            <SidebarProvider>{children}</SidebarProvider>
+            <SocketProvider>
+              <SidebarProvider>{children}</SidebarProvider>
+            </SocketProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

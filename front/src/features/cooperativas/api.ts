@@ -1,5 +1,5 @@
 import api from '@/lib/api';
-import type { Cooperative, PaginatedResponse } from '@/types';
+import type { Cooperative, FareConfig, PaginatedResponse } from '@/types';
 
 // ── Cooperativas ──────────────────────────────────────────────────────────────
 
@@ -256,6 +256,18 @@ export async function approveCoopDocument(coopId: string, docId: string): Promis
 
 export async function rejectCoopDocument(coopId: string, docId: string, reason: string): Promise<void> {
   await api.patch(`/cooperatives/${coopId}/documents/${docId}/reject`, { reason });
+}
+
+// ── Tarifas por cooperativa ───────────────────────────────────────────────────
+
+export async function getCoopFareConfig(coopId: string): Promise<FareConfig> {
+  const { data } = await api.get(`/fares/config/${coopId}`);
+  return data;
+}
+
+export async function setCoopFareConfig(coopId: string, body: Partial<FareConfig>): Promise<FareConfig> {
+  const { data } = await api.patch(`/fares/config/${coopId}`, body);
+  return data;
 }
 
 // ── Pendientes (para notificación en panel) ───────────────────────────────────

@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect, KeyboardEvent } from "react";
 import { useCoopChat, Conversation, ChatMessage } from "./useCoopChat";
 import { useAuth } from "@/context/AuthContext";
+import { useSocket } from "@/context/SocketContext";
 
 function timeLabel(iso: string | null) {
   if (!iso) return "";
@@ -191,6 +192,7 @@ function ConvListPanel({ conversations, currentId, onSelect, onClose }: ConvList
 // ── Widget principal ──────────────────────────────────────────────────────────
 export function CoopChatWidget() {
   const { user } = useAuth();
+  const { socket } = useSocket();
   const {
     conversations,
     messages,
@@ -199,7 +201,7 @@ export function CoopChatWidget() {
     openConversation,
     closeConversation,
     sendMessage,
-  } = useCoopChat(user?.id);
+  } = useCoopChat(user?.id, socket);
 
   const [showList, setShowList] = useState(false);
 

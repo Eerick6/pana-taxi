@@ -15,6 +15,7 @@ import { User, UserRole } from '../users/entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/entities/app-notification.entity';
 import { StorageService } from '../storage/storage.service';
+import { EventsGateway } from '../gateway/events.gateway';
 import { RequestRechargeDto } from './dto/request-recharge.dto';
 import { RejectRechargeDto } from './dto/reject-recharge.dto';
 import { CreateBankAccountDto } from './dto/create-bank-account.dto';
@@ -38,6 +39,7 @@ export class WalletService {
     private dataSource: DataSource,
     private storage: StorageService,
     private notificationsService: NotificationsService,
+    private gateway: EventsGateway,
   ) {}
 
   // ── Driver ──────────────────────────────────────────────────────────────────
@@ -171,7 +173,7 @@ export class WalletService {
   async confirmRecharge(rechargeId: string, staffUser: User) {
     const recharge = await this.rechargeRepo.findOne({
       where: { id: rechargeId },
-      relations: ['wallet'],
+      relations: ['wallet', 'wallet.driver'],
     });
     if (!recharge) throw new NotFoundException('Recarga no encontrada');
     if (recharge.status !== RechargeStatus.PENDING) {
@@ -208,11 +210,22 @@ export class WalletService {
       });
     });
 
+    const driverId = (recharge.wallet as any).driver?.id;
+    if (driverId) {
+      this.gateway.notifyDriver(driverId, 'wallet.recharge_approved', {
+        amount: recharge.amount,
+        balance_after: (parseFloat(recharge.wallet.balance) + amount).toFixed(2),
+      });
+    }
+
     return { message: `Recarga de $${amount.toFixed(2)} confirmada y acreditada` };
   }
 
   async rejectRecharge(rechargeId: string, dto: RejectRechargeDto) {
-    const recharge = await this.rechargeRepo.findOne({ where: { id: rechargeId } });
+    const recharge = await this.rechargeRepo.findOne({
+      where: { id: rechargeId },
+      relations: ['wallet', 'wallet.driver'],
+    });
     if (!recharge) throw new NotFoundException('Recarga no encontrada');
     if (recharge.status !== RechargeStatus.PENDING) {
       throw new BadRequestException('La recarga ya fue procesada');
@@ -222,6 +235,13 @@ export class WalletService {
       status: RechargeStatus.REJECTED,
       rejection_reason: dto.reason,
     });
+
+    const driverId = (recharge.wallet as any)?.driver?.id;
+    if (driverId) {
+      this.gateway.notifyDriver(driverId, 'wallet.recharge_rejected', {
+        reason: dto.reason ?? 'Recarga rechazada por el administrador',
+      });
+    }
 
     return { message: 'Recarga rechazada' };
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../trips/data/datasources/trips_api.dart';
@@ -215,8 +216,13 @@ class _DriverCard extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.phone_outlined,
                   color: AppColors.secondary),
-              onPressed: () {
-                // TODO: lanzar llamada
+              onPressed: () async {
+                final uri = Uri.parse('tel:${trip.driverPhone}');
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri);
+                } else {
+                  await Clipboard.setData(ClipboardData(text: trip.driverPhone!));
+                }
               },
             ),
         ],

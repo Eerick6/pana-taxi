@@ -15,6 +15,11 @@ import '../../../trips/presentation/providers/active_trip_provider.dart';
 import '../widgets/home_bottom_sheet.dart';
 import '../widgets/sos_button.dart';
 
+// Caché a nivel de módulo — se computa una sola vez por sesión de app
+Uint8List? _locationDotBytesCache;
+Future<Uint8List> _getLocationDotBytes() async =>
+    _locationDotBytesCache ??= await _buildLocationDotBytes();
+
 Future<Uint8List> _buildLocationDotBytes() async {
   const size  = 60.0;
   const cx    = size / 2;
@@ -68,7 +73,9 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> {
   MapLibreMapController? _mapController;
-  Symbol? _locationSymbol;
+  Symbol?   _locationSymbol;
+  bool      _imageReady    = false;
+  Position? _pendingPosition;
   StreamSubscription<Position>? _locationSub;
 
   // Flag para desactivar handlers sin llamar socket.off() (que borraría listeners de otras páginas)
@@ -94,6 +101,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
     socket.on('trip.accepted', (data) {
       if (!_socketActive || !mounted || data is! Map) return;
+      ref.invalidate(activeTripProvider);
       final tripId = (data['trip_id'] as String?) ?? '';
       if (tripId.isNotEmpty) context.go('/trip/$tripId');
     });
@@ -108,8 +116,20 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Future<void> _onMapCreated(MapLibreMapController c) async {
     _mapController = c;
-    final bytes = await _buildLocationDotBytes();
-    await c.addImage('location-dot', bytes);
+  }
+
+  Future<void> _onStyleLoaded() async {
+    final bytes = await _getLocationDotBytes();
+    await _mapController?.addImage('location-dot', bytes);
+    _imageReady = true;
+    // Si ya teníamos posición esperando, la mostramos ahora
+    if (_pendingPosition != null) {
+      await _updateSymbol(_pendingPosition!);
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          LatLng(_pendingPosition!.latitude, _pendingPosition!.longitude), 15),
+      );
+    }
   }
 
   Future<void> _startLocationTracking() async {
@@ -117,10 +137,13 @@ class _HomePageState extends ConsumerState<HomePage> {
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
-      await _updateSymbol(pos);
-      _mapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 15),
-      );
+      _pendingPosition = pos;
+      if (_imageReady) {
+        await _updateSymbol(pos);
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 15),
+        );
+      }
     } catch (_) {}
 
     _locationSub = Geolocator.getPositionStream(
@@ -128,7 +151,10 @@ class _HomePageState extends ConsumerState<HomePage> {
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
       ),
-    ).listen(_updateSymbol);
+    ).listen((pos) {
+      _pendingPosition = pos;
+      if (_imageReady) _updateSymbol(pos);
+    });
   }
 
   Future<void> _updateSymbol(Position pos) async {
@@ -159,6 +185,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         children: [
           MapLibreMap(
             onMapCreated: _onMapCreated,
+            onStyleLoadedCallback: _onStyleLoaded,
             initialCameraPosition: const CameraPosition(
               target: LatLng(-0.2295, -78.5243),
               zoom: 13,
@@ -226,19 +253,22 @@ class _TopBar extends ConsumerWidget {
             ),
           ),
           const Spacer(),
-          Container(
-            width: 44, height: 44,
-            decoration: BoxDecoration(
-              color: AppColors.white,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.15),
-                    blurRadius: 6),
-              ],
+          GestureDetector(
+            onTap: () => context.push('/notifications'),
+            child: Container(
+              width: 44, height: 44,
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      blurRadius: 6),
+                ],
+              ),
+              child: const Icon(Icons.notifications_outlined,
+                  color: AppColors.secondary, size: 22),
             ),
-            child: const Icon(Icons.notifications_outlined,
-                color: AppColors.secondary, size: 22),
           ),
         ],
       ),

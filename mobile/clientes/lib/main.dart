@@ -1,3 +1,4 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/config/app_env.dart';
 import 'core/network/dio_client.dart';
 import 'core/routes/app_router.dart';
+import 'core/services/push_notification_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/trips/domain/entities/active_trip.dart';
 import 'features/trips/presentation/providers/active_trip_provider.dart';
@@ -13,8 +15,13 @@ import 'features/profile/presentation/providers/profile_provider.dart';
 // Key global para mostrar SnackBars desde cualquier parte de la app
 final _messengerKey = GlobalKey<ScaffoldMessengerState>();
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    debugPrint('[Firebase] init failed: $e');
+  }
   if (kDebugMode) debugPrint('[AppEnv] FLAVOR=${AppEnv.isDev ? "dev" : "prod"} → ${AppEnv.baseUrl}');
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -33,10 +40,29 @@ class PanaClienteApp extends ConsumerStatefulWidget {
 
 class _PanaClienteAppState extends ConsumerState<PanaClienteApp>
     with WidgetsBindingObserver {
+  DateTime? _lastProfileRefresh;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _initFcm();
+  }
+
+  Future<void> _initFcm() async {
+    try {
+      final fcm = PushNotificationService.instance;
+      fcm.onNotificationTap = (tripId) {
+        if (tripId != null && tripId.isNotEmpty) {
+          appRouter.go('/trip/$tripId');
+        } else {
+          appRouter.go('/home');
+        }
+      };
+      await fcm.initialize(ref.read(dioProvider));
+    } catch (e) {
+      debugPrint('[FCM] init failed: $e');
+    }
   }
 
   @override
@@ -47,8 +73,13 @@ class _PanaClienteAppState extends ConsumerState<PanaClienteApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      // Refrescar perfil al volver a la app (renueva la URL presignada de R2)
+    if (state != AppLifecycleState.resumed) return;
+    // Renueva la URL presignada de R2, pero máximo una vez cada 5 min
+    // para no hacer un request extra en cada bloqueo/desbloqueo de pantalla
+    final now = DateTime.now();
+    if (_lastProfileRefresh == null ||
+        now.difference(_lastProfileRefresh!) > const Duration(minutes: 5)) {
+      _lastProfileRefresh = now;
       ref.invalidate(clientProfileProvider);
     }
   }
@@ -68,7 +99,7 @@ class _PanaClienteAppState extends ConsumerState<PanaClienteApp>
 
     return MaterialApp.router(
       title: 'Pana Taxi',
-      debugShowCheckedModeBanner: false,
+      debugShowCheckedModeBanner: AppEnv.isDev,
       theme: AppTheme.light,
       routerConfig: appRouter,
       scaffoldMessengerKey: _messengerKey,

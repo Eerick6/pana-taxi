@@ -15,6 +15,7 @@ class RegisterPage extends ConsumerStatefulWidget {
 }
 
 class _RegisterPageState extends ConsumerState<RegisterPage> {
+  final _formKey      = GlobalKey<FormState>();
   final _nameCtrl     = TextEditingController();
   final _cedulaCtrl   = TextEditingController();
   final _phoneCtrl    = TextEditingController();
@@ -136,21 +137,15 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   // ── Register ───────────────────────────────────────────────────────────────
 
   Future<void> _register() async {
+    if (!_formKey.currentState!.validate()) return;
+
     final name     = _nameCtrl.text.trim();
     final cedula   = _cedulaCtrl.text.trim();
     final phone    = '+593${_phoneCtrl.text.trim()}';
     final password = _passCtrl.text;
-    final confirm  = _passConfCtrl.text;
 
-    if (name.length < 3)                    return _snack('Ingresa tu nombre completo');
-    if (cedula.length != 10)                return _snack('La cédula debe tener 10 dígitos');
-    if (_phoneCtrl.text.trim().length != 9) return _snack('Ingresa un número válido de 9 dígitos');
-    if (password.length < 8)                return _snack('La contraseña debe tener al menos 8 caracteres');
-    final passRe = RegExp(r'^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^()\-_=+])');
-    if (!passRe.hasMatch(password))         return _snack('La contraseña necesita 1 mayúscula, 1 número y 1 carácter especial');
-    if (password != confirm)                return _snack('Las contraseñas no coinciden');
-    if (!_termsAccepted)                    return _snack('Debes aceptar los Términos de uso');
-    if (_termsVersion == null)              return _snack('No se cargaron los términos. Intenta de nuevo.');
+    if (!_termsAccepted)   return _snack('Debes aceptar los Términos de uso');
+    if (_termsVersion == null) return _snack('No se cargaron los términos. Intenta de nuevo.');
 
     setState(() => _loading = true);
     try {
@@ -207,7 +202,9 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
           : SafeArea(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-                child: Column(
+                child: Form(
+                  key: _formKey,
+                  child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // ── Avatar ──────────────────────────────────────────────
@@ -254,7 +251,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
                     // ── Nombre ──────────────────────────────────────────────
                     _Label('Nombre completo'),
-                    TextField(
+                    TextFormField(
                       controller: _nameCtrl,
                       textCapitalization: TextCapitalization.words,
                       style: AppTextStyles.body,
@@ -262,12 +259,14 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                         hint: 'Juan Pérez',
                         icon: Icons.person_outline,
                       ),
+                      validator: (v) =>
+                          (v ?? '').trim().length < 3 ? 'Ingresa tu nombre completo' : null,
                     ),
                     const SizedBox(height: 16),
 
                     // ── Cédula ──────────────────────────────────────────────
                     _Label('Número de cédula'),
-                    TextField(
+                    TextFormField(
                       controller: _cedulaCtrl,
                       keyboardType: TextInputType.number,
                       inputFormatters: [
@@ -279,12 +278,14 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                         hint: '1712345678',
                         icon: Icons.badge_outlined,
                       ),
+                      validator: (v) =>
+                          (v ?? '').length < 10 ? 'La cédula debe tener 10 dígitos' : null,
                     ),
                     const SizedBox(height: 16),
 
                     // ── Teléfono ─────────────────────────────────────────────
                     _Label('Teléfono'),
-                    TextField(
+                    TextFormField(
                       controller: _phoneCtrl,
                       keyboardType: TextInputType.phone,
                       inputFormatters: [
@@ -292,6 +293,8 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                         LengthLimitingTextInputFormatter(9),
                       ],
                       style: AppTextStyles.body,
+                      validator: (v) =>
+                          (v ?? '').trim().length != 9 ? 'Número inválido (9 dígitos)' : null,
                       decoration: InputDecoration(
                         hintText: '991234567',
                         hintStyle: AppTextStyles.body.copyWith(color: AppColors.gray400),
@@ -325,7 +328,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
                     // ── Contraseña ────────────────────────────────────────────
                     _Label('Contraseña'),
-                    TextField(
+                    TextFormField(
                       controller: _passCtrl,
                       obscureText: _obscurePass,
                       style: AppTextStyles.body,
@@ -355,12 +358,18 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                           borderSide: const BorderSide(color: AppColors.primary, width: 2),
                         ),
                       ),
+                      validator: (v) {
+                        if ((v ?? '').length < 8) return 'Mínimo 8 caracteres';
+                        final re = RegExp(r'^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^()\-_=+])');
+                        if (!re.hasMatch(v!)) return '1 mayúscula, 1 número y 1 carácter especial';
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 16),
 
                     // ── Confirmar contraseña ──────────────────────────────────
                     _Label('Confirmar contraseña'),
-                    TextField(
+                    TextFormField(
                       controller: _passConfCtrl,
                       obscureText: _obscureConfPass,
                       style: AppTextStyles.body,
@@ -390,6 +399,8 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                           borderSide: const BorderSide(color: AppColors.primary, width: 2),
                         ),
                       ),
+                      validator: (v) =>
+                          v != _passCtrl.text ? 'Las contraseñas no coinciden' : null,
                     ),
 
                     const SizedBox(height: 24),
@@ -436,9 +447,9 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                                       child: Text(
                                         'Términos y Condiciones',
                                         style: AppTextStyles.bodyMedium.copyWith(
-                                          color: AppColors.primary,
+                                          color: AppColors.secondary,
                                           decoration: TextDecoration.underline,
-                                          decorationColor: AppColors.primary,
+                                          decorationColor: AppColors.secondary,
                                         ),
                                       ),
                                     ),
@@ -479,6 +490,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                       ),
                     ),
                   ],
+                  ),
                 ),
               ),
             ),

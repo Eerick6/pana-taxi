@@ -148,12 +148,12 @@ class HomeOfflineToggle extends StatelessWidget {
           width: 36, height: 4, margin: const EdgeInsets.only(bottom: 16),
           decoration: BoxDecoration(color: AppColors.gray200, borderRadius: BorderRadius.circular(2)),
         ),
-        Text(isOnline ? '¡Estás en línea!' : '¿Listo para trabajar?', style: AppTextStyles.h3),
+        Text(isOnline ? '¡Jornada activa!' : '¿Listo para trabajar?', style: AppTextStyles.h3),
         const SizedBox(height: 4),
         Text(
           isOnline
-              ? 'Recibirás solicitudes de viaje en tu área'
-              : 'Activa tu disponibilidad para recibir solicitudes',
+              ? 'Estás disponible para recibir solicitudes de viaje'
+              : 'Selecciona tu taxi y empieza a recibir viajes',
           style: AppTextStyles.body.copyWith(color: AppColors.gray500),
           textAlign: TextAlign.center,
         ),
@@ -173,7 +173,7 @@ class HomeOfflineToggle extends StatelessWidget {
                 ? const SizedBox(
                     width: 22, height: 22,
                     child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.white))
-                : Text(isOnline ? 'Desconectarme' : 'Activar disponibilidad', style: AppTextStyles.btnLg),
+                : Text(isOnline ? 'Terminar jornada' : 'Iniciar jornada', style: AppTextStyles.btnLg),
           ),
         ),
       ],

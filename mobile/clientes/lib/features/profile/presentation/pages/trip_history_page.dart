@@ -104,15 +104,90 @@ class _TripItem {
   }
 }
 
-// ── Provider ─────────────────────────────────────────────────────────────────
+// ── Paginated state ───────────────────────────────────────────────────────────
 
-final _tripHistoryProvider = FutureProvider.autoDispose<List<_TripItem>>((ref) async {
-  final dio = ref.read(dioProvider);
-  final res = await dio.get('/trips/me', queryParameters: {'page': 1, 'limit': 100});
-  return (res.data['items'] as List? ?? [])
-      .map((j) => _TripItem.fromJson(j as Map<String, dynamic>))
-      .toList();
-});
+class _HistoryState {
+  const _HistoryState({
+    this.trips          = const [],
+    this.isInitialLoad  = true,
+    this.isLoadingMore  = false,
+    this.hasMore        = true,
+    this.error,
+  });
+  final List<_TripItem> trips;
+  final bool            isInitialLoad;
+  final bool            isLoadingMore;
+  final bool            hasMore;
+  final String?         error;
+
+  _HistoryState copyWith({
+    List<_TripItem>? trips,
+    bool? isInitialLoad,
+    bool? isLoadingMore,
+    bool? hasMore,
+    String? error,
+  }) => _HistoryState(
+    trips:         trips         ?? this.trips,
+    isInitialLoad: isInitialLoad ?? this.isInitialLoad,
+    isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+    hasMore:       hasMore       ?? this.hasMore,
+    error:         error,
+  );
+}
+
+class _TripHistoryNotifier extends AutoDisposeNotifier<_HistoryState> {
+  static const _limit = 20;
+  int _page = 1;
+
+  @override
+  _HistoryState build() {
+    _page = 1;
+    _fetch(initial: true);
+    return const _HistoryState();
+  }
+
+  Future<void> _fetch({bool initial = false}) async {
+    if (!initial && (state.isLoadingMore || !state.hasMore)) return;
+    state = state.copyWith(
+      isInitialLoad: initial && state.trips.isEmpty,
+      isLoadingMore: !initial,
+    );
+    try {
+      final dio = ref.read(dioProvider);
+      final res = await dio.get('/trips/me',
+          queryParameters: {'page': _page, 'limit': _limit});
+      final items = (res.data['items'] as List? ?? [])
+          .map((j) => _TripItem.fromJson(j as Map<String, dynamic>))
+          .toList();
+      _page++;
+      state = state.copyWith(
+        trips:        [...state.trips, ...items],
+        isInitialLoad: false,
+        isLoadingMore: false,
+        hasMore:       items.length == _limit,
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isInitialLoad: false,
+        isLoadingMore: false,
+        error: e.toString().replaceAll('Exception: ', ''),
+      );
+    }
+  }
+
+  Future<void> loadMore()  => _fetch(initial: false);
+
+  Future<void> refresh() async {
+    _page = 1;
+    state = const _HistoryState();
+    await _fetch(initial: true);
+  }
+}
+
+final _tripHistoryProvider =
+    NotifierProvider.autoDispose<_TripHistoryNotifier, _HistoryState>(
+  _TripHistoryNotifier.new,
+);
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
@@ -121,7 +196,7 @@ class TripHistoryPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final tripsAsync = ref.watch(_tripHistoryProvider);
+    final s = ref.watch(_tripHistoryProvider);
 
     return DefaultTabController(
       length: 4,
@@ -129,7 +204,7 @@ class TripHistoryPage extends ConsumerWidget {
         backgroundColor: AppColors.background,
         appBar: AppBar(
           title: Text('Mis viajes', style: AppTextStyles.h3),
-              bottom: const TabBar(
+          bottom: const TabBar(
             isScrollable: true,
             tabAlignment: TabAlignment.start,
             indicatorColor: AppColors.primary,
@@ -144,21 +219,48 @@ class TripHistoryPage extends ConsumerWidget {
             ],
           ),
         ),
-        body: tripsAsync.when(
-          loading: () => const Center(
-              child: CircularProgressIndicator(color: AppColors.primary)),
-          error: (e, _) => Center(
-              child: Text('Error al cargar viajes', style: AppTextStyles.body)),
-          data: (trips) => TabBarView(
-            children: [
-              _TripList(trips: trips.where((t) => t.status == 'requested').toList()),
-              _TripList(trips: trips.where((t) =>
-                  const {'accepted','driver_arrived','in_progress'}.contains(t.status)).toList()),
-              _TripList(trips: trips.where((t) => t.status == 'completed').toList()),
-              _TripList(trips: trips.where((t) => t.status == 'cancelled').toList()),
-            ],
-          ),
-        ),
+        body: s.isInitialLoad
+            ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+            : s.error != null && s.trips.isEmpty
+                ? Center(
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Text('Error al cargar viajes', style: AppTextStyles.body),
+                      const SizedBox(height: 12),
+                      ElevatedButton(
+                        onPressed: () => ref.read(_tripHistoryProvider.notifier).refresh(),
+                        child: const Text('Reintentar'),
+                      ),
+                    ]),
+                  )
+                : TabBarView(
+                    children: [
+                      _TripList(
+                        trips:       s.trips.where((t) => t.status == 'requested').toList(),
+                        isLoadingMore: s.isLoadingMore,
+                        hasMore:     s.hasMore,
+                        onLoadMore:  () => ref.read(_tripHistoryProvider.notifier).loadMore(),
+                      ),
+                      _TripList(
+                        trips:       s.trips.where((t) =>
+                            const {'accepted','driver_arrived','in_progress'}.contains(t.status)).toList(),
+                        isLoadingMore: s.isLoadingMore,
+                        hasMore:     s.hasMore,
+                        onLoadMore:  () => ref.read(_tripHistoryProvider.notifier).loadMore(),
+                      ),
+                      _TripList(
+                        trips:       s.trips.where((t) => t.status == 'completed').toList(),
+                        isLoadingMore: s.isLoadingMore,
+                        hasMore:     s.hasMore,
+                        onLoadMore:  () => ref.read(_tripHistoryProvider.notifier).loadMore(),
+                      ),
+                      _TripList(
+                        trips:       s.trips.where((t) => t.status == 'cancelled').toList(),
+                        isLoadingMore: s.isLoadingMore,
+                        hasMore:     s.hasMore,
+                        onLoadMore:  () => ref.read(_tripHistoryProvider.notifier).loadMore(),
+                      ),
+                    ],
+                  ),
       ),
     );
   }
@@ -166,19 +268,51 @@ class TripHistoryPage extends ConsumerWidget {
 
 // ── Lista ────────────────────────────────────────────────────────────────────
 
-class _TripList extends StatelessWidget {
-  const _TripList({required this.trips});
+class _TripList extends StatefulWidget {
+  const _TripList({
+    required this.trips,
+    required this.isLoadingMore,
+    required this.hasMore,
+    required this.onLoadMore,
+  });
   final List<_TripItem> trips;
+  final bool            isLoadingMore;
+  final bool            hasMore;
+  final VoidCallback    onLoadMore;
+
+  @override
+  State<_TripList> createState() => _TripListState();
+}
+
+class _TripListState extends State<_TripList> {
+  final _scroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scroll.position.pixels >= _scroll.position.maxScrollExtent - 200) {
+      widget.onLoadMore();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (trips.isEmpty) {
+    if (widget.trips.isEmpty && !widget.isLoadingMore && !widget.hasMore) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.directions_car_outlined,
-                size: 56, color: AppColors.gray300),
+            const Icon(Icons.directions_car_outlined, size: 56, color: AppColors.gray300),
             const SizedBox(height: 12),
             Text('No hay viajes aquí todavía',
                 style: AppTextStyles.h3.copyWith(color: AppColors.gray500)),
@@ -186,14 +320,39 @@ class _TripList extends StatelessWidget {
         ),
       );
     }
+
+    if (widget.trips.isEmpty && (widget.isLoadingMore || widget.hasMore)) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+    }
+
     return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: trips.length,
-      separatorBuilder: (ctx, i) => const SizedBox(height: 10),
-      itemBuilder: (ctx, i) => _TripTile(
-        trip: trips[i],
-        onTap: () => _showDetail(ctx, trips[i]),
-      ),
+      controller: _scroll,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      itemCount: widget.trips.length + (widget.hasMore ? 1 : 0),
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (ctx, i) {
+        if (i == widget.trips.length) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Center(
+              child: widget.isLoadingMore
+                  ? const CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.primary)
+                  : TextButton(
+                      onPressed: widget.onLoadMore,
+                      child: Text(
+                        'Cargar más',
+                        style: AppTextStyles.label.copyWith(color: AppColors.secondary),
+                      ),
+                    ),
+            ),
+          );
+        }
+        return _TripTile(
+          trip: widget.trips[i],
+          onTap: () => _showDetail(ctx, widget.trips[i]),
+        );
+      },
     );
   }
 
@@ -329,7 +488,7 @@ class _TripDetailSheetState extends ConsumerState<_TripDetailSheet> {
     try {
       await ref.read(tripsApiProvider).cancelTrip(widget.trip.id);
       if (!mounted) return;
-      ref.invalidate(_tripHistoryProvider);
+      await ref.read(_tripHistoryProvider.notifier).refresh();
       nav.pop();
       messenger.showSnackBar(
         const SnackBar(content: Text('Viaje cancelado.')),

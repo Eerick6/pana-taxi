@@ -5,6 +5,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import * as admin from 'firebase-admin';
 import * as fs from 'fs';
+import { Server } from 'socket.io';
 import { User } from '../users/entities/user.entity';
 import { AppNotification, NotificationType } from './entities/app-notification.entity';
 import { NOTIFICATION_QUEUE } from '../../queues/notifications/notification-queue.types';
@@ -20,6 +21,12 @@ export interface PushPayload {
 export class NotificationsService implements OnModuleInit {
   private readonly logger = new Logger(NotificationsService.name);
   private initialized = false;
+  private wsServer: Server | null = null;
+
+  /** Llamado por EventsGateway.afterInit() para emitir notifs en tiempo real */
+  setWsServer(server: Server) {
+    this.wsServer = server;
+  }
 
   constructor(
     @InjectRepository(User)
@@ -186,7 +193,7 @@ export class NotificationsService implements OnModuleInit {
   // ── Internals ───────────────────────────────────────────────────────────────
 
   private async persistNotification(userId: string, payload: PushPayload): Promise<void> {
-    await this.notifRepo.save(
+    const notif = await this.notifRepo.save(
       this.notifRepo.create({
         user_id: userId,
         title: payload.title,
@@ -195,51 +202,65 @@ export class NotificationsService implements OnModuleInit {
         data: payload.data ?? null,
       }),
     );
+    // Emitir en tiempo real al usuario (panel web o móvil con socket activo)
+    this.wsServer?.to(`user:${userId}`).emit('notification.new', {
+      id: notif.id,
+      title: notif.title,
+      body: notif.body,
+      type: notif.type,
+      data: notif.data,
+      created_at: notif.created_at,
+    });
   }
 
   private async sendToToken(token: string, payload: PushPayload): Promise<void> {
     const isTripAlert = payload.data?.['type'] === 'trip_new';
+    const msg = isTripAlert
+      ? {
+          data: { ...payload.data ?? {}, title: payload.title, body: payload.body },
+          android: { priority: 'high' as const },
+          apns: { payload: { aps: { contentAvailable: true, sound: 'trip_alert.wav', badge: 1 } } },
+        }
+      : {
+          notification: { title: payload.title, body: payload.body },
+          data: payload.data ?? {},
+          android: { priority: 'high' as const, notification: { channelId: 'default', defaultSound: true } },
+          apns: { payload: { aps: { sound: 'default', badge: 1 } } },
+        };
     try {
-      await admin.messaging().send({
-        token,
-        notification: { title: payload.title, body: payload.body },
-        data: payload.data ?? {},
-        android: {
-          priority: 'high',
-          notification: isTripAlert
-            ? { channelId: 'trip_alert', sound: 'trip_alert', defaultSound: false }
-            : { channelId: 'default', defaultSound: true },
-        },
-        apns: { payload: { aps: { sound: isTripAlert ? 'trip_alert.wav' : 'default', badge: 1 } } },
-      });
+      this.logger.log(`[FCM] sending to token ${token.slice(0, 20)}… type=${payload.data?.['type'] ?? 'general'}`);
+      await admin.messaging().send({ token, ...msg });
+      this.logger.log(`[FCM] sent OK`);
     } catch (err) {
       if (err.code === 'messaging/registration-token-not-registered') {
+        this.logger.warn(`[FCM] invalid token — clearing`);
         await this.usersRepo
           .createQueryBuilder().update()
           .set({ fcm_token: null })
           .where('fcm_token = :token', { token })
           .execute();
       } else {
-        this.logger.warn(`FCM send failed: ${err.message}`);
+        this.logger.warn(`[FCM] send failed: ${err.message}`);
       }
     }
   }
 
   private async sendToTokens(tokens: string[], payload: PushPayload): Promise<void> {
     const isTripAlert = payload.data?.['type'] === 'trip_new';
+    const msg = isTripAlert
+      ? {
+          data: { ...payload.data ?? {}, title: payload.title, body: payload.body },
+          android: { priority: 'high' as const },
+          apns: { payload: { aps: { contentAvailable: true, sound: 'trip_alert.wav', badge: 1 } } },
+        }
+      : {
+          notification: { title: payload.title, body: payload.body },
+          data: payload.data ?? {},
+          android: { priority: 'high' as const, notification: { channelId: 'default', defaultSound: true } },
+          apns: { payload: { aps: { sound: 'default', badge: 1 } } },
+        };
     try {
-      const response = await admin.messaging().sendEachForMulticast({
-        tokens,
-        notification: { title: payload.title, body: payload.body },
-        data: payload.data ?? {},
-        android: {
-          priority: 'high',
-          notification: isTripAlert
-            ? { channelId: 'trip_alert', sound: 'trip_alert', defaultSound: false }
-            : { channelId: 'default', defaultSound: true },
-        },
-        apns: { payload: { aps: { sound: isTripAlert ? 'trip_alert.wav' : 'default', badge: 1 } } },
-      });
+      const response = await admin.messaging().sendEachForMulticast({ tokens, ...msg });
 
       const invalidTokens = tokens.filter((_, i) =>
         response.responses[i]?.error?.code === 'messaging/registration-token-not-registered',

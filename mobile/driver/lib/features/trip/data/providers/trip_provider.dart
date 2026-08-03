@@ -1,13 +1,16 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/network/socket_client.dart';
-import '../../../profile/data/providers/profile_provider.dart';
-import '../../../vehicle_request/data/providers/vehicle_request_provider.dart';
 import '../models/trip_model.dart';
 import '../repositories/trip_repository.dart';
 
 final myTripsProvider = FutureProvider.autoDispose<List<TripModel>>((ref) {
   return ref.read(tripRepositoryProvider).getMyTrips();
 });
+
+// Metro en vivo — se actualiza desde socket sin reconstruir todo el árbol del viaje
+final liveMeterProvider = StateProvider<({double amount, double incPerSec})>(
+  (ref) => (amount: 0, incPerSec: 0),
+);
 
 final activeTripProvider = AsyncNotifierProvider<ActiveTripNotifier, TripModel?>(
   ActiveTripNotifier.new,
@@ -19,24 +22,23 @@ class ActiveTripNotifier extends AsyncNotifier<TripModel?> {
     final socket = ref.read(socketClientProvider);
     await socket.connect();
 
-    socket.on('trip.new_request', (data) {
-      final trip = TripModel.fromJson(data as Map<String, dynamic>);
-      state = AsyncData(trip);
-    });
-
-    socket.on('trip.cancelled', (_) {
+    void onCancelled(dynamic _) {
       state = const AsyncData(null);
-    });
+    }
 
-    // Cuando el admin aprueba el perfil, refrescar inmediatamente sin recargar
-    socket.on('driver.approved', (_) {
-      ref.read(driverProfileProvider.notifier).refresh();
-    });
+    void onMeterUpdate(dynamic data) {
+      if (data is! Map) return;
+      final amount = (data['meter_amount'] as num?)?.toDouble() ?? 0;
+      final inc    = (data['increment_per_second'] as num?)?.toDouble() ?? 0;
+      ref.read(liveMeterProvider.notifier).state = (amount: amount, incPerSec: inc);
+    }
 
-    // Cuando el dueño asigna al conductor, refrescar aplicaciones y perfil
-    socket.on('driver.assignment_created', (_) {
-      ref.read(driverProfileProvider.notifier).refresh();
-      ref.invalidate(myApplicationsProvider);
+    socket.on('trip.cancelled',    onCancelled);
+    socket.on('trip.meter_update', onMeterUpdate);
+
+    ref.onDispose(() {
+      socket.off('trip.cancelled');
+      socket.off('trip.meter_update');
     });
 
     return ref.read(tripRepositoryProvider).getActiveTrip();

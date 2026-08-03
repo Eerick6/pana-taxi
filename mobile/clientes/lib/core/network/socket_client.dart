@@ -55,6 +55,9 @@ class SocketClient {
   void joinTripRoom(String tripId) => emit('trip.subscribe', {'trip_id': tripId});
   void leaveTripRoom(String tripId) => emit('trip.unsubscribe', {'trip_id': tripId});
 
+  void joinRoom(String room) => emit('join', {'room': room});
+  void leaveRoom(String room) => emit('leave', {'room': room});
+
   void disconnect() {
     _socket?.disconnect();
     _socket = null;

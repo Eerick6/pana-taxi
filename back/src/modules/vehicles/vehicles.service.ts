@@ -18,6 +18,7 @@ import { RegisterVehicleDto } from './dto/register-vehicle.dto';
 import { UploadVehicleDocumentDto } from './dto/upload-vehicle-document.dto';
 import { RejectVehicleDto } from './dto/reject-vehicle.dto';
 import { RejectDocumentDto } from '../drivers/dto/reject-document.dto';
+import { EventsGateway } from '../gateway/events.gateway';
 
 @Injectable()
 export class VehiclesService {
@@ -33,6 +34,7 @@ export class VehiclesService {
     @InjectRepository(CooperativeOwner)
     private cooperativeOwnersRepo: Repository<CooperativeOwner>,
     private storage: StorageService,
+    private gateway: EventsGateway,
   ) {}
 
   async registerVehicle(userId: string, dto: RegisterVehicleDto) {
@@ -263,7 +265,7 @@ export class VehiclesService {
   }
 
   async approveVehicle(id: string) {
-    const vehicle = await this.vehiclesRepo.findOne({ where: { id } });
+    const vehicle = await this.vehiclesRepo.findOne({ where: { id }, relations: ['owner'] });
     if (!vehicle) throw new NotFoundException('Vehículo no encontrado');
     if (vehicle.approval_status === VehicleApprovalStatus.APPROVED) {
       throw new BadRequestException('El vehículo ya está aprobado');
@@ -273,6 +275,10 @@ export class VehiclesService {
       approval_status: VehicleApprovalStatus.APPROVED,
       rejection_reason: null,
     });
+
+    if (vehicle.owner?.id) {
+      this.gateway.notifyDriver(vehicle.owner.id, 'vehicle.approved', { vehicle_id: id });
+    }
 
     return { message: 'Vehículo aprobado' };
   }
@@ -295,6 +301,7 @@ export class VehiclesService {
   async approveVehicleDocument(vehicleId: string, documentId: string) {
     const doc = await this.vehicleDocsRepo.findOne({
       where: { id: documentId, vehicle: { id: vehicleId } },
+      relations: ['vehicle', 'vehicle.owner'],
     });
     if (!doc) throw new NotFoundException('Documento no encontrado');
     if (doc.status === DocumentStatus.APPROVED) {
@@ -305,6 +312,11 @@ export class VehiclesService {
       status: DocumentStatus.APPROVED,
       rejection_reason: null,
     });
+
+    const ownerId = doc.vehicle?.owner?.id;
+    if (ownerId) {
+      this.gateway.notifyDriver(ownerId, 'document.approved', { document_id: documentId, vehicle_id: vehicleId });
+    }
 
     return { message: 'Documento aprobado' };
   }

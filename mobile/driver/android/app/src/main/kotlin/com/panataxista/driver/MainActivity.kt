@@ -16,24 +16,15 @@ class MainActivity : FlutterFragmentActivity() {
 
     private fun createTripAlertChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-
         val manager = getSystemService(NotificationManager::class.java) ?: return
-
-        // Solo crear si no existe — Android ignora createNotificationChannel si ya existe
         if (manager.getNotificationChannel("trip_alert") != null) return
-
-        val soundUri = Uri.parse(
-            "android.resource://${packageName}/raw/trip_alert"
-        )
+        val soundUri = Uri.parse("android.resource://${packageName}/raw/trip_alert")
         val audioAttrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_NOTIFICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
-
         val channel = NotificationChannel(
-            "trip_alert",
-            "Alertas de viaje",
-            NotificationManager.IMPORTANCE_HIGH
+            "trip_alert", "Alertas de viaje", NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "Notificaciones de nuevos viajes disponibles"
             enableVibration(true)
