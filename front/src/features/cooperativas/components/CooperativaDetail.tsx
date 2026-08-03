@@ -1004,7 +1004,7 @@ function TarifasTab({ coopId }: { coopId: string }) {
     try {
       const cfg = await getCoopFareConfig(coopId);
       const mapped: Record<string, string> = {};
-      for (const f of FARE_FIELDS) mapped[f.key] = String((cfg as Record<string, unknown>)[f.key] ?? '');
+      for (const f of FARE_FIELDS) mapped[f.key] = String((cfg as unknown as Record<string, unknown>)[f.key] ?? '');
       setValues(mapped);
     } catch { /* leave empty */ }
     setLoading(false);

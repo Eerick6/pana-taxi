@@ -111,9 +111,25 @@ class TripAlertManager {
     _player = AudioPlayer();
     try {
       await _player!.setReleaseMode(ReleaseMode.loop);
-      await _player!.play(AssetSource('sounds/trip_alert.wav'));
-      Future.delayed(const Duration(seconds: 8), () { _player?.stop(); });
-    } catch (_) {}
+      await _player!.play(
+        AssetSource('sounds/trip_alert.wav'),
+        ctx: const AudioContext(
+          android: AudioContextAndroid(
+            usageType: AndroidUsageType.notificationRingtone,
+            contentType: AndroidContentType.sonification,
+            audioFocus: AndroidAudioFocus.gainTransient,
+            stayAwake: true,
+          ),
+          ios: AudioContextIOS(
+            category: AVAudioSessionCategory.playback,
+          ),
+        ),
+      );
+      final p = _player!;
+      Future.delayed(const Duration(seconds: 8), p.stop);
+    } catch (e) {
+      debugPrint('[TripAlert] audio error: $e');
+    }
 
     Overlay.of(context).insert(_entry!);
     _timer = Timer(const Duration(seconds: 25), dismiss);
