@@ -10,14 +10,14 @@ import 'core/services/push_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await AudioPlayer.global.setAudioContext(const AudioContext(
-    android: AudioContextAndroid(
+  await AudioPlayer.global.setAudioContext(AudioContext(
+    android: const AudioContextAndroid(
       usageType: AndroidUsageType.notificationRingtone,
       contentType: AndroidContentType.sonification,
       audioFocus: AndroidAudioFocus.gainTransient,
       stayAwake: true,
     ),
-    ios: AudioContextIOS(
+    iOS: AudioContextIOS(
       category: AVAudioSessionCategory.playback,
     ),
   ));

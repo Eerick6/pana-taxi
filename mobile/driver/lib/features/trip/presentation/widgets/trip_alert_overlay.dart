@@ -113,14 +113,14 @@ class TripAlertManager {
       await _player!.setReleaseMode(ReleaseMode.loop);
       await _player!.play(
         AssetSource('sounds/trip_alert.wav'),
-        ctx: const AudioContext(
-          android: AudioContextAndroid(
+        ctx: AudioContext(
+          android: const AudioContextAndroid(
             usageType: AndroidUsageType.notificationRingtone,
             contentType: AndroidContentType.sonification,
             audioFocus: AndroidAudioFocus.gainTransient,
             stayAwake: true,
           ),
-          ios: AudioContextIOS(
+          iOS: AudioContextIOS(
             category: AVAudioSessionCategory.playback,
           ),
         ),
