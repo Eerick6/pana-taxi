@@ -129,6 +129,7 @@ class _TripViewState extends ConsumerState<_TripView> {
   MapLibreMapController? _mapController;
   bool    _mapImageReady = false;
   Symbol? _mySymbol;
+  Symbol? _originSymbol;
   double? _etaMinutes;
   Timer?  _waitTimer;
   int     _waitSecondsLeft = 0;
@@ -201,6 +202,50 @@ class _TripViewState extends ConsumerState<_TripView> {
 
     // Punto blanco central
     canvas.drawCircle(Offset(cx, h / 2 + 4), 4, Paint()..color = Colors.white);
+
+    final img  = await rec.endRecording().toImage(w.toInt(), h.toInt());
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return data!.buffer.asUint8List();
+  }
+
+  Future<Uint8List> _buildPersonPin() async {
+    const w = 48.0, h = 60.0;
+    final rec    = ui.PictureRecorder();
+    final canvas = Canvas(rec, Rect.fromLTWH(0, 0, w, h));
+    final cx     = w / 2;
+
+    // Sombra
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(cx, h - 4), width: 18, height: 6),
+      Paint()..color = Colors.black.withValues(alpha: 0.22),
+    );
+
+    // Pin (teardrop): círculo arriba + triángulo abajo
+    final pinRadius = 18.0;
+    final pinCenter = Offset(cx, pinRadius + 4);
+    final pinPath = Path()
+      ..addOval(Rect.fromCircle(center: pinCenter, radius: pinRadius))
+      ..moveTo(cx - 10, pinCenter.dy + pinRadius - 4)
+      ..lineTo(cx, h - 8)
+      ..lineTo(cx + 10, pinCenter.dy + pinRadius - 4)
+      ..close();
+
+    // Fondo verde
+    canvas.drawPath(pinPath, Paint()..color = const Color(0xFF1DB954));
+    // Borde blanco
+    canvas.drawPath(pinPath, Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5);
+
+    // Persona: cabeza
+    canvas.drawCircle(pinCenter.translate(0, -6), 6, Paint()..color = Colors.white);
+    // Persona: cuerpo (semicírculo)
+    canvas.drawArc(
+      Rect.fromCenter(center: pinCenter.translate(0, 3), width: 18, height: 14),
+      3.14, 3.14, false,
+      Paint()..color = Colors.white..style = PaintingStyle.fill,
+    );
 
     final img  = await rec.endRecording().toImage(w.toInt(), h.toInt());
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
@@ -329,6 +374,10 @@ class _TripViewState extends ConsumerState<_TripView> {
 
     if (mounted) setState(() => _followDriver = false);
     await ctrl.clearLines();
+    if (_originSymbol != null) {
+      await ctrl.removeSymbol(_originSymbol!);
+      _originSymbol = null;
+    }
 
     double startLat, startLng, endLat, endLng;
     String lineColor;
@@ -346,7 +395,7 @@ class _TripViewState extends ConsumerState<_TripView> {
         }
         endLat = trip.originLat;
         endLng = trip.originLng;
-        lineColor = '#4264fb'; // blue: driver → pickup
+        lineColor = '#FF6B35'; // orange: driver → pickup
 
       case 'in_progress':
         startLat = trip.originLat;
@@ -400,6 +449,16 @@ class _TripViewState extends ConsumerState<_TripView> {
         lineOpacity: 1.0,
         lineJoin: 'round',
       ));
+
+      // Pin de recogida (persona) en el punto de origen
+      if (_mapImageReady) {
+        _originSymbol = await ctrl.addSymbol(SymbolOptions(
+          geometry: LatLng(trip.originLat, trip.originLng),
+          iconImage: 'pickup-pin',
+          iconSize: 1.0,
+          iconAnchor: 'bottom',
+        ));
+      }
 
       // Show full route for 3 seconds, then switch to navigation follow mode
       final lats = latLngs.map((p) => p.latitude);
@@ -501,6 +560,8 @@ class _TripViewState extends ConsumerState<_TripView> {
               if (ctrl == null) return;
               final bytes = await _buildNavArrow();
               await ctrl.addImage('driver-dot', bytes);
+              final pinBytes = await _buildPersonPin();
+              await ctrl.addImage('pickup-pin', pinBytes);
               _mapImageReady = true;
               _fetchAndDrawRoute(trip);
               // Icono inicial en posición actual
