@@ -368,12 +368,13 @@ export class TripsService {
     const preCheck = await this.tripsRepo.findOne({ where: { id: tripId } });
     if (!preCheck) throw new NotFoundException('Viaje no encontrado');
 
-    // NEGOTIATED: crear oferta al precio del cliente sin bloquear el viaje
-    if (preCheck.fare_mode === FareMode.NEGOTIATED) {
+    // NEGOTIATED / METER: conductor hace oferta — cliente elige
+    if (preCheck.fare_mode === FareMode.NEGOTIATED || preCheck.fare_mode === FareMode.METER) {
       return this.makeOffer(tripId, userId, {});
     }
 
-    // METER: primer conductor gana — lock pesimista
+    // Fallback (no debería llegar aquí con los modos actuales)
+    // METER original: primer conductor gana — lock pesimista
     const activeTrip = await this.tripsRepo.findOne({
       where: {
         driver: { id: driver.id },
@@ -471,19 +472,20 @@ export class TripsService {
       relations: ['client'],
     });
     if (!trip) throw new NotFoundException('Viaje no encontrado');
-    if (trip.fare_mode !== FareMode.NEGOTIATED) {
-      throw new BadRequestException('Este viaje no admite ofertas de precio fijo');
+    if (![FareMode.NEGOTIATED, FareMode.METER].includes(trip.fare_mode)) {
+      throw new BadRequestException('Este viaje no admite selección de conductor');
     }
     if (trip.status !== TripStatus.REQUESTED) {
-      throw new ConflictException('El viaje ya no está disponible para ofertas');
+      throw new ConflictException('El viaje ya no está disponible');
     }
 
+    const isMeter = trip.fare_mode === FareMode.METER;
     const fareConfig = await this.fareService.getConfig();
     const suggested = parseFloat(trip.suggested_fare as any);
     const clientPrice = parseFloat(trip.client_offer as any) ?? suggested;
 
-    // Si el conductor especifica un monto, debe estar por encima del mínimo permitido
-    if (dto.amount != null) {
+    // Solo validar monto para viajes negociados
+    if (!isMeter && dto.amount != null) {
       const maxDiscount = parseFloat(fareConfig.max_negotiation_discount_pct as any);
       const minAcceptable = +(suggested * (1 - maxDiscount / 100)).toFixed(2);
       if (dto.amount < minAcceptable) {
@@ -499,7 +501,8 @@ export class TripsService {
       throw new BadRequestException('Has alcanzado el límite de 3 ofertas para este viaje');
     }
 
-    const offerAmount = dto.amount ?? clientPrice;
+    // Taxímetro: sin monto fijo (se cobra por distancia/tiempo)
+    const offerAmount = isMeter ? null : (dto.amount ?? clientPrice);
     const vehicle = await this.findDriverVehicle(driver.id, trip);
 
     // ETA del conductor al punto de recogida — Haversine / 30 km/h promedio urbano
@@ -549,7 +552,7 @@ export class TripsService {
     }
 
     // Notificar al cliente con info completa del taxista
-    this.logger.log(`[makeOffer] tripId=${tripId} driverId=${driver.id} clientId=${trip.client?.id ?? 'null'} amount=${offerAmount} isCounter=${dto.amount != null}`);
+    this.logger.log(`[makeOffer] tripId=${tripId} driverId=${driver.id} clientId=${trip.client?.id ?? 'null'} amount=${offerAmount} isMeter=${isMeter} isCounter=${!isMeter && dto.amount != null}`);
     if (trip.client) {
       const offerPayload = {
         trip_id:        tripId,
@@ -561,20 +564,24 @@ export class TripsService {
         vehicle_plate:  vehicle ? (vehicle as any).plate : null,
         vehicle_model:  vehicle ? `${(vehicle as any).brand ?? ''} ${(vehicle as any).model ?? ''}`.trim() : null,
         amount:         offerAmount,
-        is_counter:     dto.amount != null,
+        fare_mode:      trip.fare_mode,
+        is_counter:     !isMeter && dto.amount != null,
         eta_pickup_min,
         distance_to_origin_km: distanceToOriginKm,
       };
       this.gateway.notifyUser(trip.client.id, 'trip.new_offer', offerPayload);
+      const notifBody = isMeter
+        ? `${eta_pickup_min != null ? `${eta_pickup_min} min de distancia` : 'cerca de ti'} · Tarifa por taxímetro`
+        : `$${(offerAmount as number).toFixed(2)} · ${eta_pickup_min != null ? `${eta_pickup_min} min de distancia` : 'cerca de ti'}`;
       this.notificationsService.sendToUser(trip.client.id, {
         title: `🚖 ${driver.full_name ?? 'Un taxista'} quiere llevarte`,
-        body: `$${(offerAmount as number).toFixed(2)} · ${eta_pickup_min != null ? `${eta_pickup_min} min de distancia` : 'cerca de ti'}`,
+        body: notifBody,
         data: { trip_id: tripId, event: 'trip.new_offer' },
       });
     }
 
     return {
-      message: `Oferta de $${offerAmount} enviada al cliente`,
+      message: isMeter ? 'Oferta de taxímetro enviada al cliente' : `Oferta de $${offerAmount} enviada al cliente`,
       offer_id: offerId,
       amount: offerAmount,
       eta_pickup_min,
@@ -671,8 +678,8 @@ export class TripsService {
       where: { id: tripId, client: { id: userId } },
     });
     if (!trip) throw new NotFoundException('Viaje no encontrado');
-    if (trip.fare_mode !== FareMode.NEGOTIATED) {
-      throw new BadRequestException('Solo aplica a viajes de precio fijo');
+    if (![FareMode.NEGOTIATED, FareMode.METER].includes(trip.fare_mode)) {
+      throw new BadRequestException('Solo aplica a viajes negociados o por taxímetro');
     }
     if (trip.status !== TripStatus.REQUESTED) {
       throw new ConflictException('El viaje ya fue asignado');
@@ -712,9 +719,10 @@ export class TripsService {
 
       const clientPrice = parseFloat(lockedTrip!.client_offer as any)
         ?? parseFloat(lockedTrip!.suggested_fare as any);
-      const fare = selectedOffer.amount != null
-        ? parseFloat(selectedOffer.amount as any)
-        : clientPrice;
+      // Para taxímetro no hay tarifa acordada — se calcula durante el viaje
+      const fare = lockedTrip!.fare_mode === FareMode.METER
+        ? null
+        : (selectedOffer.amount != null ? parseFloat(selectedOffer.amount as any) : clientPrice);
 
       const otp = generateOtp();
 

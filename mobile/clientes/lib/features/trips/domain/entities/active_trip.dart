@@ -16,6 +16,7 @@ class ActiveTrip {
     this.createdAt,
     this.pendingOfferAmount,
     this.clientOffer,
+    this.meterAmount,
     this.otpCode,
     this.driverName,
     this.driverPhone,
@@ -39,6 +40,7 @@ class ActiveTrip {
   final DateTime? createdAt;
   final double?   pendingOfferAmount;
   final double?   clientOffer;
+  final double?   meterAmount;
   final String?   otpCode;
   final String?   driverName;
   final String?   driverPhone;
@@ -70,6 +72,7 @@ class ActiveTrip {
                            : null,
     pendingOfferAmount:  _d(j['pending_offer_amount']),
     clientOffer:         _d(j['client_offer']),
+    meterAmount:         _d(j['meter_amount']),
     otpCode:             j['otp_code']                  as String?,
     driverName:          (j['driver']  as Map?)?['full_name']          as String?,
     driverPhone:         (j['driver']  as Map?)?['phone']              as String?,

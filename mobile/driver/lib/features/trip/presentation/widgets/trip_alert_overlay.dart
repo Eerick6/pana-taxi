@@ -413,18 +413,25 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
                                 ],
                               ),
                             ),
-                            // Precio + countdown
+                            // Precio / modo + countdown
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                   decoration: BoxDecoration(
-                                    color: AppColors.primary,
+                                    color: alert.fareMode == 'meter' ? Colors.teal : AppColors.primary,
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: Text('\$${(_currentPrice ?? alert.displayFare).toStringAsFixed(2)}',
-                                      style: AppTextStyles.labelLg.copyWith(fontWeight: FontWeight.w800)),
+                                  child: alert.fareMode == 'meter'
+                                      ? const Row(mainAxisSize: MainAxisSize.min, children: [
+                                          Icon(Icons.speed, size: 13, color: Colors.white),
+                                          SizedBox(width: 4),
+                                          Text('Taxímetro', style: TextStyle(
+                                            color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                                        ])
+                                      : Text('\$${(_currentPrice ?? alert.displayFare).toStringAsFixed(2)}',
+                                          style: AppTextStyles.labelLg.copyWith(fontWeight: FontWeight.w800)),
                                 ),
                                 const SizedBox(height: 4),
                                 _CountdownRing(seconds: _seconds, total: 25),

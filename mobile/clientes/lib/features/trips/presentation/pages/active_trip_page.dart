@@ -129,14 +129,24 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
     // Usar dato ya cacheado en el provider — evita request duplicado al arrancar
     final cached = ref.read(activeTripProvider).valueOrNull;
     if (cached != null) {
-      setState(() => _trip = cached);
+      setState(() {
+        _trip = cached;
+        if (cached.status == 'in_progress' && cached.fareMode == 'meter' && (cached.meterAmount ?? 0) > 0) {
+          _meterAmount = cached.meterAmount!;
+        }
+      });
       if (_mapReady) _drawRoute();
       return;
     }
     // Fallback: fetch directo si el provider aún no tiene datos
     final trip = await ref.read(tripsApiProvider).getActiveTrip();
     if (mounted && trip != null) {
-      setState(() => _trip = trip);
+      setState(() {
+        _trip = trip;
+        if (trip.status == 'in_progress' && trip.fareMode == 'meter' && (trip.meterAmount ?? 0) > 0) {
+          _meterAmount = trip.meterAmount!;
+        }
+      });
       if (_mapReady) _drawRoute();
     }
   }
@@ -176,11 +186,13 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
       }
     });
 
-    socket.on('trip.started', (_) {
+    socket.on('trip.started', (data) {
       if (!mounted) return;
+      final baseFare = data is Map ? (data['meter_amount'] as num?)?.toDouble() : null;
       setState(() {
         _trip = _trip != null ? _rebuildTrip(_trip!, 'in_progress') : _trip;
-        _routeDrawn = false; // permitir redibujar con la ruta al destino
+        _routeDrawn = false;
+        if (baseFare != null && baseFare > 0) _meterAmount = baseFare;
       });
       if (_mapReady) _drawRoute();
     });
@@ -192,7 +204,30 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
       if (mounted) context.go('/home');
     });
 
-    socket.on('trip.cancelled', (_) {
+    socket.on('trip.cancelled', (data) async {
+      if (!mounted) return;
+      String? reason;
+      String? cancelledBy;
+      if (data is Map) {
+        reason = data['reason'] as String?;
+        cancelledBy = data['cancelled_by'] as String?;
+      }
+      if (reason != null && cancelledBy == 'driver' && mounted) {
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Viaje cancelado'),
+            content: Text('El conductor canceló el viaje:\n$reason'),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Entendido'),
+              ),
+            ],
+          ),
+        );
+      }
       if (mounted) context.go('/home');
     });
 
@@ -377,7 +412,7 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
     destinationLat: t.destinationLat, destinationLng: t.destinationLng,
     routeGeometry: t.routeGeometry, searchRadiusKm: t.searchRadiusKm,
     createdAt: t.createdAt, pendingOfferAmount: t.pendingOfferAmount,
-    clientOffer: t.clientOffer, otpCode: t.otpCode,
+    clientOffer: t.clientOffer, meterAmount: t.meterAmount, otpCode: t.otpCode,
     driverName: t.driverName, driverPhone: t.driverPhone,
     driverPhoto: t.driverPhoto, driverRating: t.driverRating,
     vehiclePlate: t.vehiclePlate, vehicleModel: t.vehicleModel,
@@ -517,7 +552,7 @@ class _BottomPanelState extends ConsumerState<_BottomPanel> {
           const SizedBox(height: 12),
 
           // Taxímetro en tiempo real (solo meter + in_progress)
-          if (trip.status == 'in_progress' && trip.fareMode == 'meter' && widget.meterAmount > 0) ...[
+          if (trip.status == 'in_progress' && trip.fareMode == 'meter') ...[
             _MeterDisplay(amount: widget.meterAmount),
             const SizedBox(height: 12),
           ],

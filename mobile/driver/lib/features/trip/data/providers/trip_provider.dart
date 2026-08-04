@@ -12,6 +12,9 @@ final liveMeterProvider = StateProvider<({double amount, double incPerSec})>(
   (ref) => (amount: 0, incPerSec: 0),
 );
 
+// Razón de cancelación por parte del cliente — mostrada antes de ir al home
+final tripCancelReasonProvider = StateProvider<String?>((ref) => null);
+
 final activeTripProvider = AsyncNotifierProvider<ActiveTripNotifier, TripModel?>(
   ActiveTripNotifier.new,
 );
@@ -22,7 +25,14 @@ class ActiveTripNotifier extends AsyncNotifier<TripModel?> {
     final socket = ref.read(socketClientProvider);
     await socket.connect();
 
-    void onCancelled(dynamic _) {
+    void onCancelled(dynamic data) {
+      if (data is Map) {
+        final reason = data['reason'] as String?;
+        final cancelledBy = data['cancelled_by'] as String?;
+        if (reason != null && cancelledBy == 'client') {
+          ref.read(tripCancelReasonProvider.notifier).state = reason;
+        }
+      }
       state = const AsyncData(null);
     }
 

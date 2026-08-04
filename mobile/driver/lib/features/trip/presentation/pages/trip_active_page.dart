@@ -4,7 +4,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 
 import 'package:dio/dio.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart' as geo;
@@ -80,7 +79,28 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
       error: (e, _) => Scaffold(body: Center(child: Text('Error: $e'))),
       data: (trip) {
         if (trip == null) {
-          WidgetsBinding.instance.addPostFrameCallback((_) => context.go('/home'));
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            if (!mounted) return;
+            final reason = ref.read(tripCancelReasonProvider);
+            if (reason != null) {
+              ref.read(tripCancelReasonProvider.notifier).state = null;
+              await showDialog<void>(
+                context: context,
+                barrierDismissible: false,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Viaje cancelado'),
+                  content: Text('El cliente canceló el viaje:\n$reason'),
+                  actions: [
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Entendido'),
+                    ),
+                  ],
+                ),
+              );
+            }
+            if (mounted) context.go('/home');
+          });
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         return _TripView(trip: trip, loading: _loading, onAction: _performAction);
@@ -126,6 +146,7 @@ class _TripView extends ConsumerStatefulWidget {
 }
 
 class _TripViewState extends ConsumerState<_TripView> {
+  bool    _disposed = false; // guardián para setState tras dispose
   MapLibreMapController? _mapController;
   bool    _mapImageReady = false;
   Symbol? _mySymbol;
@@ -147,7 +168,6 @@ class _TripViewState extends ConsumerState<_TripView> {
   @override
   void initState() {
     super.initState();
-    WakelockPlus.enable();
     _startLocationTracking();
     if (widget.trip.status == 'driver_arrived') {
       WidgetsBinding.instance.addPostFrameCallback(
@@ -162,7 +182,7 @@ class _TripViewState extends ConsumerState<_TripView> {
 
   @override
   void dispose() {
-    WakelockPlus.disable();
+    _disposed = true;
     _locationSub?.cancel();
     _waitTimer?.cancel();
     _meterTimer?.cancel();
@@ -358,10 +378,10 @@ class _TripViewState extends ConsumerState<_TripView> {
     _waitTimer?.cancel();
     final expires = expiresAt ?? DateTime.now().add(const Duration(minutes: 5));
     final initial = expires.difference(DateTime.now()).inSeconds;
-    if (!mounted) return;
+    if (_disposed || !mounted) return;
     setState(() => _waitSecondsLeft = initial < 0 ? 0 : initial);
     _waitTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
+      if (_disposed || !mounted) return;
       final left = expires.difference(DateTime.now()).inSeconds;
       setState(() => _waitSecondsLeft = left < 0 ? 0 : left);
       if (left <= 0) _waitTimer?.cancel();
@@ -372,7 +392,7 @@ class _TripViewState extends ConsumerState<_TripView> {
     final ctrl = _mapController;
     if (ctrl == null) return;
 
-    if (mounted) setState(() => _followDriver = false);
+    if (!_disposed) setState(() => _followDriver = false);
     await ctrl.clearLines();
     if (_originSymbol != null) {
       await ctrl.removeSymbol(_originSymbol!);
@@ -424,7 +444,7 @@ class _TripViewState extends ConsumerState<_TripView> {
 
       if (trip.status == 'accepted') {
         final secs = (routes[0]['duration'] as num?)?.toDouble();
-        if (secs != null && mounted) setState(() => _etaMinutes = secs / 60);
+        if (secs != null && !_disposed) setState(() => _etaMinutes = secs / 60);
       }
 
       final coords = routes[0]['geometry']['coordinates'] as List;
@@ -432,7 +452,7 @@ class _TripViewState extends ConsumerState<_TripView> {
           .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
           .toList();
 
-      if (!mounted) return;
+      if (_disposed || !mounted) return;
 
       // White border first, colored line on top — Uber/InDrive style
       await ctrl.addLine(LineOptions(
@@ -481,9 +501,9 @@ class _TripViewState extends ConsumerState<_TripView> {
       ));
 
       await Future.delayed(const Duration(seconds: 3));
-      if (mounted) setState(() => _followDriver = true);
+      if (!_disposed) setState(() => _followDriver = true);
     } catch (_) {
-      if (mounted) setState(() => _followDriver = true);
+      if (!_disposed) setState(() => _followDriver = true);
     }
   }
 
@@ -562,7 +582,7 @@ class _TripViewState extends ConsumerState<_TripView> {
 
     try {
       await ref.read(tripRepositoryProvider).cancelTrip(trip.id, reason);
-      if (mounted) context.go('/home');
+      ref.read(activeTripProvider.notifier).clear();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -576,17 +596,17 @@ class _TripViewState extends ConsumerState<_TripView> {
   Widget build(BuildContext context) {
     final trip = widget.trip;
 
-    // Taxímetro en vivo — sincroniza cada vez que el backend manda trip.meter_update
+    // Taxímetro en vivo — solo registra el listener cuando el viaje está en progreso
     if (trip.status == 'in_progress' && trip.isMeterMode) {
       ref.listen<({double amount, double incPerSec})>(liveMeterProvider, (_, next) {
-        if (!mounted) return;
+        if (_disposed || !mounted) return;
         _meterTimer?.cancel();
         setState(() {
           _meterDisplay   = next.amount;
           _meterIncPerSec = next.incPerSec;
         });
         _meterTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-          if (!mounted) { _meterTimer?.cancel(); return; }
+          if (_disposed || !mounted) { _meterTimer?.cancel(); return; }
           setState(() => _meterDisplay += _meterIncPerSec);
         });
       });
@@ -663,7 +683,7 @@ class _TripViewState extends ConsumerState<_TripView> {
             myLocationEnabled: false,
             trackCameraPosition: true,
             onCameraIdle: () {
-              if (!_suppressCameraIdle && _followDriver && mounted) {
+              if (!_suppressCameraIdle && _followDriver && !_disposed && mounted) {
                 setState(() => _followDriver = false);
               }
             },

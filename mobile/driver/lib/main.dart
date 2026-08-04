@@ -5,11 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'app.dart';
 import 'core/services/push_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  WakelockPlus.enable();
   await AudioPlayer.global.setAudioContext(AudioContext(
     android: const AudioContextAndroid(
       usageType: AndroidUsageType.notificationRingtone,

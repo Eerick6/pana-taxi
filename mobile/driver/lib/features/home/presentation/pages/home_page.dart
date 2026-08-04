@@ -30,6 +30,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
   MapLibreMapController? _mapController;
   StreamSubscription<geo.Position>? _locationSub;
   geo.Position? _pendingPosition;
+  bool _resumeChecked = false;
 
   @override
   void initState() {
@@ -305,7 +306,18 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) {
-    // CERO ref.watch aquí — el mapa nunca participa en rebuilds por providers
+    // Auto-resume si hay un viaje activo al abrir la app
+    ref.listen<AsyncValue<dynamic>>(activeTripProvider, (_, next) {
+      if (_resumeChecked) return;
+      final trip = next.valueOrNull;
+      if (trip == null) { _resumeChecked = true; return; }
+      final status = trip.status as String?;
+      if (status == 'accepted' || status == 'in_progress' || status == 'driver_arrived') {
+        _resumeChecked = true;
+        if (mounted) context.go('/trip/${trip.id}');
+      }
+    });
+
     return Scaffold(
       body: Stack(
         children: [

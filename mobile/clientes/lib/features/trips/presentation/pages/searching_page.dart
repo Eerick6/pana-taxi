@@ -105,6 +105,7 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
   List<DriverOffer>           _offers        = [];
   final Map<String, DateTime> _offerArrivals = {};
   Timer? _driverTimer;
+  Timer? _offerTimer;
 
   DateTime? _tripCreatedAt;
 
@@ -114,6 +115,7 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
   double _lastPulseOpacity = 0.08;
 
   bool get _isNegotiated => _trip.isNegotiated;
+  bool get _showOffersPanel => _trip.isNegotiated || _trip.fareMode == 'meter';
 
   @override
   void initState() {
@@ -173,12 +175,22 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
         context.go('/home');
       }
     });
+
+    // Rescatar ofertas enviadas antes de que el socket estuviera listo
+    // y mantener sincronía cada 10s como respaldo al socket
+    if (_showOffersPanel) {
+      _refreshOffers();
+      _offerTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (_socketActive && mounted) _refreshOffers();
+      });
+    }
   }
 
   @override
   void dispose() {
     _socketActive = false;
     _driverTimer?.cancel();
+    _offerTimer?.cancel();
     _pulseAnim.removeListener(_onPulseTick);
     _pulseCtrl.dispose();
     super.dispose();
@@ -480,7 +492,7 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
                       Text(
                         _noDrivers
                             ? 'No encontramos conductor'
-                            : (_isNegotiated ? 'Esperando ofertas…' : 'Buscando conductor…'),
+                            : (_showOffersPanel ? 'Esperando conductores…' : 'Buscando conductor…'),
                         style: AppTextStyles.label.copyWith(
                           color: _noDrivers ? AppColors.error : null,
                         ),
@@ -516,7 +528,7 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
                     onRetry:   _retryTrip,
                     onCancel:  () => context.go('/home'),
                   )
-                : _isNegotiated
+                : _showOffersPanel
                     ? _NegotiatedPanel(
                         trip:          trip,
                         offers:        _offers,
@@ -757,21 +769,26 @@ class _NegotiatedPanelState extends ConsumerState<_NegotiatedPanel> {
   }
 
   @override
-  Widget build(BuildContext context) => _PanelShell(
+  Widget build(BuildContext context) {
+    final isMeter = widget.trip.fareMode == 'meter';
+    return _PanelShell(
     bottomPad: widget.bottomPad,
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Tu oferta + ajuste de precio
+        // Header: oferta o modo taxímetro
         Row(children: [
-          const Icon(Icons.local_offer_outlined, size: 16, color: AppColors.gray500),
+          Icon(
+            isMeter ? Icons.speed : Icons.local_offer_outlined,
+            size: 16, color: AppColors.gray500,
+          ),
           const SizedBox(width: 8),
           Text(
-            'Tu oferta: \$${_currentOffer.toStringAsFixed(2)}',
+            isMeter ? 'Modo taxímetro' : 'Tu oferta: \$${_currentOffer.toStringAsFixed(2)}',
             style: AppTextStyles.label,
           ),
           const Spacer(),
-          if (widget.offers.isEmpty) ...[
+          if (!isMeter && widget.offers.isEmpty) ...[
             _AdjustButton(
               icon: Icons.remove,
               onTap: _submitting ? null : () => _scheduleAdjust(-1),
@@ -850,6 +867,7 @@ class _NegotiatedPanelState extends ConsumerState<_NegotiatedPanel> {
       ],
     ),
   );
+  }
 }
 
 // ── Tarjeta de oferta — mismo lenguaje visual que el overlay del taxista ─────
@@ -926,8 +944,9 @@ class _OfferCardState extends State<_OfferCard>
   @override
   Widget build(BuildContext context) {
     final offer      = widget.offer;
+    final isMeter    = offer.isMeter;
     final isCounter  = offer.isCounter;
-    final priceColor = isCounter ? const Color(0xFFF57C00) : AppColors.success;
+    final priceColor = isMeter ? Colors.teal : (isCounter ? const Color(0xFFF57C00) : AppColors.success);
 
     return FadeTransition(
       opacity: _fade,
@@ -1018,15 +1037,22 @@ class _OfferCardState extends State<_OfferCard>
                           color: priceColor,
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: Text(
-                          '\$${offer.amount.toStringAsFixed(2)}',
-                          style: AppTextStyles.label.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: isCounter ? Colors.white : AppColors.secondary,
-                          ),
-                        ),
+                        child: isMeter
+                            ? const Row(mainAxisSize: MainAxisSize.min, children: [
+                                Icon(Icons.speed, size: 13, color: Colors.white),
+                                SizedBox(width: 4),
+                                Text('Taxímetro', style: TextStyle(
+                                  color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                              ])
+                            : Text(
+                                '\$${offer.amount.toStringAsFixed(2)}',
+                                style: AppTextStyles.label.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: isCounter ? Colors.white : AppColors.secondary,
+                                ),
+                              ),
                       ),
-                      if (isCounter)
+                      if (!isMeter && isCounter)
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
                           child: Text(
@@ -1128,7 +1154,7 @@ class _OfferCardState extends State<_OfferCard>
                               child: CircularProgressIndicator(
                                   strokeWidth: 2, color: Colors.black))
                           : Text(
-                              'Aceptar \$${offer.amount.toStringAsFixed(2)}',
+                              isMeter ? 'Aceptar' : 'Aceptar \$${offer.amount.toStringAsFixed(2)}',
                               style: AppTextStyles.label.copyWith(fontWeight: FontWeight.w700),
                             ),
                     ),

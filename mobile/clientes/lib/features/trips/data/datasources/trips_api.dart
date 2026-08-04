@@ -23,6 +23,7 @@ class DriverOffer {
     required this.driverName,
     required this.amount,
     required this.isCounter,
+    this.fareMode = 'negotiated',
     this.driverPhoto,
     this.driverRating,
     this.vehiclePlate,
@@ -36,12 +37,15 @@ class DriverOffer {
   final String  driverName;
   final double  amount;
   final bool    isCounter;
+  final String  fareMode;
   final String? driverPhoto;
   final double? driverRating;
   final String? vehiclePlate;
   final String? vehicleModel;
   final int?    etaMin;
   final double? distanceToOriginKm;
+
+  bool get isMeter => fareMode == 'meter';
 
   static double? _d(dynamic v) {
     if (v == null) return null;
@@ -59,6 +63,7 @@ class DriverOffer {
       driverPhoto:         driver['photo']            as String?,
       driverRating:        _d(driver['rating']),
       amount:              (_d(j['amount']) ?? 0),
+      fareMode:            j['fare_mode']             as String? ?? 'negotiated',
       isCounter:           j['is_counter']            as bool? ?? false,
       vehiclePlate:        vehicle?['plate']          as String?,
       vehicleModel:        vehicle?['model']          as String?,
@@ -76,6 +81,7 @@ class DriverOffer {
       driverPhoto:         j['driver_photo']          as String?,
       driverRating:        _d(j['driver_rating']),
       amount:              (_d(j['amount']) ?? 0),
+      fareMode:            j['fare_mode']             as String? ?? 'negotiated',
       isCounter:           j['is_counter']            as bool? ?? false,
       vehiclePlate:        j['vehicle_plate']         as String?,
       vehicleModel:        j['vehicle_model']         as String?,

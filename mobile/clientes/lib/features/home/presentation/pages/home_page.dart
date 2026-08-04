@@ -80,6 +80,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   // Flag para desactivar handlers sin llamar socket.off() (que borraría listeners de otras páginas)
   bool _socketActive = false;
+  bool _resumeChecked = false;
 
   @override
   void initState() {
@@ -179,6 +180,18 @@ class _HomePageState extends ConsumerState<HomePage> {
   Widget build(BuildContext context) {
     final activeTripAsync = ref.watch(activeTripProvider);
     final hasActiveTrip   = activeTripAsync.valueOrNull?.isActive ?? false;
+
+    // Auto-resume si hay un viaje en curso al abrir la app
+    ref.listen<AsyncValue<dynamic>>(activeTripProvider, (_, next) {
+      if (_resumeChecked) return;
+      final trip = next.valueOrNull;
+      if (trip == null) { _resumeChecked = true; return; }
+      final status = trip.status as String?;
+      if (status == 'accepted' || status == 'in_progress' || status == 'driver_arrived') {
+        _resumeChecked = true;
+        if (mounted) context.go('/trip/${trip.id}');
+      }
+    });
 
     return Scaffold(
       body: Stack(
