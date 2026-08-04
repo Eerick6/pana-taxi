@@ -1,7 +1,10 @@
 import 'dart:async';
-import 'dart:ui';
+import 'dart:ui' as ui;
+
+import 'package:flutter/services.dart';
 
 import 'package:dio/dio.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart' as geo;
@@ -124,12 +127,16 @@ class _TripView extends ConsumerStatefulWidget {
 
 class _TripViewState extends ConsumerState<_TripView> {
   MapLibreMapController? _mapController;
+  bool    _mapImageReady = false;
+  Symbol? _mySymbol;
   double? _etaMinutes;
   Timer?  _waitTimer;
   int     _waitSecondsLeft = 0;
   final   _externalDio = Dio();
   StreamSubscription<geo.Position>? _locationSub;
   bool    _followDriver = false;
+  bool    _suppressCameraIdle = false; // true mientras animamos nosotros
+  geo.Position? _lastKnownPos;         // para re-centrar desde el botón
 
   // Taxímetro en vivo
   double _meterDisplay   = 0;
@@ -139,6 +146,7 @@ class _TripViewState extends ConsumerState<_TripView> {
   @override
   void initState() {
     super.initState();
+    WakelockPlus.enable();
     _startLocationTracking();
     if (widget.trip.status == 'driver_arrived') {
       WidgetsBinding.instance.addPostFrameCallback(
@@ -153,11 +161,77 @@ class _TripViewState extends ConsumerState<_TripView> {
 
   @override
   void dispose() {
+    WakelockPlus.disable();
     _locationSub?.cancel();
     _waitTimer?.cancel();
     _meterTimer?.cancel();
     _externalDio.close(force: true);
     super.dispose();
+  }
+
+  Future<Uint8List> _buildNavArrow() async {
+    const w = 44.0, h = 56.0;
+    final rec    = ui.PictureRecorder();
+    final canvas = Canvas(rec, Rect.fromLTWH(0, 0, w, h));
+    final cx     = w / 2;
+
+    // Sombra difusa
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(cx, h - 6), width: 22, height: 8),
+      Paint()..color = Colors.black.withValues(alpha: 0.25),
+    );
+
+    // Flecha apuntando al norte (hacia arriba) — rota vía iconRotate en el mapa
+    final path = Path()
+      ..moveTo(cx, 4)              // punta superior
+      ..lineTo(w - 6, h - 12)     // base derecha
+      ..lineTo(cx, h - 20)        // muesca central (da forma de carro/flecha)
+      ..lineTo(6, h - 12)         // base izquierda
+      ..close();
+
+    // Relleno azul navegación
+    canvas.drawPath(path, Paint()..color = const Color(0xFF1A73E8));
+
+    // Borde blanco
+    canvas.drawPath(path, Paint()
+      ..color      = Colors.white
+      ..style      = PaintingStyle.stroke
+      ..strokeWidth = 2.5
+      ..strokeJoin  = StrokeJoin.round);
+
+    // Punto blanco central
+    canvas.drawCircle(Offset(cx, h / 2 + 4), 4, Paint()..color = Colors.white);
+
+    final img  = await rec.endRecording().toImage(w.toInt(), h.toInt());
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return data!.buffer.asUint8List();
+  }
+
+  void _moveCamera(CameraUpdate update) {
+    _suppressCameraIdle = true;
+    _mapController?.animateCamera(update);
+    Future.delayed(const Duration(milliseconds: 700), () {
+      if (mounted) _suppressCameraIdle = false;
+    });
+  }
+
+  Future<void> _updateMySymbol(LatLng pos, {double heading = 0}) async {
+    final ctrl = _mapController;
+    if (ctrl == null || !_mapImageReady) return;
+    if (_mySymbol == null) {
+      _mySymbol = await ctrl.addSymbol(SymbolOptions(
+        geometry: pos,
+        iconImage: 'driver-dot',
+        iconSize: 1.0,
+        iconAnchor: 'center',
+        iconRotate: heading,
+      ));
+    } else {
+      await ctrl.updateSymbol(_mySymbol!, SymbolOptions(
+        geometry: pos,
+        iconRotate: heading,
+      ));
+    }
   }
 
   Future<void> _startLocationTracking() async {
@@ -185,15 +259,18 @@ class _TripViewState extends ConsumerState<_TripView> {
       ),
     ).listen((pos) {
       if (!mounted) return;
+      final driverPos = LatLng(pos.latitude, pos.longitude);
       socket.emit('location.update', {
         'lat': pos.latitude,
         'lng': pos.longitude,
         'speed_kmh': pos.speed > 0 ? pos.speed * 3.6 : 0.0,
       });
+      _lastKnownPos = pos;
+      _updateMySymbol(driverPos, heading: pos.heading >= 0 ? pos.heading : 0);
       if (_followDriver) {
-        _mapController?.animateCamera(CameraUpdate.newCameraPosition(
+        _moveCamera(CameraUpdate.newCameraPosition(
           CameraPosition(
-            target: LatLng(pos.latitude, pos.longitude),
+            target: driverPos,
             bearing: pos.heading >= 0 ? pos.heading : 0,
             zoom: 17,
             tilt: 45,
@@ -280,9 +357,7 @@ class _TripViewState extends ConsumerState<_TripView> {
 
       default:
         // driver_arrived: no route needed, just center on pickup
-        await ctrl.animateCamera(
-          CameraUpdate.newLatLngZoom(LatLng(trip.originLat, trip.originLng), 16),
-        );
+        _moveCamera(CameraUpdate.newLatLngZoom(LatLng(trip.originLat, trip.originLng), 16));
         await Future.delayed(const Duration(seconds: 2));
         if (mounted) setState(() => _followDriver = true);
         return;
@@ -329,24 +404,22 @@ class _TripViewState extends ConsumerState<_TripView> {
       // Show full route for 3 seconds, then switch to navigation follow mode
       final lats = latLngs.map((p) => p.latitude);
       final lngs = latLngs.map((p) => p.longitude);
-      await ctrl.animateCamera(
-        CameraUpdate.newLatLngBounds(
-          LatLngBounds(
-            southwest: LatLng(
-              lats.reduce((a, b) => a < b ? a : b),
-              lngs.reduce((a, b) => a < b ? a : b),
-            ),
-            northeast: LatLng(
-              lats.reduce((a, b) => a > b ? a : b),
-              lngs.reduce((a, b) => a > b ? a : b),
-            ),
+      _moveCamera(CameraUpdate.newLatLngBounds(
+        LatLngBounds(
+          southwest: LatLng(
+            lats.reduce((a, b) => a < b ? a : b),
+            lngs.reduce((a, b) => a < b ? a : b),
           ),
-          left: 50,
-          top: 80,
-          right: 50,
-          bottom: 340,
+          northeast: LatLng(
+            lats.reduce((a, b) => a > b ? a : b),
+            lngs.reduce((a, b) => a > b ? a : b),
+          ),
         ),
-      );
+        left: 50,
+        top: 80,
+        right: 50,
+        bottom: 340,
+      ));
 
       await Future.delayed(const Duration(seconds: 3));
       if (mounted) setState(() => _followDriver = true);
@@ -422,11 +495,64 @@ class _TripViewState extends ConsumerState<_TripView> {
             ),
             onMapCreated: (controller) {
               _mapController = controller;
+            },
+            onStyleLoadedCallback: () async {
+              final ctrl = _mapController;
+              if (ctrl == null) return;
+              final bytes = await _buildNavArrow();
+              await ctrl.addImage('driver-dot', bytes);
+              _mapImageReady = true;
               _fetchAndDrawRoute(trip);
+              // Icono inicial en posición actual
+              try {
+                final pos = await geo.Geolocator.getCurrentPosition(
+                  locationSettings: const geo.LocationSettings(accuracy: geo.LocationAccuracy.high),
+                );
+                if (mounted) await _updateMySymbol(
+                  LatLng(pos.latitude, pos.longitude),
+                  heading: pos.heading >= 0 ? pos.heading : 0,
+                );
+              } catch (_) {}
             },
             myLocationEnabled: false,
             trackCameraPosition: true,
+            onCameraIdle: () {
+              if (!_suppressCameraIdle && _followDriver && mounted) {
+                setState(() => _followDriver = false);
+              }
+            },
           ),
+
+          // Botón re-centrar (aparece cuando el usuario scrolleó)
+          if (!_followDriver)
+            Positioned(
+              right: 16,
+              bottom: 220,
+              child: GestureDetector(
+                onTap: () {
+                  setState(() => _followDriver = true);
+                  final p = _lastKnownPos;
+                  if (p != null) {
+                    _moveCamera(CameraUpdate.newCameraPosition(CameraPosition(
+                      target: LatLng(p.latitude, p.longitude),
+                      bearing: p.heading >= 0 ? p.heading : 0,
+                      zoom: 17,
+                      tilt: 45,
+                    )));
+                  }
+                },
+                child: Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 10)],
+                  ),
+                  child: const Icon(Icons.navigation_rounded, color: Color(0xFF1A73E8), size: 24),
+                ),
+              ),
+            ),
 
           // Back button
           SafeArea(

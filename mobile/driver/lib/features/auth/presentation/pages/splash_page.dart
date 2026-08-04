@@ -6,6 +6,7 @@ import '../../../../core/services/push_notification_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../data/providers/auth_provider.dart';
+import '../../../trip/data/repositories/trip_repository.dart';
 
 class SplashPage extends ConsumerStatefulWidget {
   const SplashPage({super.key});
@@ -29,7 +30,16 @@ class _SplashPageState extends ConsumerState<SplashPage> {
       final dio = ref.read(dioProvider);
       await PushNotificationService.instance.initialize(dio);
       if (!mounted) return;
-      context.go('/home');
+
+      // Si hay un viaje activo, ir directo a él en lugar del home
+      final activeTrip = await ref.read(tripRepositoryProvider).getActiveTrip();
+      if (!mounted) return;
+
+      if (activeTrip != null) {
+        context.go('/trip/${activeTrip.id}');
+      } else {
+        context.go('/home');
+      }
     } else {
       context.go('/auth/welcome');
     }

@@ -697,7 +697,7 @@ export class TripsService {
 
       const selectedOffer = await em.findOne(TripOffer, {
         where: { id: offerId, trip_id: tripId, status: OfferStatus.PENDING },
-        relations: ['driver', 'driver.user', 'vehicle'],
+        relations: ['driver', 'driver.user', 'vehicle', 'vehicle.cooperative'],
       });
       if (!selectedOffer) throw new NotFoundException('Oferta no encontrada o ya procesada');
 
@@ -718,6 +718,16 @@ export class TripsService {
 
       const otp = generateOtp();
 
+      // Resolver cooperativa del conductor (vehicle > membership)
+      let driverCoopId: string | undefined = (selectedOffer.vehicle as any)?.cooperative?.id;
+      if (!driverCoopId) {
+        const membership = await em.findOne(CooperativeMember, {
+          where: { user: { id: selectedOffer.driver.user.id } },
+          relations: ['cooperative'],
+        });
+        driverCoopId = membership?.cooperative?.id;
+      }
+
       // Asignar conductor y marcar ACCEPTED
       await em.update(Trip, tripId, {
         status: TripStatus.ACCEPTED,
@@ -726,6 +736,7 @@ export class TripsService {
         agreed_fare: fare as any,
         accepted_at: new Date(),
         otp_code: otp,
+        ...(driverCoopId && { cooperative: { id: driverCoopId } }),
       });
 
       // Marcar oferta seleccionada
@@ -1332,7 +1343,17 @@ export class TripsService {
     if (COOP_ROLES_LOCAL.includes(user.role)) {
       // Fuerza filtro por la cooperativa del JWT — nunca confiar en query params
       if (!user.cooperative_id) throw new ForbiddenException('No estás asociado a ninguna cooperativa');
-      qb.andWhere('trip.cooperative_id = :coopId', { coopId: user.cooperative_id });
+      // Triple OR para cubrir todos los casos:
+      // 1. trip.cooperative_id: viajes creados por la coop o aceptados post-fix
+      // 2. vehicleCoop: vehículo del viaje pertenece a la coop
+      // 3. driverMember: el conductor asignado es miembro de la coop (históricos sin cooperative_id)
+      qb.leftJoin('vehicle.cooperative', 'vehicleCoop')
+        .leftJoin('driver.user', 'driverUser')
+        .leftJoin(CooperativeMember, 'driverMember', 'driverMember.user_id = driverUser.id');
+      qb.andWhere(
+        '(trip.cooperative_id = :coopId OR vehicleCoop.id = :coopId OR driverMember.cooperative_id = :coopId)',
+        { coopId: user.cooperative_id },
+      );
     }
 
     const [items, total] = await qb.getManyAndCount();

@@ -75,6 +75,7 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
   bool     _mapReady = false;
   bool     _routeDrawn = false;
   bool     _approachDrawn = false;
+  LatLng?  _pendingDriverPos;
   final    _routeDio = Dio();
 
   // Taxímetro en tiempo real (solo fareMode == 'meter' + in_progress)
@@ -151,25 +152,13 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
       final lng = (data['lng'] as num?)?.toDouble();
       if (lat == null || lng == null) return;
       final ctrl = _mapController;
-      if (ctrl == null) return;
-
       final pos = LatLng(lat, lng);
-      if (_driverSymbol == null) {
-        _driverSymbol = await ctrl.addSymbol(SymbolOptions(
-          geometry: pos,
-          iconImage: 'taxi-dot',
-          iconSize: 1.0,
-          iconAnchor: 'center',
-        ));
-        // Dibujar ruta conductor→punto de recogida (solo la primera vez)
-        if (!_approachDrawn) _drawApproachRoute(ctrl, pos);
-      } else {
-        await ctrl.updateSymbol(_driverSymbol!, SymbolOptions(geometry: pos));
+      // Si el mapa aún no cargó el estilo, guardar para procesar después
+      if (ctrl == null || !_mapReady) {
+        _pendingDriverPos = pos;
+        return;
       }
-      // Seguimiento suave del conductor cuando está en camino
-      if (_trip?.status == 'accepted') {
-        await ctrl.animateCamera(CameraUpdate.newLatLng(pos));
-      }
+      await _handleDriverPosition(ctrl, pos);
     });
 
     socket.on('trip.driver_arrived', (data) async {
@@ -245,6 +234,24 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
     });
   }
 
+  Future<void> _handleDriverPosition(MapLibreMapController ctrl, LatLng pos) async {
+    if (!mounted) return;
+    if (_driverSymbol == null) {
+      _driverSymbol = await ctrl.addSymbol(SymbolOptions(
+        geometry: pos,
+        iconImage: 'taxi-dot',
+        iconSize: 1.0,
+        iconAnchor: 'center',
+      ));
+      if (!_approachDrawn) _drawApproachRoute(ctrl, pos);
+    } else {
+      await ctrl.updateSymbol(_driverSymbol!, SymbolOptions(geometry: pos));
+    }
+    if (_trip?.status == 'accepted') {
+      await ctrl.animateCamera(CameraUpdate.newLatLng(pos));
+    }
+  }
+
   Future<void> _drawApproachRoute(MapLibreMapController ctrl, LatLng driverPos) async {
     final trip = _trip;
     if (trip?.originLat == null || trip?.originLng == null) return;
@@ -277,11 +284,21 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
 
   Future<void> _onMapCreated(MapLibreMapController ctrl) async {
     _mapController = ctrl;
-    // Registrar imagen del taxi
+  }
+
+  Future<void> _onStyleLoaded() async {
+    final ctrl = _mapController;
+    if (ctrl == null) return;
     final taxiBytes = await _getTaxiDot();
     await ctrl.addImage('taxi-dot', taxiBytes);
     _mapReady = true;
     if (_trip != null) _drawRoute();
+    // Procesar posición del conductor que llegó antes del estilo
+    final pending = _pendingDriverPos;
+    if (pending != null) {
+      _pendingDriverPos = null;
+      await _handleDriverPosition(ctrl, pending);
+    }
   }
 
   Future<void> _drawRoute() async {
@@ -386,6 +403,7 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
               zoom: trip?.originLat != null ? 14 : 6,
             ),
             onMapCreated: _onMapCreated,
+            onStyleLoadedCallback: _onStyleLoaded,
             myLocationEnabled: false,
             compassEnabled: false,
             attributionButtonPosition: AttributionButtonPosition.bottomLeft,
