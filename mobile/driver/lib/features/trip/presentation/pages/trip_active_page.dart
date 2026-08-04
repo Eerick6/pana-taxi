@@ -673,7 +673,7 @@ class _TripViewState extends ConsumerState<_TripView> {
           if (!_followDriver)
             Positioned(
               right: 16,
-              bottom: 360,
+              top: 120,
               child: GestureDetector(
                 onTap: () {
                   setState(() => _followDriver = true);
@@ -792,6 +792,20 @@ class _TripViewState extends ConsumerState<_TripView> {
                   _RouteCard(origin: trip.originAddress, destination: trip.destinationAddress),
                   const SizedBox(height: 16),
 
+                  // Cancelar — pequeño link encima del botón principal
+                  if (trip.status == 'accepted' || trip.status == 'driver_arrived') ...[
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton(
+                        onPressed: widget.loading ? null : () => _showCancelSheet(context, trip),
+                        style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 6)),
+                        child: Text('Cancelar viaje', style: AppTextStyles.label.copyWith(color: AppColors.error)),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                  ],
+
                   if (actionLabel.isNotEmpty)
                     SizedBox(
                       width: double.infinity,
@@ -809,23 +823,6 @@ class _TripViewState extends ConsumerState<_TripView> {
                             : Text(actionLabel, style: AppTextStyles.btnLg),
                       ),
                     ),
-
-                  // Cancelar viaje — solo antes de que empiece
-                  if (trip.status == 'accepted' || trip.status == 'driver_arrived') ...[
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 44,
-                      child: OutlinedButton(
-                        onPressed: widget.loading ? null : () => _showCancelSheet(context, trip),
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: AppColors.error),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                        child: Text('Cancelar viaje', style: AppTextStyles.label.copyWith(color: AppColors.error)),
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),

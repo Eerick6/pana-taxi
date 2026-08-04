@@ -145,27 +145,7 @@ class TripAlertManager {
 
     if (playSound) {
       _player = AudioPlayer();
-      try {
-        await _player!.setReleaseMode(ReleaseMode.loop);
-        await _player!.play(
-          AssetSource('sounds/trip_alert.wav'),
-          ctx: AudioContext(
-            android: const AudioContextAndroid(
-              usageType: AndroidUsageType.alarm,
-              contentType: AndroidContentType.music,
-              audioFocus: AndroidAudioFocus.gain,
-              stayAwake: true,
-            ),
-            iOS: AudioContextIOS(
-              category: AVAudioSessionCategory.playback,
-            ),
-          ),
-        );
-        final p = _player!;
-        Future.delayed(const Duration(seconds: 8), p.stop);
-      } catch (e) {
-        debugPrint('[TripAlert] audio error: $e');
-      }
+      _playTwoBeeps(); // fire and forget — no bloquea show()
     }
   }
 
@@ -177,9 +157,36 @@ class TripAlertManager {
     _state?.onPriceUpdated(newPrice);
   }
 
+  static Future<void> _playTwoBeeps() async {
+    final ctx = AudioContext(
+      android: const AudioContextAndroid(
+        usageType: AndroidUsageType.alarm,
+        contentType: AndroidContentType.music,
+        audioFocus: AndroidAudioFocus.gain,
+        stayAwake: true,
+      ),
+    );
+    try {
+      await _player!.setReleaseMode(ReleaseMode.stop);
+      await _player!.play(AssetSource('sounds/trip_alert.wav'), ctx: ctx);
+      await Future.delayed(const Duration(milliseconds: 900));
+      if (_player != null) {
+        await _player!.play(AssetSource('sounds/trip_alert.wav'), ctx: ctx);
+      }
+    } catch (e) {
+      debugPrint('[TripAlert] audio error: $e');
+    }
+  }
+
+  static void stopSound() {
+    _player?.stop();
+    _player?.dispose();
+    _player = null;
+  }
+
   static void dismiss() {
     _timer?.cancel();  _timer  = null;
-    _player?.stop();   _player?.dispose(); _player = null;
+    stopSound();
     _entry?.remove();  _entry  = null;
     _state = null;
     _currentTripId = null;
@@ -351,7 +358,9 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
             alignment: Alignment.bottomCenter,
             child: SlideTransition(
               position: _slide,
-              child: Material(
+              child: GestureDetector(
+                onTap: TripAlertManager.stopSound,
+                child: Material(
                 color: Colors.transparent,
                 child: Container(
                   margin: const EdgeInsets.fromLTRB(12, 0, 12, 24),
@@ -594,7 +603,8 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
                     ],
                   ),
                 ),
-              ),
+              ), // Material
+              ), // GestureDetector
             ),
           ),
           ), // AnimatedPadding

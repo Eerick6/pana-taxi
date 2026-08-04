@@ -525,8 +525,8 @@ class _BottomPanelState extends ConsumerState<_BottomPanel> {
           // Route
           _RouteRow(trip: trip),
 
-          // OTP
-          if (trip.otpCode != null && trip.status == 'accepted') ...[
+          // OTP — visible mientras llega Y cuando ya llegó (para dárselo al taxista)
+          if (trip.otpCode != null && (trip.status == 'accepted' || trip.status == 'driver_arrived')) ...[
             const SizedBox(height: 12),
             _OtpCard(otp: trip.otpCode!),
           ],
