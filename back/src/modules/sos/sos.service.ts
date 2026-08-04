@@ -1,7 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Twilio } from 'twilio';
 import { SosAlert, SosStatus } from './entities/sos-alert.entity';
 import { Client } from '../clients/entities/client.entity';
 import { EmergencyContact } from '../clients/entities/emergency-contact.entity';
@@ -13,8 +12,6 @@ import { ResolveSosDto } from './dto/resolve-sos.dto';
 
 @Injectable()
 export class SosService {
-  private twilio: Twilio;
-
   constructor(
     @InjectRepository(SosAlert)
     private alertsRepo: Repository<SosAlert>,
@@ -27,7 +24,6 @@ export class SosService {
     private gateway: EventsGateway,
     private notificationsService: NotificationsService,
   ) {
-    this.twilio = new Twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
   }
 
   async trigger(userId: string, dto: TriggerSosDto) {
@@ -147,10 +143,17 @@ export class SosService {
       console.log(`[DEV SOS SMS] → ${to}: ${message}`);
       return;
     }
-    await this.twilio.messages.create({
-      body: message,
-      from: process.env.TWILIO_PHONE,
-      to,
+    const res = await fetch('https://api.zavu.dev/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.ZAVU_API_KEY ?? ''}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ to, text: message }),
     });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Zavu SMS SOS ${res.status}: ${err}`);
+    }
   }
 }

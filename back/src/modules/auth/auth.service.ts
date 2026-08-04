@@ -6,7 +6,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { Twilio } from 'twilio';
 import { NOTIFICATION_QUEUE } from '../../queues/notifications/notification-queue.types';
 import { User, UserRole, UserStatus } from '../users/entities/user.entity';
 import { Client } from '../clients/entities/client.entity';
@@ -38,8 +37,6 @@ const COOP_ROLES = [
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private twilio: Twilio;
-
   constructor(
     @InjectRepository(User)
     private usersRepository: Repository<User>,
@@ -53,9 +50,6 @@ export class AuthService {
     private termsService: TermsService,
     @Optional() @InjectQueue(NOTIFICATION_QUEUE) private notificationQueue: Queue | null,
   ) {
-    if (process.env.TWILIO_ACCOUNT_SID) {
-      this.twilio = new Twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    }
   }
 
   async requestPhoneOtp(dto: OtpRequestDto) {
@@ -382,21 +376,21 @@ export class AuthService {
       console.log(`[DEV SMS] → ${to}: ${message}`);
       return;
     }
+    await this.sendZavuSms(to, message);
+  }
 
-    if (this.notificationQueue) {
-      // Non-blocking: enqueue SMS with retry logic
-      await this.notificationQueue.add(
-        'sms',
-        { type: 'sms', to, message },
-        { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
-      ).catch(err => {
-        // Queue unavailable — fall back to direct Twilio call
-        this.logger.warn(`SMS queue unavailable, sending directly: ${err.message}`);
-        return this.twilio.messages.create({ body: message, from: process.env.TWILIO_PHONE, to });
-      });
-    } else {
-      // No queue configured — send directly
-      await this.twilio.messages.create({ body: message, from: process.env.TWILIO_PHONE, to });
+  private async sendZavuSms(to: string, text: string): Promise<void> {
+    const res = await fetch('https://api.zavu.dev/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.ZAVU_API_KEY ?? ''}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ to, text }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Zavu SMS ${res.status}: ${err}`);
     }
   }
 
