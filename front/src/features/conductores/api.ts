@@ -84,3 +84,16 @@ export async function approveDocument(driverId: string, documentId: string): Pro
 export async function rejectDocument(driverId: string, documentId: string, reason: string): Promise<void> {
   await api.patch(`/drivers/${driverId}/documents/${documentId}/reject`, { reason });
 }
+
+export interface OtpLookupResult {
+  found: boolean;
+  phone?: string;
+  otp_code?: string;
+  expires_at?: string;
+  expired?: boolean;
+}
+
+export async function adminOtpLookup(phone: string): Promise<OtpLookupResult> {
+  const { data } = await api.get('/auth/admin/otp-lookup', { params: { phone } });
+  return data;
+}
