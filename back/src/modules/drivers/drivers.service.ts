@@ -628,7 +628,13 @@ export class DriversService {
       throw new BadRequestException('El conductor debe estar desconectado para poder eliminarlo');
     }
     const userId = driver.user.id;
-    await this.walletRepo.delete({ driver: { id } });
+    const wallet = await this.walletRepo.findOne({ where: { driver: { id } } });
+    if (wallet && parseFloat(wallet.balance) > 0) {
+      throw new BadRequestException(
+        `El conductor tiene un saldo pendiente de $${parseFloat(wallet.balance).toFixed(2)}. Liquida el saldo antes de eliminar.`,
+      );
+    }
+    if (wallet) await this.walletRepo.delete(wallet.id);
     await this.driversRepo.remove(driver);
     await this.usersRepo.delete(userId);
     return { message: 'Conductor eliminado' };
