@@ -62,7 +62,7 @@ export class AuthService {
     await this.usersRepository.update(user.id, { otp_code: code, otp_expires_at: expires });
     await this.sendSms(dto.phone, `Tu código de verificación es: ${code}. Expira en 10 minutos.`);
 
-    if (this.isDev) return { message: 'OTP enviado (modo dev)', dev_code: code };
+    if (this.showDevOtp) return { message: 'OTP enviado', dev_code: code };
     return { message: 'OTP enviado al teléfono' };
   }
 
@@ -98,7 +98,7 @@ export class AuthService {
     await this.usersRepository.update(user.id, { otp_code: code, otp_expires_at: expires });
     await this.sendEmail(dto.email, code);
 
-    if (this.isDev) return { message: 'OTP enviado (modo dev)', dev_code: code };
+    if (this.showDevOtp) return { message: 'OTP enviado', dev_code: code };
     return { message: 'OTP enviado al correo' };
   }
 
@@ -250,7 +250,7 @@ export class AuthService {
         const { code, expires } = this.generateOtp();
         await this.usersRepository.update(exists.id, { otp_code: code, otp_expires_at: expires });
         await this.sendSms(dto.phone, `Tu código de verificación es: ${code}. Expira en 10 minutos.`);
-        if (this.isDev) return { message: 'Código reenviado (modo dev)', dev_code: code };
+        if (this.showDevOtp) return { message: 'Código reenviado', dev_code: code };
         return { message: 'Código reenviado al teléfono' };
       }
       throw new ConflictException('Teléfono ya registrado');
@@ -289,7 +289,7 @@ export class AuthService {
     await this.usersRepository.update(user.id, { otp_code: code, otp_expires_at: expires });
     await this.sendSms(dto.phone, `Tu código de verificación es: ${code}. Expira en 10 minutos.`);
 
-    if (this.isDev) return { message: 'Registro exitoso (modo dev). Verifica tu teléfono.', dev_code: code };
+    if (this.showDevOtp) return { message: 'Registro exitoso. Verifica tu teléfono.', dev_code: code };
     return { message: 'Registro exitoso. Verifica tu teléfono.' };
   }
 
@@ -375,7 +375,11 @@ export class AuthService {
   }
 
   private get isDev() {
-    return process.env.NODE_ENV !== 'production' || process.env.SHOW_DEV_OTP === 'true';
+    return process.env.NODE_ENV !== 'production';
+  }
+
+  private get showDevOtp() {
+    return this.isDev || process.env.SHOW_DEV_OTP === 'true';
   }
 
   private validateOtp(user: User, code: string) {
