@@ -8,9 +8,14 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../data/models/document_model.dart';
 import '../../data/providers/document_provider.dart';
 
-class DocumentsPage extends ConsumerWidget {
+class DocumentsPage extends ConsumerStatefulWidget {
   const DocumentsPage({super.key});
 
+  @override
+  ConsumerState<DocumentsPage> createState() => _DocumentsPageState();
+}
+
+class _DocumentsPageState extends ConsumerState<DocumentsPage> {
   static const _requiredDocs = [
     ('profile_photo', 'Foto de perfil', Icons.person_outlined),
     ('cedula_front', 'Cédula (frente)', Icons.badge_outlined),
@@ -21,8 +26,11 @@ class DocumentsPage extends ConsumerWidget {
 
   static const _obligatory = ['cedula_front', 'cedula_back', 'license_front', 'license_back'];
 
+  bool _reviewSent    = false;
+  bool _reviewLoading = false;
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final docsAsync = ref.watch(documentsProvider);
 
     return Scaffold(
@@ -48,7 +56,6 @@ class DocumentsPage extends ConsumerWidget {
           ),
         ),
         data: (docs) {
-          // Backend devuelve DESC — putIfAbsent conserva el más reciente por tipo
           final docMap = <String, DocumentModel>{};
           for (final d in docs) {
             docMap.putIfAbsent(d.type, () => d);
@@ -59,7 +66,6 @@ class DocumentsPage extends ConsumerWidget {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                // Summary
                 _SummaryCard(docs: docs, total: _requiredDocs.length),
                 const SizedBox(height: 16),
                 Text('Documentos requeridos', style: AppTextStyles.labelLg),
@@ -70,7 +76,7 @@ class DocumentsPage extends ConsumerWidget {
                     label: d.$2,
                     icon: d.$3,
                     document: docMap[d.$1],
-                    onUpload: () => _pickAndUpload(context, ref, d.$1),
+                    onUpload: () => _pickAndUpload(context, d.$1),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -78,13 +84,36 @@ class DocumentsPage extends ConsumerWidget {
                   SizedBox(
                     width: double.infinity,
                     height: 52,
-                    child: OutlinedButton.icon(
-                      onPressed: () => _requestReview(context, ref),
-                      icon: const Icon(Icons.send_outlined, size: 18),
-                      label: const Text('Solicitar revisión de perfil'),
-                      style: OutlinedButton.styleFrom(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
+                    child: _reviewSent
+                        ? OutlinedButton.icon(
+                            onPressed: null,
+                            icon: const Icon(Icons.check_circle_outline, size: 18, color: Colors.green),
+                            label: const Text('Revisión solicitada — te avisaremos'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.green,
+                              side: const BorderSide(color: Colors.green),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            ),
+                          )
+                        : OutlinedButton.icon(
+                            onPressed: _reviewLoading ? null : _requestReview,
+                            icon: _reviewLoading
+                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                                : const Icon(Icons.send_outlined, size: 18),
+                            label: const Text('Notificar al equipo que estoy listo'),
+                            style: OutlinedButton.styleFrom(
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            ),
+                          ),
+                  ),
+                const SizedBox(height: 8),
+                if (anyObligatoryUploaded && !_reviewSent)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(
+                      'Sube todos tus documentos y luego pulsa el botón para que el equipo los revise.',
+                      style: AppTextStyles.caption.copyWith(color: AppColors.gray500),
+                      textAlign: TextAlign.center,
                     ),
                   ),
                 const SizedBox(height: 24),
@@ -96,20 +125,15 @@ class DocumentsPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _requestReview(BuildContext context, WidgetRef ref) async {
+  Future<void> _requestReview() async {
+    setState(() => _reviewLoading = true);
     try {
-      final dio = ref.read(dioProvider);
-      final res = await dio.patch('/drivers/me/request-review');
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(res.data['message'] as String? ?? 'Solicitud enviada.'),
-          backgroundColor: AppColors.success,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      await ref.read(dioProvider).patch('/drivers/me/request-review');
+      if (!mounted) return;
+      setState(() { _reviewSent = true; _reviewLoading = false; });
     } catch (_) {
-      if (!context.mounted) return;
+      if (!mounted) return;
+      setState(() => _reviewLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No se pudo enviar la solicitud. Intenta de nuevo.'),
@@ -120,7 +144,7 @@ class DocumentsPage extends ConsumerWidget {
     }
   }
 
-  Future<void> _pickAndUpload(BuildContext context, WidgetRef ref, String type) async {
+  Future<void> _pickAndUpload(BuildContext context, String type) async {
     final picker = ImagePicker();
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
@@ -152,7 +176,11 @@ class DocumentsPage extends ConsumerWidget {
       await ref.read(documentsProvider.notifier).upload(type, File(picked.path));
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Documento enviado para revisión'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('Documento guardado correctamente'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     } catch (e) {
