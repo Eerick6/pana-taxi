@@ -628,6 +628,7 @@ export class DriversService {
       throw new BadRequestException('El conductor debe estar desconectado para poder eliminarlo');
     }
     const userId = driver.user.id;
+    await this.walletRepo.delete({ driver: { id } });
     await this.driversRepo.remove(driver);
     await this.usersRepo.delete(userId);
     return { message: 'Conductor eliminado' };
