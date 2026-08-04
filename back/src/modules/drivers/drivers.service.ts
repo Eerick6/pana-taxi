@@ -14,7 +14,7 @@ import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../../redis/redis.module';
 import { User, UserRole, UserStatus } from '../users/entities/user.entity';
 import { Driver, DriverApprovalStatus, DriverType, DriverOnlineStatus } from './entities/driver.entity';
-import { DriverDocument, DriverDocumentType, DocumentStatus } from './entities/driver-document.entity';
+import { DriverDocument, DriverDocumentType, DocumentStatus, REQUIRED_DOCS } from './entities/driver-document.entity';
 import { DriverWallet } from '../wallet/entities/driver-wallet.entity';
 import { Cooperative, CooperativeStatus, CooperativeApprovalStatus } from '../cooperatives/entities/cooperative.entity';
 import { CooperativeOwner, OwnerApprovalStatus } from '../cooperatives/entities/cooperative-owner.entity';
@@ -375,6 +375,17 @@ export class DriversService {
 
     if (dto.type === DriverDocumentType.PROFILE_PHOTO) {
       await this.driversRepo.update(driver.id, { profile_photo_url: key });
+    }
+
+    // Notificar al admin cuando se suban todos los documentos obligatorios por primera vez
+    if (driver.approval_status !== DriverApprovalStatus.APPROVED) {
+      const uploaded = await this.documentsRepo.find({ where: { driver: { id: driver.id } } });
+      const uploadedTypes = new Set(uploaded.map(d => d.type));
+      const allRequired = REQUIRED_DOCS.every(t => uploadedTypes.has(t));
+      if (allRequired) {
+        await this.driversRepo.update(driver.id, { review_requested_at: new Date() });
+        this.notifyPlatformAdmins(driver.id, 'review_request').catch(() => {});
+      }
     }
 
     return { message: 'Documento subido correctamente', document_id: doc.id };
