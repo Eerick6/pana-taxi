@@ -22,7 +22,7 @@ class ActiveTripPanel extends ConsumerWidget {
           BoxShadow(color: Colors.black12, blurRadius: 16, offset: Offset(0, -4))
         ],
       ),
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      padding: EdgeInsets.fromLTRB(20, 16, 20, 32 + MediaQuery.of(context).padding.bottom),
       child: switch (trip.status) {
         'requested'      => _PendingState(trip: trip, ref: ref),
         'accepted'       => _DriverState(trip: trip, ref: ref),

@@ -25,7 +25,7 @@ class HomeBottomSheet extends ConsumerWidget {
           BoxShadow(color: Colors.black12, blurRadius: 16, offset: Offset(0, -4))
         ],
       ),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 32 + MediaQuery.of(context).padding.bottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
