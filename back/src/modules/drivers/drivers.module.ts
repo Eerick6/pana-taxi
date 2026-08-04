@@ -14,6 +14,7 @@ import { StorageModule } from '../storage/storage.module';
 import { TermsModule } from '../terms/terms.module';
 import { FareModule } from '../fare/fare.module';
 import { GatewayModule } from '../gateway/gateway.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { GatewayModule } from '../gateway/gateway.module';
     TermsModule,
     FareModule,
     GatewayModule,
+    NotificationsModule,
   ],
   providers: [DriversService],
   controllers: [DriversController],

@@ -30,6 +30,7 @@ import { RejectDriverDto } from './dto/reject-driver.dto';
 import { RejectDocumentDto } from './dto/reject-document.dto';
 import { JoinCooperativeDto } from './dto/join-cooperative.dto';
 import { FareService } from '../fare/fare.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class DriversService {
@@ -59,6 +60,7 @@ export class DriversService {
     private termsService: TermsService,
     private fareService: FareService,
     private gateway: EventsGateway,
+    private notifications: NotificationsService,
     @Inject(REDIS_CLIENT) private redis: Redis,
   ) {}
 
@@ -369,6 +371,8 @@ export class DriversService {
       await this.driversRepo.update(driver.id, { profile_photo_url: key });
     }
 
+    this.notifyPlatformAdmins(driver.id, dto.type).catch(() => {});
+
     return { message: 'Documento subido correctamente', document_id: doc.id };
   }
 
@@ -660,5 +664,19 @@ export class DriversService {
       lat: fuzz(parseFloat(d.current_lat as any)),
       lng: fuzz(parseFloat(d.current_lng as any)),
     }));
+  }
+
+  private async notifyPlatformAdmins(driverId: string, docType: string): Promise<void> {
+    const admins = await this.usersRepo.find({
+      where: [{ role: UserRole.OWNER }, { role: UserRole.PLATFORM_ADMIN }],
+      select: ['id'],
+    });
+    const ids = admins.map(u => u.id);
+    if (!ids.length) return;
+    await this.notifications.sendToUsers(ids, {
+      title: 'Documento subido por conductor',
+      body: `Un conductor subió un nuevo documento (${docType}). Revisa y aprueba en el panel.`,
+      data: { type: 'driver_document', driver_id: driverId },
+    });
   }
 }
