@@ -221,8 +221,8 @@ export class DriversService {
     if (driver.approval_status === DriverApprovalStatus.APPROVED) {
       return { message: 'Tu perfil ya está aprobado.' };
     }
-    // Marcar timestamp para que el admin lo vea como recién solicitado
     await this.driversRepo.update(driver.id, { review_requested_at: new Date() });
+    this.notifyPlatformAdmins(driver.id, 'review_request').catch(() => {});
     return { message: 'Solicitud enviada. El equipo revisará tu perfil en 24–48 horas.' };
   }
 
@@ -355,6 +355,12 @@ export class DriversService {
       ? `drivers/${driver.id}/photo`
       : `drivers/${driver.id}/documents`;
 
+    // Si ya existe un documento del mismo tipo, reemplazarlo (evita acumulación de fotos)
+    const existing = await this.documentsRepo.findOne({
+      where: { driver: { id: driver.id }, type: dto.type as any },
+    });
+    if (existing) await this.documentsRepo.delete(existing.id);
+
     const key = await this.storage.upload(folder, file.originalname, file.buffer, file.mimetype);
 
     const doc = await this.documentsRepo.save(
@@ -370,8 +376,6 @@ export class DriversService {
     if (dto.type === DriverDocumentType.PROFILE_PHOTO) {
       await this.driversRepo.update(driver.id, { profile_photo_url: key });
     }
-
-    this.notifyPlatformAdmins(driver.id, dto.type).catch(() => {});
 
     return { message: 'Documento subido correctamente', document_id: doc.id };
   }
@@ -601,6 +605,7 @@ export class DriversService {
     if (doc.status === DocumentStatus.APPROVED) throw new ForbiddenException('No se puede rechazar un documento ya aprobado');
 
     await this.documentsRepo.update(documentId, { status: DocumentStatus.REJECTED, rejection_reason: dto.reason });
+    this.gateway.notifyDriver(driverId, 'document.rejected', { document_id: documentId, reason: dto.reason });
     return { message: 'Documento rechazado. El conductor podrá resubir.' };
   }
 
@@ -639,6 +644,7 @@ export class DriversService {
       );
     }
     if (wallet) await this.walletRepo.delete(wallet.id);
+    await this.documentsRepo.delete({ driver: { id } });
     await this.driversRepo.remove(driver);
     await this.usersRepo.delete(userId);
     return { message: 'Conductor eliminado' };
@@ -666,16 +672,19 @@ export class DriversService {
     }));
   }
 
-  private async notifyPlatformAdmins(driverId: string, docType: string): Promise<void> {
+  private async notifyPlatformAdmins(driverId: string, reason: string): Promise<void> {
     const admins = await this.usersRepo.find({
       where: [{ role: UserRole.OWNER }, { role: UserRole.PLATFORM_ADMIN }],
       select: ['id'],
     });
     const ids = admins.map(u => u.id);
     if (!ids.length) return;
+    const isReview = reason === 'review_request';
     await this.notifications.sendToUsers(ids, {
-      title: 'Documento subido por conductor',
-      body: `Un conductor subió un nuevo documento (${docType}). Revisa y aprueba en el panel.`,
+      title: isReview ? '📋 Solicitud de revisión de perfil' : 'Documento subido por conductor',
+      body: isReview
+        ? 'Un conductor solicita revisión de su perfil. Revisa los documentos en el panel.'
+        : `Un conductor subió un nuevo documento (${reason}). Revisa y aprueba en el panel.`,
       data: { type: 'driver_document', driver_id: driverId },
     });
   }
