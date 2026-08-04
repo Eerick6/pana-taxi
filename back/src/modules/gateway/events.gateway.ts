@@ -113,7 +113,8 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       await this.joinRoleRooms(socket, user);
 
       this.logger.log(`Connected: ${user.role} ${user.id} (socket ${socket.id})`);
-    } catch {
+    } catch (err) {
+      this.logger.warn(`[WS] Connection rejected (socket ${socket.id}): ${(err as Error).message}`);
       socket.disconnect(true);
     }
   }
@@ -309,6 +310,7 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     @MessageBody() data: { trip_id: string },
   ) {
     const user: User = socket.data.user;
+    if (!user) throw new WsException('No autenticado');
     const trip = await this.tripsRepo.findOne({
       where: { id: data.trip_id, client: { id: user.id } },
     });

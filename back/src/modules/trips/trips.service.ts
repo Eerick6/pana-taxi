@@ -549,6 +549,7 @@ export class TripsService {
     }
 
     // Notificar al cliente con info completa del taxista
+    this.logger.log(`[makeOffer] tripId=${tripId} driverId=${driver.id} clientId=${trip.client?.id ?? 'null'} amount=${offerAmount} isCounter=${dto.amount != null}`);
     if (trip.client) {
       const offerPayload = {
         trip_id:        tripId,
@@ -665,6 +666,7 @@ export class TripsService {
   // ── Cliente selecciona una oferta ────────────────────────────────────────────
 
   async selectOffer(tripId: string, offerId: string, userId: string) {
+    this.logger.log(`[selectOffer] tripId=${tripId} offerId=${offerId} userId=${userId}`);
     const trip = await this.tripsRepo.findOne({
       where: { id: tripId, client: { id: userId } },
     });
@@ -676,7 +678,14 @@ export class TripsService {
       throw new ConflictException('El viaje ya fue asignado');
     }
 
-    return this.dataSource.transaction(async (em) => {
+    // Ejecutar toda la lógica DB en una transacción y extraer los datos necesarios
+    // para notificar DESPUÉS del COMMIT — garantiza que el driver ya verá el viaje asignado
+    const {
+      selectedDriverId,
+      rejectedDriverIds,
+      agreedFare,
+      otpCode,
+    } = await this.dataSource.transaction(async (em) => {
       // Lock pesimista para evitar doble selección simultánea
       const lockedTrip = await em.findOne(Trip, {
         where: { id: tripId },
@@ -703,20 +712,20 @@ export class TripsService {
 
       const clientPrice = parseFloat(lockedTrip!.client_offer as any)
         ?? parseFloat(lockedTrip!.suggested_fare as any);
-      const agreedFare = selectedOffer.amount != null
+      const fare = selectedOffer.amount != null
         ? parseFloat(selectedOffer.amount as any)
         : clientPrice;
 
-      const otpCode = generateOtp();
+      const otp = generateOtp();
 
       // Asignar conductor y marcar ACCEPTED
       await em.update(Trip, tripId, {
         status: TripStatus.ACCEPTED,
         driver: { id: selectedOffer.driver.id },
         vehicle: selectedOffer.vehicle ? { id: (selectedOffer.vehicle as any).id } : undefined,
-        agreed_fare: agreedFare as any,
+        agreed_fare: fare as any,
         accepted_at: new Date(),
-        otp_code: otpCode,
+        otp_code: otp,
       });
 
       // Marcar oferta seleccionada
@@ -751,46 +760,51 @@ export class TripsService {
         .where('driver_id = :driverId AND checked_out_at IS NULL', { driverId: selectedOffer.driver.id })
         .execute();
 
-      const fareConfig = await this.fareService.getConfig();
-
-      // Notificar al conductor seleccionado
-      this.gateway.notifyDriver(selectedOffer.driver.id, 'trip.offer_accepted', {
-        trip_id: tripId,
-        agreed_fare: agreedFare,
-        location_update_interval_sec: fareConfig.location_interval_trip_sec,
-      });
-
-      // Notificar a los conductores rechazados (obtenemos la lista antes del update, pero ya están rechazados)
+      // Recopilar IDs de conductores rechazados para notificar fuera de la tx
       const rejectedOffers = await em.createQueryBuilder(TripOffer, 'o')
         .leftJoinAndSelect('o.driver', 'driver')
-        .leftJoinAndSelect('driver.user', 'user')
         .where('o.trip_id = :tripId AND o.id != :offerId AND o.status = :status', {
           tripId, offerId, status: OfferStatus.REJECTED,
         })
         .getMany();
 
-      for (const ro of rejectedOffers) {
-        if (ro.driver?.user) {
-          this.gateway.notifyDriver(ro.driver.id, 'trip.offer_rejected', { trip_id: tripId });
-        }
-      }
-
-      // Notificar al cliente con OTP (solo él lo ve)
-      this.gateway.notifyUser(userId, 'trip.accepted', {
-        trip_id: tripId,
-        driver_id: selectedOffer.driver.id,
-        status: TripStatus.ACCEPTED,
-        agreed_fare: agreedFare,
-        otp_code: otpCode,
-        location_update_interval_sec: fareConfig.location_interval_trip_sec,
-      });
-
       return {
-        message: `Conductor asignado. Tarifa acordada: $${agreedFare}`,
-        trip_id: tripId,
-        agreed_fare: agreedFare,
+        selectedDriverId: selectedOffer.driver.id,
+        rejectedDriverIds: rejectedOffers.map(ro => ro.driver?.id).filter(Boolean) as string[],
+        agreedFare: fare,
+        otpCode: otp,
       };
     });
+
+    // ── Notificaciones fuera de la transacción — el COMMIT ya es visible ──────
+    const fareConfig = await this.fareService.getConfig();
+
+    this.logger.log(`[selectOffer] notifyDriver driverId=${selectedDriverId} trip_id=${tripId}`);
+    this.gateway.notifyDriver(selectedDriverId, 'trip.offer_accepted', {
+      trip_id: tripId,
+      agreed_fare: agreedFare,
+      location_update_interval_sec: fareConfig.location_interval_trip_sec,
+    });
+
+    for (const driverId of rejectedDriverIds) {
+      this.gateway.notifyDriver(driverId, 'trip.offer_rejected', { trip_id: tripId });
+    }
+
+    // Notificar al cliente con OTP (solo él lo ve)
+    this.gateway.notifyUser(userId, 'trip.accepted', {
+      trip_id: tripId,
+      driver_id: selectedDriverId,
+      status: TripStatus.ACCEPTED,
+      agreed_fare: agreedFare,
+      otp_code: otpCode,
+      location_update_interval_sec: fareConfig.location_interval_trip_sec,
+    });
+
+    return {
+      message: `Conductor asignado. Tarifa acordada: $${agreedFare}`,
+      trip_id: tripId,
+      agreed_fare: agreedFare,
+    };
   }
 
   // ── Incrementar oferta del cliente ($0.25) ────────────────────────────────────

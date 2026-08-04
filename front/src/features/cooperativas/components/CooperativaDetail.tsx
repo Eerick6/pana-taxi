@@ -202,7 +202,7 @@ function InfoTab({
 
       {/* Reject modal */}
       {showReject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4">
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Rechazar cooperativa</h3>
             <p className="text-sm text-gray-400 mb-4">Indica el motivo del rechazo</p>
@@ -227,7 +227,7 @@ function InfoTab({
 
       {/* Fee modal */}
       {showFee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Cuota mensual</h3>
             <p className="text-sm text-gray-400 mb-4">Monto en dólares (0 = sin cuota)</p>
@@ -253,7 +253,7 @@ function InfoTab({
 
       {/* Edit modal */}
       {showEdit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Editar cooperativa</h3>
             <p className="text-sm text-gray-400 mb-5">
@@ -457,7 +457,7 @@ function ParadasTab({ coopId }: { coopId: string }) {
 
       {/* Create modal */}
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4">
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-4">Nueva parada</h3>
             <div className="space-y-3">
@@ -573,7 +573,7 @@ function EquipoTab({ coopId }: { coopId: string }) {
       )}
 
       {showAdd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4">
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-4">Agregar miembro del equipo</h3>
             <div className="space-y-3">
@@ -756,7 +756,7 @@ function VehiculosTab({ coopId }: { coopId: string }) {
 
       {/* Reject modal */}
       {rejectTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4">
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Rechazar vehículo</h3>
             <p className="text-sm text-gray-400 mb-4">Indica el motivo del rechazo</p>
@@ -894,7 +894,7 @@ function SociosTab({ coopId }: { coopId: string }) {
 
       {/* Reject modal */}
       {rejectTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4">
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Rechazar solicitud de socio</h3>
             <p className="text-sm text-gray-400 mb-4">Indica el motivo del rechazo</p>

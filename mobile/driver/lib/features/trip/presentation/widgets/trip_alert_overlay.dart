@@ -216,12 +216,11 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
   int    _seconds      = 25;
   Timer? _countdown;
   bool   _sending      = false;
-  bool   _showCounter  = false;
   bool   _waiting      = false;  // offer submitted, awaiting client
   bool   _offerIgnored = false;  // client ignored our offer
   bool   _canReOffer   = true;   // backend allows re-offer (< 3 total)
   double? _currentPrice;         // overrides alert.displayFare on price_updated
-  final  _counterCtrl  = TextEditingController();
+  OverlayEntry? _counterEntry;
 
   @override
   void initState() {
@@ -243,7 +242,7 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
   void dispose() {
     if (TripAlertManager._state == this) TripAlertManager._state = null;
     _countdown?.cancel();
-    _counterCtrl.dispose();
+    _counterEntry?.remove();
     _ctrl.dispose();
     super.dispose();
   }
@@ -251,12 +250,10 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
   void onOfferIgnored({required bool canReOffer}) {
     if (!mounted) return;
     _countdown?.cancel();
-    _counterCtrl.clear();
     setState(() {
       _waiting      = false;
       _offerIgnored = true;
       _canReOffer   = canReOffer;
-      _showCounter  = canReOffer;
       _seconds      = 25;
     });
     _countdown = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -271,6 +268,29 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
     setState(() => _currentPrice = newPrice);
   }
 
+  Future<void> _openCounterSheet({bool isReOffer = false}) async {
+    _counterEntry?.remove();
+    final price = _currentPrice ?? widget.alert.displayFare;
+
+    double? result;
+    final completer = Completer<double?>();
+
+    _counterEntry = OverlayEntry(
+      builder: (ctx) => _CounterOfferSheet(
+        currentPrice: price,
+        isReOffer:    isReOffer,
+        onSubmit:     (val) { completer.complete(val); },
+        onDismiss:    ()    { completer.complete(null); },
+      ),
+    );
+    Overlay.of(context).insert(_counterEntry!);
+
+    result = await completer.future;
+    _counterEntry?.remove();
+    _counterEntry = null;
+    if (result != null && mounted) _respond(counterAmount: result);
+  }
+
   Future<void> _respond({double? counterAmount}) async {
     if (_sending) return;
     setState(() => _sending = true);
@@ -282,7 +302,7 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
           data: counterAmount != null ? {'amount': counterAmount} : {},
         );
         if (!mounted) return;
-        setState(() { _sending = false; _waiting = true; _showCounter = false; });
+        setState(() { _sending = false; _waiting = true; });
         // Parar countdown — el conductor espera respuesta del cliente sin límite fijo.
         // El overlay se descarta por: trip.offer_accepted, trip.offer_rejected,
         // trip.offer_ignored (que reinicia el timer a 25s) o tap en fondo.
@@ -478,49 +498,6 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
                         ),
                       ],
 
-                      // ── Contra-oferta input ─────────────────────────────
-                      if (!_waiting && _showCounter && alert.isNegotiated) ...[
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                          child: Row(children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _counterCtrl,
-                                autofocus: true,
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
-                                decoration: InputDecoration(
-                                  prefixText: '\$ ',
-                                  hintText: (_currentPrice ?? alert.displayFare).toStringAsFixed(2),
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                  isDense: true,
-                                ),
-                                style: AppTextStyles.labelLg,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            ElevatedButton(
-                              onPressed: _sending ? null : () {
-                                final val = double.tryParse(_counterCtrl.text.trim());
-                                if (val == null || val <= 0) return;
-                                _respond(counterAmount: val);
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.secondary,
-                                foregroundColor: AppColors.primary,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                                elevation: 0,
-                              ),
-                              child: _sending
-                                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                                  : Text(_offerIgnored ? 'Re-ofertar' : 'Enviar'),
-                            ),
-                          ]),
-                        ),
-                      ],
-
                       // ── Botones principales ─────────────────────────────
                       if (!_waiting) Padding(
                         padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
@@ -544,19 +521,15 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
                                   Expanded(
                                     flex: 2,
                                     child: ElevatedButton(
-                                      onPressed: _sending ? null : () {
-                                        setState(() => _showCounter = !_showCounter);
-                                      },
+                                      onPressed: _sending ? null : () => _openCounterSheet(isReOffer: true),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: AppColors.primary,
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                         padding: const EdgeInsets.symmetric(vertical: 13),
                                         elevation: 0,
                                       ),
-                                      child: Text(
-                                        _showCounter ? 'Ocultar precio' : 'Cambiar precio',
-                                        style: AppTextStyles.label.copyWith(fontWeight: FontWeight.w700),
-                                      ),
+                                      child: Text('Cambiar precio',
+                                          style: AppTextStyles.label.copyWith(fontWeight: FontWeight.w700)),
                                     ),
                                   ),
                                 ],
@@ -581,7 +554,7 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
                           if (alert.isNegotiated) ...[
                             Expanded(
                               child: OutlinedButton(
-                                onPressed: _sending ? null : () => setState(() => _showCounter = !_showCounter),
+                                onPressed: _sending ? null : () => _openCounterSheet(),
                                 style: OutlinedButton.styleFrom(
                                   side: const BorderSide(color: AppColors.secondary),
                                   foregroundColor: AppColors.secondary,
@@ -661,6 +634,157 @@ class _CountdownRing extends StatelessWidget {
         ),
         Text('$seconds', style: AppTextStyles.caption.copyWith(fontWeight: FontWeight.w700)),
       ]),
+    );
+  }
+}
+
+// ── Sheet de contra-oferta (OverlayEntry encima del alert overlay) ────────────
+
+class _CounterOfferSheet extends StatefulWidget {
+  const _CounterOfferSheet({
+    required this.currentPrice,
+    required this.isReOffer,
+    required this.onSubmit,
+    required this.onDismiss,
+  });
+  final double          currentPrice;
+  final bool            isReOffer;
+  final void Function(double) onSubmit;
+  final VoidCallback    onDismiss;
+
+  @override
+  State<_CounterOfferSheet> createState() => _CounterOfferSheetState();
+}
+
+class _CounterOfferSheetState extends State<_CounterOfferSheet>
+    with SingleTickerProviderStateMixin {
+  late final TextEditingController _ctrl;
+  late final AnimationController   _anim;
+  late final Animation<Offset>     _slide;
+  final _focus = FocusNode();
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(
+      text: widget.currentPrice.toStringAsFixed(2),
+    );
+    _anim  = AnimationController(vsync: this, duration: const Duration(milliseconds: 280));
+    _slide = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic));
+    _anim.forward();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _focus.dispose();
+    _anim.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final val = double.tryParse(_ctrl.text.trim().replaceAll(',', '.'));
+    if (val == null || val <= 0) {
+      setState(() => _error = 'Ingresa un monto válido');
+      return;
+    }
+    widget.onSubmit(val);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final kb = MediaQuery.of(context).viewInsets.bottom;
+    return Material(
+      color: Colors.transparent,
+      child: Stack(
+        children: [
+          // Fondo oscuro — toca para cerrar
+          GestureDetector(
+            onTap: widget.onDismiss,
+            child: Container(color: Colors.black.withValues(alpha: 0.4)),
+          ),
+          // Sheet deslizante
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: EdgeInsets.only(bottom: kb),
+              child: SlideTransition(
+                position: _slide,
+                child: Container(
+                  width: double.infinity,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40, height: 4,
+                          decoration: BoxDecoration(
+                            color: AppColors.gray200,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        widget.isReOffer ? 'Cambiar precio' : 'Contraofertar',
+                        style: AppTextStyles.h3,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Precio del cliente: \$${widget.currentPrice.toStringAsFixed(2)}',
+                        style: AppTextStyles.caption.copyWith(color: AppColors.gray500),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller:      _ctrl,
+                        focusNode:       _focus,
+                        keyboardType:    const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
+                        textInputAction: TextInputAction.done,
+                        onSubmitted:     (_) => _submit(),
+                        decoration: InputDecoration(
+                          prefixText:     '\$ ',
+                          labelText:      'Tu precio',
+                          errorText:      _error,
+                          border:         OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                        ),
+                        style: AppTextStyles.labelLg.copyWith(fontSize: 20),
+                      ),
+                      const SizedBox(height: 14),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _submit,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            elevation: 0,
+                          ),
+                          child: Text(
+                            widget.isReOffer ? 'Re-ofertar' : 'Enviar oferta',
+                            style: AppTextStyles.label.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

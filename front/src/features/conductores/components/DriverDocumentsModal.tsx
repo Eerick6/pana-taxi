@@ -109,7 +109,7 @@ export default function DriverDocumentsModal({ driverId, onClose, onUpdate, read
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+        className="fixed inset-0 z-999999 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
         onClick={onClose}
       >
         <div
@@ -319,7 +319,7 @@ export default function DriverDocumentsModal({ driverId, onClose, onUpdate, read
 
       {/* ── Preview image ── */}
       {previewUrl && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80" onClick={() => setPreviewUrl(null)}>
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/80" onClick={() => setPreviewUrl(null)}>
           <div className="relative max-w-3xl max-h-[90vh] p-2" onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => setPreviewUrl(null)}
@@ -336,7 +336,7 @@ export default function DriverDocumentsModal({ driverId, onClose, onUpdate, read
 
       {/* ── Reject document reason ── */}
       {rejectDocId && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4">
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Rechazar documento</h3>
             <p className="text-sm text-gray-400 mb-4">Indica el motivo para que el conductor pueda corregirlo</p>
@@ -357,7 +357,7 @@ export default function DriverDocumentsModal({ driverId, onClose, onUpdate, read
 
       {/* ── Reject driver reason ── */}
       {rejectDriverOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4">
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Rechazar conductor</h3>
             <p className="text-sm text-gray-400 mb-4">El conductor recibirá una notificación con este motivo</p>

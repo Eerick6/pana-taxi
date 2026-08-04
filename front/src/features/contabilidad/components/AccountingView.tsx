@@ -84,7 +84,7 @@ function RejectDialog({
 }) {
   const [reason, setReason] = useState('');
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+    <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 px-4">
       <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
         <h3 className="text-base font-semibold text-gray-800 dark:text-white">
           Rechazar recarga
@@ -191,7 +191,7 @@ function BankDialog({
   const bi = getBankInfo(form.bank_name);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 overflow-y-auto py-6">
+    <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 px-4 overflow-y-auto py-6">
       <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4 my-auto">
         <h3 className="text-base font-semibold text-gray-800 dark:text-white">
           {initial ? 'Editar cuenta bancaria' : 'Nueva cuenta bancaria'}

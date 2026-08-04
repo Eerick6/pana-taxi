@@ -260,7 +260,7 @@ export default function VehiclesList({ cooperativeId }: Props) {
 
       {/* Delete confirmation */}
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">¿Eliminar vehículo?</h3>
             <p className="text-sm text-gray-400 mb-6">Esta acción es permanente. Solo se pueden eliminar vehículos que no estén activos.</p>
