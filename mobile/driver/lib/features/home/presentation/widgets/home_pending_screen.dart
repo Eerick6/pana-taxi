@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../core/network/dio_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../documents/data/models/document_model.dart';
@@ -238,23 +237,6 @@ class _HomePendingScreenState extends ConsumerState<HomePendingScreen> {
             ),
           ),
 
-          if (anyUploaded) ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: OutlinedButton.icon(
-                onPressed: () async => _requestReview(context),
-                icon: const Icon(Icons.send_outlined, size: 18),
-                label: Text('Solicitar revisión de perfil', style: AppTextStyles.btnLg),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.secondary,
-                  side: const BorderSide(color: AppColors.secondary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-              ),
-            ),
-          ],
 
           const SizedBox(height: 20),
 
@@ -283,27 +265,6 @@ class _HomePendingScreenState extends ConsumerState<HomePendingScreen> {
     );
   }
 
-  Future<void> _requestReview(BuildContext context) async {
-    try {
-      final dio = ref.read(dioProvider);
-      final res = await dio.patch('/drivers/me/request-review');
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(res.data['message'] as String? ?? 'Solicitud enviada.'),
-          backgroundColor: AppColors.success,
-        ),
-      );
-    } catch (_) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo enviar la solicitud. Intenta de nuevo.'),
-          backgroundColor: AppColors.error,
-        ),
-      );
-    }
-  }
 }
 
 // ── Guard de onboarding para dueño de taxi ────────────────────────────────────
