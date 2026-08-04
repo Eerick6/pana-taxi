@@ -129,6 +129,7 @@ class _TripViewState extends ConsumerState<_TripView> {
   int     _waitSecondsLeft = 0;
   final   _externalDio = Dio();
   StreamSubscription<geo.Position>? _locationSub;
+  bool    _followDriver = false;
 
   // Taxímetro en vivo
   double _meterDisplay   = 0;
@@ -189,6 +190,16 @@ class _TripViewState extends ConsumerState<_TripView> {
         'lng': pos.longitude,
         'speed_kmh': pos.speed > 0 ? pos.speed * 3.6 : 0.0,
       });
+      if (_followDriver) {
+        _mapController?.animateCamera(CameraUpdate.newCameraPosition(
+          CameraPosition(
+            target: LatLng(pos.latitude, pos.longitude),
+            bearing: pos.heading >= 0 ? pos.heading : 0,
+            zoom: 17,
+            tilt: 45,
+          ),
+        ));
+      }
     });
   }
 
@@ -239,8 +250,7 @@ class _TripViewState extends ConsumerState<_TripView> {
     final ctrl = _mapController;
     if (ctrl == null) return;
 
-    // Stop following while we set up the new view
-    await ctrl.updateMyLocationTrackingMode(MyLocationTrackingMode.none);
+    if (mounted) setState(() => _followDriver = false);
     await ctrl.clearLines();
 
     double startLat, startLng, endLat, endLng;
@@ -274,9 +284,7 @@ class _TripViewState extends ConsumerState<_TripView> {
           CameraUpdate.newLatLngZoom(LatLng(trip.originLat, trip.originLng), 16),
         );
         await Future.delayed(const Duration(seconds: 2));
-        if (mounted) {
-          await ctrl.updateMyLocationTrackingMode(MyLocationTrackingMode.trackingCompass);
-        }
+        if (mounted) setState(() => _followDriver = true);
         return;
     }
 
@@ -341,15 +349,9 @@ class _TripViewState extends ConsumerState<_TripView> {
       );
 
       await Future.delayed(const Duration(seconds: 3));
-      if (mounted) {
-        // Camera follows driver and rotates with compass — navigation mode
-        await ctrl.updateMyLocationTrackingMode(MyLocationTrackingMode.trackingCompass);
-      }
+      if (mounted) setState(() => _followDriver = true);
     } catch (_) {
-      // Route fetch failed silently — map still shows, switch to follow mode anyway
-      if (mounted) {
-        await ctrl.updateMyLocationTrackingMode(MyLocationTrackingMode.trackingCompass);
-      }
+      if (mounted) setState(() => _followDriver = true);
     }
   }
 
@@ -422,9 +424,7 @@ class _TripViewState extends ConsumerState<_TripView> {
               _mapController = controller;
               _fetchAndDrawRoute(trip);
             },
-            myLocationEnabled: true,
-            myLocationTrackingMode: MyLocationTrackingMode.none,
-            myLocationRenderMode: MyLocationRenderMode.normal,
+            myLocationEnabled: false,
             trackCameraPosition: true,
           ),
 
