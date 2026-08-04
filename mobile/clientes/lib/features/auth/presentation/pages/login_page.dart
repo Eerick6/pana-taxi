@@ -6,6 +6,7 @@ import '../../../../core/services/biometric_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../providers/auth_provider.dart';
+import '../../data/datasources/auth_api.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
@@ -59,6 +60,15 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       );
       if (!mounted) return;
       context.go('/home');
+    } on PendingVerificationException catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      context.push('/otp', extra: {
+        'phone':      e.phone,
+        'flow':       'register',
+        'devCode':    e.devCode ?? '',
+        'photoBytes': null,
+      });
     } catch (e) {
       if (mounted) {
         setState(() => _loading = false);

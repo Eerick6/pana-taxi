@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException, ConflictException, Logger, Optional } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, ConflictException, HttpException, Logger, Optional } from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
@@ -164,6 +164,16 @@ export class AuthService {
     const user = await this.usersRepository.findOne({ where: { phone } });
     if (!user) throw new UnauthorizedException('Teléfono o contraseña incorrectos');
     if (user.status === UserStatus.SUSPENDED) throw new UnauthorizedException('Tu cuenta ha sido bloqueada. Contacta con soporte.');
+    if (user.status === UserStatus.PENDING) {
+      const { code, expires } = this.generateOtp();
+      await this.usersRepository.update(user.id, { otp_code: code, otp_expires_at: expires });
+      await this.sendSms(phone, `Tu código de verificación es: ${code}. Expira en 10 minutos.`);
+      throw new HttpException({
+        error: 'PENDING_VERIFICATION',
+        message: 'Tu registro está pendiente de verificación. Te enviamos un nuevo código.',
+        ...(this.showDevOtp ? { dev_code: code } : {}),
+      }, 428);
+    }
     if (user.status !== UserStatus.ACTIVE) throw new UnauthorizedException('Tu cuenta no está activa. Contacta con soporte.');
     if (!user.password_hash) throw new UnauthorizedException('Esta cuenta no tiene contraseña configurada.');
 
@@ -390,10 +400,15 @@ export class AuthService {
 
   private async sendSms(to: string, message: string) {
     if (this.isDev) {
-      console.log(`[DEV SMS] → ${to}: ${message}`);
+      this.logger.log(`[DEV SMS] → ${to}: ${message}`);
       return;
     }
-    await this.sendZavuSms(to, message);
+    try {
+      await this.sendZavuSms(to, message);
+      this.logger.log(`[SMS OK] → ${to}`);
+    } catch (err) {
+      this.logger.error(`[SMS FAIL] → ${to} | ${err.message}`);
+    }
   }
 
   private async sendZavuSms(to: string, text: string): Promise<void> {

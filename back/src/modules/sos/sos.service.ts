@@ -143,17 +143,21 @@ export class SosService {
       console.log(`[DEV SOS SMS] → ${to}: ${message}`);
       return;
     }
-    const res = await fetch('https://api.zavu.dev/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.ZAVU_API_KEY ?? ''}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ to, text: message }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Zavu SMS SOS ${res.status}: ${err}`);
+    try {
+      const res = await fetch('https://api.zavu.dev/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.ZAVU_API_KEY ?? ''}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ to, text: message }),
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        console.error(`[SOS SMS FAIL] → ${to} | ${res.status}: ${err}`);
+      }
+    } catch (err) {
+      console.error(`[SOS SMS FAIL] → ${to} | ${err.message}`);
     }
   }
 }

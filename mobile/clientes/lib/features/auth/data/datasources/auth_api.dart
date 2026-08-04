@@ -3,6 +3,12 @@ import '../../../../core/constants/api_constants.dart';
 import '../../domain/entities/auth_tokens.dart';
 import '../models/auth_response_model.dart';
 
+class PendingVerificationException implements Exception {
+  final String phone;
+  final String? devCode;
+  const PendingVerificationException({required this.phone, this.devCode});
+}
+
 class AuthApi {
   const AuthApi(this._dio);
   final Dio _dio;
@@ -53,6 +59,13 @@ class AuthApi {
       });
       return AuthTokensModel.fromJson(res.data as Map<String, dynamic>);
     } on DioException catch (e) {
+      final data = e.response?.data;
+      if (data is Map && data['error'] == 'PENDING_VERIFICATION') {
+        throw PendingVerificationException(
+          phone:   phone,
+          devCode: data['dev_code'] as String?,
+        );
+      }
       throw Exception(_parseError(e));
     }
   }
