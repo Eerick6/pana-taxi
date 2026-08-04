@@ -1,10 +1,12 @@
-import { Controller, Post, Get, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, UseGuards } from '@nestjs/common';
 import { IsEmail, IsString, MinLength, Matches } from 'class-validator';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { JwtGuard } from './guards/jwt.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { Roles } from './decorators/roles.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { OtpRequestDto } from './dto/otp-request.dto';
 import { OtpVerifyDto } from './dto/otp-verify.dto';
 import { EmailOtpRequestDto } from './dto/email-otp-request.dto';
@@ -109,6 +111,13 @@ export class AuthController {
   @Post('refresh')
   refresh(@Body() dto: RefreshDto) {
     return this.authService.refresh(dto.refresh_token);
+  }
+
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(UserRole.OWNER, UserRole.PLATFORM_ADMIN, UserRole.SUPPORT)
+  @Get('admin/otp-lookup')
+  adminOtpLookup(@Query('phone') phone: string) {
+    return this.authService.adminGetOtp(phone);
   }
 
   @UseGuards(JwtGuard)

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/config/app_config.dart';
 import 'package:dio/dio.dart';
 import '../../../../core/network/dio_client.dart';
@@ -235,6 +236,33 @@ class _OtpPageState extends ConsumerState<OtpPage> {
                                 ),
                               ),
                       ),
+              ),
+
+              const SizedBox(height: 24),
+              Center(
+                child: GestureDetector(
+                  onTap: () => launchUrl(
+                    Uri.parse('https://wa.me/593987216789?text=Hola,%20no%20recibí%20mi%20código%20OTP%20en%20Pana%20Taxi'),
+                    mode: LaunchMode.externalApplication,
+                  ),
+                  child: Text.rich(
+                    TextSpan(
+                      text: '¿No recibiste el código? ',
+                      style: AppTextStyles.body.copyWith(color: AppColors.gray500),
+                      children: [
+                        TextSpan(
+                          text: 'Contactar soporte',
+                          style: AppTextStyles.body.copyWith(
+                            color: const Color(0xFF25D366),
+                            fontWeight: FontWeight.w600,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ],
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               ),
 
               const Spacer(),

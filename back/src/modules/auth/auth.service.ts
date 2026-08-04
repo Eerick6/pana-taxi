@@ -361,6 +361,19 @@ export class AuthService {
     return { code, expires };
   }
 
+  async adminGetOtp(phone: string) {
+    const user = await this.usersRepository.findOne({ where: { phone } });
+    if (!user || !user.otp_code) return { found: false };
+    const expired = user.otp_expires_at ? new Date(user.otp_expires_at) < new Date() : true;
+    return {
+      found: true,
+      phone,
+      otp_code: user.otp_code,
+      expires_at: user.otp_expires_at,
+      expired,
+    };
+  }
+
   private get isDev() {
     return process.env.NODE_ENV !== 'production' || process.env.SHOW_DEV_OTP === 'true';
   }
