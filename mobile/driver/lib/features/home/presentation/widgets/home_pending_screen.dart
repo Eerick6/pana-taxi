@@ -18,7 +18,7 @@ class HomeProfileGuard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final profileAsync = ref.watch(driverProfileProvider);
 
-    if (profileAsync.isLoading) {
+    if (profileAsync.isLoading && profileAsync.value == null) {
       return const ColoredBox(
         color: AppColors.secondary,
         child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
