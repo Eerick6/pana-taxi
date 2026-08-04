@@ -9,10 +9,12 @@ import 'package:go_router/go_router.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/config/app_config.dart';
+import '../../../../core/network/socket_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../data/models/trip_model.dart';
 import '../../data/providers/trip_provider.dart';
+import '../../data/repositories/trip_repository.dart';
 import '../../../ratings/presentation/rating_sheet.dart';
 
 class TripActivePage extends ConsumerStatefulWidget {
@@ -25,6 +27,30 @@ class TripActivePage extends ConsumerStatefulWidget {
 
 class _TripActivePageState extends ConsumerState<TripActivePage> {
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _listenOfferAccepted();
+  }
+
+  void _listenOfferAccepted() {
+    final socket = ref.read(socketClientProvider);
+    socket.on('trip.offer_accepted', (data) async {
+      if (!mounted) return;
+      final repo = ref.read(tripRepositoryProvider);
+      final updated = await repo.getActiveTrip();
+      if (mounted && updated != null) {
+        ref.read(activeTripProvider.notifier).setTrip(updated);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    ref.read(socketClientProvider).off('trip.offer_accepted');
+    super.dispose();
+  }
 
   Future<void> _performAction(Future<void> Function() action) async {
     setState(() => _loading = true);
@@ -101,6 +127,7 @@ class _TripViewState extends ConsumerState<_TripView> {
   Timer?  _waitTimer;
   int     _waitSecondsLeft = 0;
   final   _externalDio = Dio();
+  StreamSubscription<geo.Position>? _locationSub;
 
   // Taxímetro en vivo
   double _meterDisplay   = 0;
@@ -110,6 +137,7 @@ class _TripViewState extends ConsumerState<_TripView> {
   @override
   void initState() {
     super.initState();
+    _startLocationTracking();
     if (widget.trip.status == 'driver_arrived') {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _startWaitCountdown(widget.trip.waitTimerExpiresAt),
@@ -123,10 +151,44 @@ class _TripViewState extends ConsumerState<_TripView> {
 
   @override
   void dispose() {
+    _locationSub?.cancel();
     _waitTimer?.cancel();
     _meterTimer?.cancel();
     _externalDio.close(force: true);
     super.dispose();
+  }
+
+  Future<void> _startLocationTracking() async {
+    final socket = ref.read(socketClientProvider);
+
+    // Emitir posición actual inmediatamente (para que el cliente vea el taxi enseguida)
+    try {
+      final pos = await geo.Geolocator.getCurrentPosition(
+        locationSettings: const geo.LocationSettings(accuracy: geo.LocationAccuracy.high),
+      );
+      if (mounted) {
+        socket.emit('location.update', {
+          'lat': pos.latitude,
+          'lng': pos.longitude,
+          'speed_kmh': 0.0,
+        });
+      }
+    } catch (_) {}
+
+    // Streaming continuo mientras dure el viaje
+    _locationSub = geo.Geolocator.getPositionStream(
+      locationSettings: const geo.LocationSettings(
+        accuracy: geo.LocationAccuracy.high,
+        distanceFilter: 15,
+      ),
+    ).listen((pos) {
+      if (!mounted) return;
+      socket.emit('location.update', {
+        'lat': pos.latitude,
+        'lng': pos.longitude,
+        'speed_kmh': pos.speed > 0 ? pos.speed * 3.6 : 0.0,
+      });
+    });
   }
 
   @override
@@ -137,7 +199,25 @@ class _TripViewState extends ConsumerState<_TripView> {
       if (widget.trip.status == 'driver_arrived') {
         _startWaitCountdown(widget.trip.waitTimerExpiresAt);
       }
+      // Cuando el cliente acepta → emitir posición fresca para que vea el taxi de inmediato
+      if (widget.trip.status == 'accepted') {
+        _emitCurrentLocation();
+      }
     }
+  }
+
+  Future<void> _emitCurrentLocation() async {
+    try {
+      final pos = await geo.Geolocator.getCurrentPosition(
+        locationSettings: const geo.LocationSettings(accuracy: geo.LocationAccuracy.high),
+      );
+      if (!mounted) return;
+      ref.read(socketClientProvider).emit('location.update', {
+        'lat': pos.latitude,
+        'lng': pos.longitude,
+        'speed_kmh': 0.0,
+      });
+    } catch (_) {}
   }
 
   void _startWaitCountdown(DateTime? expiresAt) {
@@ -352,7 +432,7 @@ class _TripViewState extends ConsumerState<_TripView> {
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: GestureDetector(
-                onTap: () => context.pop(),
+                onTap: () => context.go('/home'),
                 child: Container(
                   width: 44,
                   height: 44,

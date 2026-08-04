@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -69,8 +70,12 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
 
   MapLibreMapController? _mapController;
   Symbol?  _driverSymbol;
+  Line?    _approachLine1;
+  Line?    _approachLine2;
   bool     _mapReady = false;
   bool     _routeDrawn = false;
+  bool     _approachDrawn = false;
+  final    _routeDio = Dio();
 
   // Taxímetro en tiempo real (solo fareMode == 'meter' + in_progress)
   double   _meterAmount = 0;
@@ -89,6 +94,7 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
   void dispose() {
     _waitTimer?.cancel();
     _meterTimer?.cancel();
+    _routeDio.close(force: true);
     final socket = ref.read(socketClientProvider);
     socket.leaveTripRoom(widget.tripId);
     socket.off('trip.driver_arrived');
@@ -155,26 +161,38 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
           iconSize: 1.0,
           iconAnchor: 'center',
         ));
+        // Dibujar ruta conductor→punto de recogida (solo la primera vez)
+        if (!_approachDrawn) _drawApproachRoute(ctrl, pos);
       } else {
         await ctrl.updateSymbol(_driverSymbol!, SymbolOptions(geometry: pos));
       }
-      // Suave seguimiento del conductor cuando está en camino
+      // Seguimiento suave del conductor cuando está en camino
       if (_trip?.status == 'accepted') {
         await ctrl.animateCamera(CameraUpdate.newLatLng(pos));
       }
     });
 
-    socket.on('trip.driver_arrived', (data) {
+    socket.on('trip.driver_arrived', (data) async {
       if (!mounted) return;
       final waitExpires = data is Map ? data['wait_expires_at'] as String? : null;
       setState(() => _trip = _trip != null ? _rebuildTrip(_trip!, 'driver_arrived') : _trip);
       _startWaitCountdown(waitExpires);
+      // Limpiar ruta de acercamiento — el conductor ya llegó
+      final ctrl = _mapController;
+      if (ctrl != null) {
+        if (_approachLine1 != null) await ctrl.removeLine(_approachLine1!);
+        if (_approachLine2 != null) await ctrl.removeLine(_approachLine2!);
+        _approachLine1 = null;
+        _approachLine2 = null;
+      }
     });
 
     socket.on('trip.started', (_) {
       if (!mounted) return;
-      setState(() => _trip = _trip != null ? _rebuildTrip(_trip!, 'in_progress') : _trip);
-      // Cuando inicia el viaje, mostrar ruta al destino
+      setState(() {
+        _trip = _trip != null ? _rebuildTrip(_trip!, 'in_progress') : _trip;
+        _routeDrawn = false; // permitir redibujar con la ruta al destino
+      });
       if (_mapReady) _drawRoute();
     });
 
@@ -227,6 +245,36 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
     });
   }
 
+  Future<void> _drawApproachRoute(MapLibreMapController ctrl, LatLng driverPos) async {
+    final trip = _trip;
+    if (trip?.originLat == null || trip?.originLng == null) return;
+    _approachDrawn = true;
+    try {
+      final res = await _routeDio.get<Map<String, dynamic>>(
+        'https://router.project-osrm.org/route/v1/driving/'
+        '${driverPos.longitude},${driverPos.latitude};'
+        '${trip!.originLng},${trip.originLat}'
+        '?overview=full&geometries=geojson',
+      );
+      final routes = res.data?['routes'] as List?;
+      if (routes == null || routes.isEmpty || !mounted) return;
+      final coords = routes[0]['geometry']['coordinates'] as List;
+      final latLngs = coords
+          .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
+          .toList();
+      if (latLngs.length < 2) return;
+      _approachLine1 = await ctrl.addLine(LineOptions(
+        geometry: latLngs, lineColor: '#ffffff', lineWidth: 8.0, lineOpacity: 0.85, lineJoin: 'round',
+      ));
+      _approachLine2 = await ctrl.addLine(LineOptions(
+        geometry: latLngs, lineColor: '#4264fb', lineWidth: 5.0, lineOpacity: 1.0, lineJoin: 'round',
+      ));
+    } catch (_) {
+      // Si falla el routing, el marcador del taxi sigue visible
+      _approachDrawn = false;
+    }
+  }
+
   Future<void> _onMapCreated(MapLibreMapController ctrl) async {
     _mapController = ctrl;
     // Registrar imagen del taxi
@@ -241,32 +289,7 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
     final trip = _trip;
     if (ctrl == null || trip == null || _routeDrawn) return;
 
-    final geom = trip.routeGeometry;
-    if (geom == null) return;
-
-    // Extraer coordenadas del GeoJSON LineString
-    List? rawCoords;
-    if (geom['type'] == 'LineString') {
-      rawCoords = geom['coordinates'] as List?;
-    } else if (geom['type'] == 'Feature') {
-      final g = geom['geometry'] as Map?;
-      rawCoords = g?['coordinates'] as List?;
-    }
-    if (rawCoords == null || rawCoords.isEmpty) return;
-
-    final latLngs = rawCoords
-        .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
-        .toList();
-
-    // Borde blanco + línea azul estilo navegación
-    await ctrl.addLine(LineOptions(
-      geometry: latLngs, lineColor: '#ffffff', lineWidth: 10.0, lineOpacity: 1.0, lineJoin: 'round',
-    ));
-    await ctrl.addLine(LineOptions(
-      geometry: latLngs, lineColor: '#4264fb', lineWidth: 6.0, lineOpacity: 1.0, lineJoin: 'round',
-    ));
-
-    // Marcador de origen y destino
+    // Pines de origen y destino — siempre visibles en accepted e in_progress
     if (trip.originLat != null && trip.originLng != null) {
       await ctrl.addCircle(CircleOptions(
         geometry: LatLng(trip.originLat!, trip.originLng!),
@@ -279,6 +302,42 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
         circleRadius: 8, circleColor: '#ef4444', circleStrokeWidth: 2, circleStrokeColor: '#ffffff',
       ));
     }
+
+    // Ruta origen→destino solo cuando el viaje está en curso
+    if (trip.status != 'in_progress') {
+      _routeDrawn = true;
+      // Centrar mapa en el punto de recogida para que el cliente vea al conductor llegar
+      if (trip.originLat != null && trip.originLng != null) {
+        await ctrl.animateCamera(
+          CameraUpdate.newLatLngZoom(LatLng(trip.originLat!, trip.originLng!), 15),
+        );
+      }
+      return;
+    }
+
+    final geom = trip.routeGeometry;
+    if (geom == null) { _routeDrawn = true; return; }
+
+    List? rawCoords;
+    if (geom['type'] == 'LineString') {
+      rawCoords = geom['coordinates'] as List?;
+    } else if (geom['type'] == 'Feature') {
+      final g = geom['geometry'] as Map?;
+      rawCoords = g?['coordinates'] as List?;
+    }
+    if (rawCoords == null || rawCoords.isEmpty) { _routeDrawn = true; return; }
+
+    final latLngs = rawCoords
+        .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
+        .toList();
+
+    // Borde blanco + línea azul estilo navegación
+    await ctrl.addLine(LineOptions(
+      geometry: latLngs, lineColor: '#ffffff', lineWidth: 10.0, lineOpacity: 1.0, lineJoin: 'round',
+    ));
+    await ctrl.addLine(LineOptions(
+      geometry: latLngs, lineColor: '#4264fb', lineWidth: 6.0, lineOpacity: 1.0, lineJoin: 'round',
+    ));
 
     _routeDrawn = true;
 

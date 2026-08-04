@@ -155,7 +155,7 @@ class _OtpPageState extends ConsumerState<OtpPage> {
   @override
   Widget build(BuildContext context) {
     final display = '${widget.phone.substring(0, 4)} ${widget.phone.substring(4)}';
-    final showDevHint = AppEnv.isDev && (widget.devCode?.isNotEmpty ?? false);
+    final showDevHint = widget.devCode?.isNotEmpty ?? false;
 
     return Scaffold(
       backgroundColor: AppColors.white,

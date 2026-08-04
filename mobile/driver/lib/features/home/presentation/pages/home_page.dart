@@ -10,6 +10,7 @@ import '../../../../core/network/socket_client.dart';
 import '../../../../core/services/push_notification_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../profile/data/providers/profile_provider.dart';
+import '../../../trip/data/providers/trip_provider.dart';
 import '../../../trip/presentation/widgets/trip_alert_overlay.dart';
 import '../../../documents/data/providers/document_provider.dart';
 import '../../../vehicles/data/providers/vehicle_provider.dart';
@@ -55,7 +56,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
         context: context,
         alert: alert,
         dio: dio,
-        onAccepted: (_) => context.push('/trip/$tripId'),
+        onAccepted: (_) => context.go('/trip/$tripId'),
         playSound: false,
       );
     } catch (e) {
@@ -81,7 +82,6 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     socket.off('trip.new');
     socket.off('trip.taken');
     socket.off('trip.radius_expanded');
-    socket.off('trip.offer_accepted');
     socket.off('trip.offer_rejected');
     socket.off('trip.offer_ignored');
     socket.off('trip.price_updated');
@@ -124,7 +124,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
         context: context,
         alert: alert,
         dio: ref.read(dioProvider),
-        onAccepted: (_) => context.push('/trip/${alert.tripId}'),
+        onAccepted: (_) => context.go('/trip/${alert.tripId}'),
       );
     });
 
@@ -136,7 +136,10 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       if (!mounted) return;
       TripAlertManager.dismiss();
       final tripId = (data is Map ? data['trip_id'] : null) as String?;
-      if (tripId != null) context.push('/trip/$tripId');
+      if (tripId != null) {
+        ref.invalidate(activeTripProvider);
+        context.go('/trip/$tripId');
+      }
     });
 
     socket.on('trip.offer_rejected', (_) {
@@ -171,7 +174,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
         context: context,
         alert: alert,
         dio: ref.read(dioProvider),
-        onAccepted: (_) => context.push('/trip/${alert.tripId}'),
+        onAccepted: (_) => context.go('/trip/${alert.tripId}'),
       );
     });
 
@@ -189,7 +192,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
         context: context,
         alert: alert,
         dio: ref.read(dioProvider),
-        onAccepted: (_) => context.push('/trip/${alert.tripId}'),
+        onAccepted: (_) => context.go('/trip/${alert.tripId}'),
       );
     });
   }
@@ -333,7 +336,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
             ),
           ),
 
-          HomeTripBanner(onNavigate: (id) => context.push('/trip/$id')),
+          HomeTripBanner(onNavigate: (id) => context.go('/trip/$id')),
 
           Positioned(
             bottom: 0, left: 0, right: 0,

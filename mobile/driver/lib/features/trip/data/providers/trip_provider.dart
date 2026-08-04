@@ -69,4 +69,5 @@ class ActiveTripNotifier extends AsyncNotifier<TripModel?> {
   }
 
   void clear() => state = const AsyncData(null);
+  void setTrip(TripModel trip) => state = AsyncData(trip);
 }
