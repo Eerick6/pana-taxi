@@ -24,9 +24,12 @@ void main() async {
   }
   if (kDebugMode) debugPrint('[AppEnv] FLAVOR=${AppEnv.isDev ? "dev" : "prod"} → ${AppEnv.baseUrl}');
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarContrastEnforced: false,
   ));
   runApp(const ProviderScope(child: PanaClienteApp()));
 }

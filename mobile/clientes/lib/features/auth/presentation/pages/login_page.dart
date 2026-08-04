@@ -121,7 +121,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         ),
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -227,7 +227,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 ),
               ),
 
-              const Spacer(),
+              const SizedBox(height: 32),
 
               // ── Botón login ──────────────────────────────────────────────
               SizedBox(
@@ -313,3 +313,4 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     );
   }
 }
+

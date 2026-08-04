@@ -68,7 +68,7 @@ class MyVehiclesPage extends ConsumerWidget {
                   icon: Icons.hourglass_top_rounded,
                   color: Colors.blue,
                   title: 'Membresía en revisión',
-                  body: 'Tu solicitud de membresía está siendo revisada por la cooperativa. Una vez aprobada podrás registrar tus taxis.',
+                  body: 'La cooperativa aún no aprueba tu membresía. Puedes registrar taxis mientras tanto; serán revisados por la cooperativa.',
                 )
               else
                 _InfoBanner(
