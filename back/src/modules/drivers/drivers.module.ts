@@ -12,6 +12,7 @@ import { CooperativeMember } from '../cooperatives/entities/cooperative-member.e
 import { Vehicle } from '../vehicles/entities/vehicle.entity';
 import { VehicleDocument } from '../vehicles/entities/vehicle-document.entity';
 import { VehicleAssignment } from '../vehicles/entities/vehicle-assignment.entity';
+import { Trip } from '../trips/entities/trip.entity';
 import { StorageModule } from '../storage/storage.module';
 import { TermsModule } from '../terms/terms.module';
 import { FareModule } from '../fare/fare.module';
@@ -20,7 +21,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Driver, DriverDocument, User, DriverWallet, Cooperative, CooperativeOwner, CooperativeMember, Vehicle, VehicleDocument, VehicleAssignment]),
+    TypeOrmModule.forFeature([Driver, DriverDocument, User, DriverWallet, Cooperative, CooperativeOwner, CooperativeMember, Vehicle, VehicleDocument, VehicleAssignment, Trip]),
     StorageModule,
     TermsModule,
     FareModule,

@@ -21,6 +21,7 @@ import { CooperativeOwner, OwnerApprovalStatus } from '../cooperatives/entities/
 import { CooperativeMember } from '../cooperatives/entities/cooperative-member.entity';
 import { Vehicle, VehicleApprovalStatus } from '../vehicles/entities/vehicle.entity';
 import { VehicleDocument } from '../vehicles/entities/vehicle-document.entity';
+import { Trip, TripStatus } from '../trips/entities/trip.entity';
 import { VehicleAssignment, AssignmentStatus } from '../vehicles/entities/vehicle-assignment.entity';
 import { StorageService } from '../storage/storage.service';
 import { TermsService } from '../terms/terms.service';
@@ -60,6 +61,8 @@ export class DriversService {
     private vehiclesRepo: Repository<Vehicle>,
     @InjectRepository(VehicleDocument)
     private vehicleDocsRepo: Repository<VehicleDocument>,
+    @InjectRepository(Trip)
+    private tripsRepo: Repository<Trip>,
     @InjectRepository(VehicleAssignment)
     private assignmentsRepo: Repository<VehicleAssignment>,
     private storage: StorageService,
@@ -655,8 +658,14 @@ export class DriversService {
   async deleteDriver(id: string) {
     const driver = await this.driversRepo.findOne({ where: { id }, relations: ['user'] });
     if (!driver) throw new NotFoundException('Conductor no encontrado');
-    if (driver.online_status !== DriverOnlineStatus.OFFLINE) {
-      throw new BadRequestException('El conductor debe estar desconectado para poder eliminarlo');
+    const activeTrip = await this.tripsRepo.findOne({
+      where: {
+        driver: { id },
+        status: In([TripStatus.ACCEPTED, TripStatus.IN_PROGRESS, TripStatus.REQUESTED]),
+      },
+    });
+    if (activeTrip) {
+      throw new BadRequestException('El conductor tiene un viaje activo. Espera a que finalice antes de eliminarlo.');
     }
     const userId = driver.user.id;
 
