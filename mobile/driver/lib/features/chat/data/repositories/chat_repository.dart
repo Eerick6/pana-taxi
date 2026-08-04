@@ -49,6 +49,16 @@ class ChatRepository {
     }
   }
 
+  Future<String> openOperatorConversation(String cooperativeId) async {
+    try {
+      final res = await _dio.post('/chat/operator/open', data: {'cooperative_id': cooperativeId});
+      return res.data['id'] as String;
+    } on DioException catch (e) {
+      final msg = e.response?.data?['message'];
+      throw Exception(msg is List ? msg.first : msg ?? 'Error al abrir chat');
+    }
+  }
+
   Future<MessageModel> sendMessage(String conversationId, String content,
       {String? myUserId}) async {
     try {

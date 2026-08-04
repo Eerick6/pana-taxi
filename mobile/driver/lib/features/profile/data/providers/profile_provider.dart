@@ -52,7 +52,6 @@ class DriverProfileNotifier extends AsyncNotifier<DriverProfileModel> {
   }
 
   Future<void> refresh() async {
-    state = const AsyncLoading();
     state = await AsyncValue.guard(
       () => ref.read(profileRepositoryProvider).getProfile(),
     );

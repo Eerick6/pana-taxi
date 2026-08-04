@@ -167,6 +167,11 @@ class TripsApi {
     return (res.data['client_offer'] as num).toDouble();
   }
 
+  Future<double> setOffer(String tripId, double amount) async {
+    final res = await _dio.patch('/trips/$tripId/set-offer', data: {'amount': amount});
+    return (res.data['client_offer'] as num).toDouble();
+  }
+
   Future<void> cancelTrip(String tripId) async {
     await _dio.patch('/trips/$tripId/cancel', data: {'reason': 'Cliente canceló'});
   }

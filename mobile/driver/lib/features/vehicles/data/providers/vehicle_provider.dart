@@ -79,7 +79,6 @@ class MyVehiclesGuardNotifier extends AsyncNotifier<List<VehicleModel>> {
       ref.read(vehicleRepositoryProvider).getMyVehicles();
 
   Future<void> refresh() async {
-    state = const AsyncLoading();
     state = await AsyncValue.guard(
         () => ref.read(vehicleRepositoryProvider).getMyVehicles());
   }

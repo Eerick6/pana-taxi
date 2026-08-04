@@ -865,6 +865,66 @@ export class TripsService {
     return { message: `Oferta actualizada a $${newOffer}`, client_offer: newOffer };
   }
 
+  async setOffer(tripId: string, userId: string, amount: number) {
+    const trip = await this.tripsRepo.findOne({
+      where: { id: tripId, client: { id: userId } },
+      relations: ['client'],
+    });
+    if (!trip) throw new NotFoundException('Viaje no encontrado');
+    if (trip.fare_mode !== FareMode.NEGOTIATED)
+      throw new BadRequestException('Solo aplica a viajes de precio negociado');
+    if (trip.status !== TripStatus.REQUESTED)
+      throw new BadRequestException('No se puede modificar la oferta en este estado');
+
+    const pendingCount = await this.tripOffersRepo.count({
+      where: { trip_id: tripId, status: OfferStatus.PENDING },
+    });
+    if (pendingCount > 0)
+      throw new BadRequestException('Tienes ofertas de conductores pendientes. Selecciona una.');
+
+    const suggestedFare = parseFloat(trip.suggested_fare as any);
+    const fareConfig    = await this.fareService.getConfig();
+    const discountPct   = parseFloat(fareConfig.max_negotiation_discount_pct as any);
+    const rawMin        = suggestedFare * (1 - discountPct / 100);
+    const roundedMin    = Math.ceil(rawMin / 0.05) * 0.05;
+    const minimumFare   = +Math.max(roundedMin, 1.50).toFixed(2);
+
+    const newOffer = +amount.toFixed(2);
+    if (newOffer < minimumFare)
+      throw new BadRequestException(`La oferta mínima es $${minimumFare.toFixed(2)}`);
+
+    await this.tripsRepo.update(tripId, { client_offer: newOffer as any });
+
+    const clientProfile = await this.clientsRepo.findOne({ where: { user: { id: userId } } });
+    const originLat     = parseFloat(trip.origin_lat as any);
+    const originLng     = parseFloat(trip.origin_lng as any);
+    const searchKm      = parseFloat(trip.current_search_radius_km as any) || 1.0;
+
+    const payload = {
+      trip_id:             tripId,
+      new_price:           newOffer,
+      client_offer:        newOffer,
+      origin_address:      trip.origin_address,
+      destination_address: trip.destination_address,
+      origin_lat:          originLat,
+      origin_lng:          originLng,
+      search_radius_km:    searchKm,
+      suggested_fare:      suggestedFare,
+      fare_mode:           trip.fare_mode,
+      distance_km:         parseFloat(trip.estimated_distance_km as any),
+      client_name:         clientProfile?.full_name ?? (trip.client as any)?.full_name ?? null,
+      client_rating:       clientProfile ? parseFloat(clientProfile.rating as any) : null,
+      client_total_trips:  clientProfile?.total_trips ?? 0,
+    };
+
+    this.gateway.notifyAvailableDrivers('trip.price_updated', payload);
+    this.gateway.sendPriceUpdateFcm(tripId, newOffer, originLat, originLng, searchKm,
+      trip.origin_address ?? 'Origen', trip.destination_address ?? 'Destino')
+      .catch(err => this.logger.warn(`FCM setOffer failed: ${err.message}`));
+
+    return { message: `Oferta actualizada a $${newOffer}`, client_offer: newOffer };
+  }
+
   async decrementOffer(tripId: string, userId: string) {
     const trip = await this.tripsRepo.findOne({
       where: { id: tripId, client: { id: userId } },

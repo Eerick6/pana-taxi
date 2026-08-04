@@ -17,6 +17,7 @@ import { CreateTripDto } from './dto/create-trip.dto';
 import { CompleteTripDto } from './dto/complete-trip.dto';
 import { CancelTripDto } from './dto/cancel-trip.dto';
 import { MakeOfferDto } from './dto/make-offer.dto';
+import { SetOfferDto } from './dto/set-offer.dto';
 import { StartTripDto } from './dto/start-trip.dto';
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -154,6 +155,17 @@ export class TripsController {
   @Roles(UserRole.CLIENT)
   decrementOffer(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: User) {
     return this.tripsService.decrementOffer(id, user.id);
+  }
+
+  // Cliente fija oferta al precio final (una sola notificación)
+  @Patch(':id/set-offer')
+  @Roles(UserRole.CLIENT)
+  setOffer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+    @Body() dto: SetOfferDto,
+  ) {
+    return this.tripsService.setOffer(id, user.id, dto.amount);
   }
 
   // Cliente confirma que ya viene hacia el taxi

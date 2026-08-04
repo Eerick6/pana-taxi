@@ -15,7 +15,7 @@ import { Client } from '../clients/entities/client.entity';
 import { VehicleAssignment, AssignmentStatus } from '../vehicles/entities/vehicle-assignment.entity';
 import { CooperativeOwner } from '../cooperatives/entities/cooperative-owner.entity';
 import { EventsGateway } from '../gateway/events.gateway';
-import { SendMessageDto, OpenOperatorConversationDto, OpenOwnerConversationDto, OpenApplicantConversationDto } from './dto/chat.dto';
+import { SendMessageDto, OpenOperatorConversationDto, OpenOwnerConversationDto, OpenApplicantConversationDto, OpenWithDriverDto } from './dto/chat.dto';
 
 @Injectable()
 export class ChatService {
@@ -179,6 +179,50 @@ export class ChatService {
         cooperative: operator.cooperative,
       }),
     );
+  }
+
+  // ── Cooperativa inicia chat con un conductor específico ───────────────────────
+
+  async getOrCreateOperatorConversationWithDriver(user: User, driverId: string): Promise<Conversation> {
+    const coopMember = await this.coopMembersRepo.findOne({
+      where: { user: { id: user.id } },
+      relations: ['cooperative'],
+    });
+    if (!coopMember) throw new ForbiddenException('Solo operadores de cooperativa pueden iniciar este chat');
+
+    const driver = await this.driversRepo.findOne({
+      where: { id: driverId },
+      relations: ['user'],
+    });
+    if (!driver?.user) throw new NotFoundException('Conductor no encontrado');
+
+    const membership = await this.coopOwnersRepo.findOne({
+      where: { owner: { id: driver.id }, cooperative: { id: coopMember.cooperative.id } },
+    });
+    if (!membership) {
+      const assignment = await this.assignmentsRepo.findOne({
+        where: { driver: { id: driver.id }, status: AssignmentStatus.ACTIVE },
+        relations: ['vehicle', 'vehicle.cooperative'],
+      });
+      if (assignment?.vehicle?.cooperative?.id !== coopMember.cooperative.id) {
+        throw new ForbiddenException('Este conductor no pertenece a tu cooperativa');
+      }
+    }
+
+    const existing = await this.convRepo.findOne({
+      where: [
+        { type: ConversationType.DRIVER_OPERATOR, cooperative: { id: coopMember.cooperative.id }, participant_a: { id: driver.user.id } },
+        { type: ConversationType.DRIVER_OPERATOR, cooperative: { id: coopMember.cooperative.id }, participant_b: { id: driver.user.id } },
+      ],
+    });
+    if (existing) return existing;
+
+    return this.convRepo.save(this.convRepo.create({
+      type: ConversationType.DRIVER_OPERATOR,
+      participant_a: driver.user,
+      participant_b: user,
+      cooperative: coopMember.cooperative,
+    }));
   }
 
   // ── Enviar mensaje ────────────────────────────────────────────────────────────

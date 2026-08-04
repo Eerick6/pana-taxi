@@ -685,14 +685,22 @@ class _NegotiatedPanel extends ConsumerStatefulWidget {
 }
 
 class _NegotiatedPanelState extends ConsumerState<_NegotiatedPanel> {
-  bool _cancelling = false;
-  bool _adjusting  = false;
+  bool _cancelling  = false;
+  bool _submitting  = false;
   late double _currentOffer;
+  Timer? _debounce;
+  int   _pendingDelta = 0;
 
   @override
   void initState() {
     super.initState();
     _currentOffer = widget.trip.clientOffer ?? 0;
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
   }
 
   Future<void> _doCancel(BuildContext ctx) async {
@@ -719,15 +727,23 @@ class _NegotiatedPanelState extends ConsumerState<_NegotiatedPanel> {
     }
   }
 
-  Future<void> _adjust(bool increment) async {
-    if (_adjusting) return;
-    setState(() => _adjusting = true);
-    final api = ref.read(tripsApiProvider);
+  void _scheduleAdjust(int delta) {
+    if (_submitting) return;
+    setState(() {
+      _pendingDelta   += delta;
+      _currentOffer    = (_currentOffer + delta * 0.25).clamp(0.0, 999.0);
+    });
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(seconds: 1), _flushAdjust);
+  }
+
+  Future<void> _flushAdjust() async {
+    if (_pendingDelta == 0) return;
+    final targetPrice = _currentOffer;
+    setState(() { _submitting = true; _pendingDelta = 0; });
     try {
-      final updated = increment
-          ? await api.incrementOffer(widget.trip.id)
-          : await api.decrementOffer(widget.trip.id);
-      if (mounted) setState(() => _currentOffer = updated);
+      final confirmed = await ref.read(tripsApiProvider).setOffer(widget.trip.id, targetPrice);
+      if (mounted) setState(() => _currentOffer = confirmed);
     } on DioException catch (e) {
       if (mounted) {
         final msg = (e.response?.data as Map?)?['message'] ?? 'Error al ajustar oferta';
@@ -736,7 +752,7 @@ class _NegotiatedPanelState extends ConsumerState<_NegotiatedPanel> {
         );
       }
     } finally {
-      if (mounted) setState(() => _adjusting = false);
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
@@ -758,12 +774,12 @@ class _NegotiatedPanelState extends ConsumerState<_NegotiatedPanel> {
           if (widget.offers.isEmpty) ...[
             _AdjustButton(
               icon: Icons.remove,
-              onTap: _adjusting ? null : () => _adjust(false),
+              onTap: _submitting ? null : () => _scheduleAdjust(-1),
             ),
             const SizedBox(width: 6),
             _AdjustButton(
               icon: Icons.add,
-              onTap: _adjusting ? null : () => _adjust(true),
+              onTap: _submitting ? null : () => _scheduleAdjust(1),
             ),
             const SizedBox(width: 8),
           ],

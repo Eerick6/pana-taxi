@@ -205,6 +205,17 @@ export function CoopChatWidget() {
 
   const [showList, setShowList] = useState(false);
 
+  // Permite que otras páginas abran una conversación vía evento global
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { convId } = (e as CustomEvent<{ convId: string }>).detail;
+      setShowList(false);
+      openConversation(convId);
+    };
+    window.addEventListener('open-chat', handler);
+    return () => window.removeEventListener('open-chat', handler);
+  }, [openConversation]);
+
   function handleSelectConv(id: string) {
     setShowList(false);
     openConversation(id);

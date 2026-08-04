@@ -28,3 +28,9 @@ export class OpenApplicantConversationDto {
   @IsUUID()
   application_id: string;
 }
+
+// Para que la cooperativa inicie chat con un conductor específico
+export class OpenWithDriverDto {
+  @IsUUID()
+  driver_id: string;
+}

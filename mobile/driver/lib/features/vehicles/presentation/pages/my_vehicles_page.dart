@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../chat/data/repositories/chat_repository.dart';
 import '../../../profile/data/models/driver_profile_model.dart';
 import '../../../profile/data/providers/profile_provider.dart';
 import '../../../vehicle_request/data/providers/vehicle_request_provider.dart';
@@ -185,13 +186,38 @@ class _InfoBanner extends StatelessWidget {
   }
 }
 
-class _CoopChip extends StatelessWidget {
+class _CoopChip extends ConsumerStatefulWidget {
   const _CoopChip({required this.coop});
   final CooperativeMembership coop;
 
   @override
+  ConsumerState<_CoopChip> createState() => _CoopChipState();
+}
+
+class _CoopChipState extends ConsumerState<_CoopChip> {
+  bool _opening = false;
+
+  Future<void> _openChat() async {
+    if (_opening) return;
+    setState(() => _opening = true);
+    try {
+      final convId = await ref.read(chatRepositoryProvider).openOperatorConversation(widget.coop.cooperativeId);
+      if (mounted) context.push('/chat/$convId');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.toString().replaceAll('Exception: ', '')),
+          backgroundColor: AppColors.error,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final (color, label) = switch (coop.membershipStatus) {
+    final (color, label) = switch (widget.coop.membershipStatus) {
       'approved' => (Colors.green, 'Aprobado'),
       'pending' => (AppColors.warningText, 'En revisión'),
       _ => (AppColors.errorText, 'Rechazado'),
@@ -208,7 +234,7 @@ class _CoopChip extends StatelessWidget {
         children: [
           const Icon(Icons.business_outlined, size: 18, color: AppColors.gray500),
           const SizedBox(width: 10),
-          Expanded(child: Text(coop.cooperativeName, style: AppTextStyles.label)),
+          Expanded(child: Text(widget.coop.cooperativeName, style: AppTextStyles.label)),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
@@ -217,6 +243,19 @@ class _CoopChip extends StatelessWidget {
             ),
             child: Text(label, style: AppTextStyles.caption.copyWith(color: color)),
           ),
+          if (widget.coop.isApproved) ...[
+            const SizedBox(width: 6),
+            _opening
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : IconButton(
+                    icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    color: AppColors.secondary,
+                    tooltip: 'Chatear con la cooperativa',
+                    onPressed: _openChat,
+                  ),
+          ],
         ],
       ),
     );

@@ -296,11 +296,21 @@ class _HomeOwnerStartDaySheetState extends ConsumerState<HomeOwnerStartDaySheet>
           Text('Selecciona el vehículo para iniciar tu jornada.',
               style: AppTextStyles.body.copyWith(color: AppColors.gray500)),
           const SizedBox(height: 18),
-          ...widget.vehicles.map((v) => HomeVehiclePickerTile(
-                vehicle: v,
-                selected: _selected?.id == v.id,
-                onTap: () => setState(() => _selected = v),
-              )),
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.35,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: widget.vehicles.map((v) => HomeVehiclePickerTile(
+                      vehicle: v,
+                      selected: _selected?.id == v.id,
+                      onTap: () => setState(() => _selected = v),
+                    )).toList(),
+              ),
+            ),
+          ),
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,
