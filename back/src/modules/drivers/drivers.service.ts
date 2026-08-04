@@ -8,7 +8,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not } from 'typeorm';
+import { Repository, Not, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../../redis/redis.module';
@@ -20,6 +20,7 @@ import { Cooperative, CooperativeStatus, CooperativeApprovalStatus } from '../co
 import { CooperativeOwner, OwnerApprovalStatus } from '../cooperatives/entities/cooperative-owner.entity';
 import { CooperativeMember } from '../cooperatives/entities/cooperative-member.entity';
 import { Vehicle, VehicleApprovalStatus } from '../vehicles/entities/vehicle.entity';
+import { VehicleDocument } from '../vehicles/entities/vehicle-document.entity';
 import { VehicleAssignment, AssignmentStatus } from '../vehicles/entities/vehicle-assignment.entity';
 import { StorageService } from '../storage/storage.service';
 import { TermsService } from '../terms/terms.service';
@@ -57,6 +58,8 @@ export class DriversService {
     private coopMembersRepo: Repository<CooperativeMember>,
     @InjectRepository(Vehicle)
     private vehiclesRepo: Repository<Vehicle>,
+    @InjectRepository(VehicleDocument)
+    private vehicleDocsRepo: Repository<VehicleDocument>,
     @InjectRepository(VehicleAssignment)
     private assignmentsRepo: Repository<VehicleAssignment>,
     private storage: StorageService,
@@ -656,14 +659,28 @@ export class DriversService {
       throw new BadRequestException('El conductor debe estar desconectado para poder eliminarlo');
     }
     const userId = driver.user.id;
+
+    // Única condición bloqueante: saldo en billetera
     const wallet = await this.walletRepo.findOne({ where: { driver: { id } } });
     if (wallet && parseFloat(wallet.balance) > 0) {
       throw new BadRequestException(
         `El conductor tiene un saldo pendiente de $${parseFloat(wallet.balance).toFixed(2)}. Liquida el saldo antes de eliminar.`,
       );
     }
+
+    // Borrado en cascada — orden por FKs
     if (wallet) await this.walletRepo.delete(wallet.id);
     await this.documentsRepo.delete({ driver: { id } });
+
+    const vehicles = await this.vehiclesRepo.find({ where: { owner: { id } }, select: ['id'] });
+    if (vehicles.length > 0) {
+      const vehicleIds = vehicles.map(v => v.id);
+      await this.vehicleDocsRepo.delete({ vehicle: { id: In(vehicleIds) } });
+      await this.assignmentsRepo.delete({ vehicle: { id: In(vehicleIds) } });
+      await this.vehiclesRepo.delete({ owner: { id } });
+    }
+
+    await this.cooperativeOwnersRepo.delete({ owner: { id } });
     await this.driversRepo.remove(driver);
     await this.usersRepo.delete(userId);
     return { message: 'Conductor eliminado' };
