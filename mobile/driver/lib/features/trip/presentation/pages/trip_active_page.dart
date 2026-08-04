@@ -72,6 +72,7 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
     final tripAsync = ref.watch(activeTripProvider);
 
     return tripAsync.when(
+      skipLoadingOnRefresh: false,
       loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (e, _) => Scaffold(body: Center(child: Text('Error: $e'))),
       data: (trip) {
