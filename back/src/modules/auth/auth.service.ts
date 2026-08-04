@@ -71,20 +71,20 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('Teléfono no registrado');
 
     if (this.isDev && dto.code === '000000') {
-      await this.usersRepository.update(user.id, { otp_code: null, otp_expires_at: null });
-      return this.generateTokens(user);
+      await this.usersRepository.update(user.id, { otp_code: null, otp_expires_at: null, status: UserStatus.ACTIVE });
+      return this.generateTokens({ ...user, status: UserStatus.ACTIVE });
     }
 
     // UPDATE atómico: consume el OTP solo si aún es válido — previene race condition
     const result = await this.usersRepository
       .createQueryBuilder()
       .update(User)
-      .set({ otp_code: null, otp_expires_at: null })
+      .set({ otp_code: null, otp_expires_at: null, status: UserStatus.ACTIVE })
       .where('id = :id AND otp_code = :code AND otp_expires_at > NOW()', { id: user.id, code: dto.code })
       .execute();
     if (result.affected === 0) throw new UnauthorizedException('Código inválido o expirado');
 
-    return this.generateTokens(user);
+    return this.generateTokens({ ...user, status: UserStatus.ACTIVE });
   }
 
   async requestEmailOtp(dto: EmailOtpRequestDto) {
@@ -164,7 +164,7 @@ export class AuthService {
     const user = await this.usersRepository.findOne({ where: { phone } });
     if (!user) throw new UnauthorizedException('Teléfono o contraseña incorrectos');
     if (user.status === UserStatus.SUSPENDED) throw new UnauthorizedException('Tu cuenta ha sido bloqueada. Contacta con soporte.');
-    if (user.status === UserStatus.PENDING) {
+    if (user.status === UserStatus.INACTIVE && user.otp_code) {
       const { code, expires } = this.generateOtp();
       await this.usersRepository.update(user.id, { otp_code: code, otp_expires_at: expires });
       await this.sendSms(phone, `Tu código de verificación es: ${code}. Expira en 10 minutos.`);
@@ -280,7 +280,7 @@ export class AuthService {
     const user = this.usersRepository.create({
       phone: dto.phone,
       role: UserRole.CLIENT,
-      status: UserStatus.ACTIVE,
+      status: UserStatus.INACTIVE,
       terms_version: terms.version,
       terms_accepted_at: new Date(),
       password_hash: passwordHash,
