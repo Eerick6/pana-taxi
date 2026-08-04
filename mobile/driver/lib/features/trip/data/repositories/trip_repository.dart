@@ -69,4 +69,13 @@ class TripRepository {
       throw Exception(msg is List ? msg.first : msg ?? 'Error al finalizar viaje');
     }
   }
+
+  Future<void> cancelTrip(String tripId, String reason) async {
+    try {
+      await _dio.patch('/trips/$tripId/cancel', data: {'reason': reason});
+    } on DioException catch (e) {
+      final msg = e.response?.data?['message'];
+      throw Exception(msg is List ? msg.first : msg ?? 'Error al cancelar viaje');
+    }
+  }
 }

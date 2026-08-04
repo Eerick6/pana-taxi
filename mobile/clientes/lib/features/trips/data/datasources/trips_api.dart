@@ -172,8 +172,8 @@ class TripsApi {
     return (res.data['client_offer'] as num).toDouble();
   }
 
-  Future<void> cancelTrip(String tripId) async {
-    await _dio.patch('/trips/$tripId/cancel', data: {'reason': 'Cliente canceló'});
+  Future<void> cancelTrip(String tripId, {String reason = 'Cliente canceló'}) async {
+    await _dio.patch('/trips/$tripId/cancel', data: {'reason': reason});
   }
 
   Future<void> clientReady(String tripId) async {

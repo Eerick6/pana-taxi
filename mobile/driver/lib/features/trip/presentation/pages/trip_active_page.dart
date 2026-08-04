@@ -487,6 +487,91 @@ class _TripViewState extends ConsumerState<_TripView> {
     }
   }
 
+  Future<void> _showCancelSheet(BuildContext ctx, TripModel trip) async {
+    const reasons = [
+      'El pasajero no se presentó',
+      'El pasajero solicitó la cancelación',
+      'Problemas con el vehículo',
+      'Emergencia personal',
+      'Otro motivo',
+    ];
+    String? selected;
+    final otherCtrl = TextEditingController();
+
+    final confirmed = await showModalBottomSheet<bool>(
+      context: ctx,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (_, setState) => Padding(
+          padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(sheetCtx).viewInsets.bottom + 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(child: Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 16), decoration: BoxDecoration(color: AppColors.gray200, borderRadius: BorderRadius.circular(2)))),
+              Text('Motivo de cancelación', style: AppTextStyles.h3),
+              const SizedBox(height: 4),
+              Text('Selecciona el motivo por el que cancelas el viaje', style: AppTextStyles.body.copyWith(color: AppColors.gray400)),
+              const SizedBox(height: 16),
+              ...reasons.map((r) => RadioListTile<String>(
+                value: r,
+                groupValue: selected,
+                contentPadding: EdgeInsets.zero,
+                title: Text(r, style: AppTextStyles.body),
+                activeColor: AppColors.error,
+                onChanged: (v) => setState(() => selected = v),
+              )),
+              if (selected == 'Otro motivo') ...[
+                const SizedBox(height: 8),
+                TextField(
+                  controller: otherCtrl,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: 'Describe el motivo...',
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: selected == null ? null : () => Navigator.pop(sheetCtx, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.error,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: AppColors.gray200,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    elevation: 0,
+                  ),
+                  child: const Text('Confirmar cancelación'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    final reason = selected == 'Otro motivo' ? otherCtrl.text.trim() : selected!;
+    if (reason.length < 3) return;
+
+    try {
+      await ref.read(tripRepositoryProvider).cancelTrip(trip.id, reason);
+      if (mounted) context.go('/home');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final trip = widget.trip;
@@ -588,7 +673,7 @@ class _TripViewState extends ConsumerState<_TripView> {
           if (!_followDriver)
             Positioned(
               right: 16,
-              bottom: 220,
+              bottom: 360,
               child: GestureDetector(
                 onTap: () {
                   setState(() => _followDriver = true);
@@ -724,6 +809,23 @@ class _TripViewState extends ConsumerState<_TripView> {
                             : Text(actionLabel, style: AppTextStyles.btnLg),
                       ),
                     ),
+
+                  // Cancelar viaje — solo antes de que empiece
+                  if (trip.status == 'accepted' || trip.status == 'driver_arrived') ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 44,
+                      child: OutlinedButton(
+                        onPressed: widget.loading ? null : () => _showCancelSheet(context, trip),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppColors.error),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                        child: Text('Cancelar viaje', style: AppTextStyles.label.copyWith(color: AppColors.error)),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

@@ -573,24 +573,81 @@ class _BottomPanelState extends ConsumerState<_BottomPanel> {
   }
 
   Future<void> _cancel() async {
-    final confirmed = await showDialog<bool>(
+    const reasons = [
+      'El taxi tardó demasiado',
+      'Encontré otro transporte',
+      'Me equivoqué en la dirección',
+      'Emergencia personal',
+      'Otro motivo',
+    ];
+    String? selected;
+    final otherCtrl = TextEditingController();
+
+    final confirmed = await showModalBottomSheet<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('¿Cancelar viaje?'),
-        content: const Text('El conductor ya está en camino. ¿Estás seguro?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('No')),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Sí, cancelar', style: TextStyle(color: AppColors.error)),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (_, setState) => Padding(
+          padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(sheetCtx).viewInsets.bottom + 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(child: Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 16), decoration: BoxDecoration(color: AppColors.gray200, borderRadius: BorderRadius.circular(2)))),
+              Text('¿Por qué cancelas?', style: AppTextStyles.h3),
+              const SizedBox(height: 4),
+              Text('Selecciona el motivo de tu cancelación', style: AppTextStyles.body.copyWith(color: AppColors.gray400)),
+              const SizedBox(height: 16),
+              ...reasons.map((r) => RadioListTile<String>(
+                value: r,
+                groupValue: selected,
+                contentPadding: EdgeInsets.zero,
+                title: Text(r, style: AppTextStyles.body),
+                activeColor: AppColors.error,
+                onChanged: (v) => setState(() => selected = v),
+              )),
+              if (selected == 'Otro motivo') ...[
+                const SizedBox(height: 8),
+                TextField(
+                  controller: otherCtrl,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: 'Describe el motivo...',
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: selected == null ? null : () => Navigator.pop(sheetCtx, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.error,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: AppColors.gray200,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    elevation: 0,
+                  ),
+                  child: const Text('Confirmar cancelación'),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
+
     if (confirmed != true || !mounted) return;
+    final reason = selected == 'Otro motivo' ? otherCtrl.text.trim() : selected!;
+    if (reason.length < 3) return;
+
     setState(() => _cancelling = true);
     try {
-      await ref.read(tripsApiProvider).cancelTrip(widget.trip.id);
+      await ref.read(tripsApiProvider).cancelTrip(widget.trip.id, reason: reason);
       if (mounted) context.go('/home');
     } catch (_) {
       if (mounted) setState(() => _cancelling = false);
