@@ -12,8 +12,10 @@ import { VehicleDocument, VehicleDocumentType } from './entities/vehicle-documen
 import { Driver, DriverType, DriverApprovalStatus } from '../drivers/entities/driver.entity';
 import { Cooperative, CooperativeStatus } from '../cooperatives/entities/cooperative.entity';
 import { CooperativeOwner, OwnerApprovalStatus } from '../cooperatives/entities/cooperative-owner.entity';
+import { CooperativeMember } from '../cooperatives/entities/cooperative-member.entity';
 import { DocumentStatus } from '../drivers/entities/driver-document.entity';
 import { StorageService } from '../storage/storage.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { RegisterVehicleDto } from './dto/register-vehicle.dto';
 import { UploadVehicleDocumentDto } from './dto/upload-vehicle-document.dto';
 import { RejectVehicleDto } from './dto/reject-vehicle.dto';
@@ -33,8 +35,11 @@ export class VehiclesService {
     private cooperativesRepo: Repository<Cooperative>,
     @InjectRepository(CooperativeOwner)
     private cooperativeOwnersRepo: Repository<CooperativeOwner>,
+    @InjectRepository(CooperativeMember)
+    private coopMembersRepo: Repository<CooperativeMember>,
     private storage: StorageService,
     private gateway: EventsGateway,
+    private notifications: NotificationsService,
   ) {}
 
   async registerVehicle(userId: string, dto: RegisterVehicleDto) {
@@ -81,6 +86,11 @@ export class VehiclesService {
         year: dto.year,
       }),
     );
+
+    this.notifyCoopAdmins(cooperative.id, {
+      title: 'Nuevo taxi registrado',
+      body: `${driver.full_name} registró un nuevo vehículo (${dto.plate}) y requiere revisión.`,
+    }).catch(() => {});
 
     return {
       message: `Vehículo registrado bajo ${cooperative.name}. Sube los documentos para revisión.`,
@@ -265,10 +275,20 @@ export class VehiclesService {
   }
 
   async approveVehicle(id: string) {
-    const vehicle = await this.vehiclesRepo.findOne({ where: { id }, relations: ['owner'] });
+    const vehicle = await this.vehiclesRepo.findOne({ where: { id }, relations: ['owner', 'cooperative'] });
     if (!vehicle) throw new NotFoundException('Vehículo no encontrado');
     if (vehicle.approval_status === VehicleApprovalStatus.APPROVED) {
       throw new BadRequestException('El vehículo ya está aprobado');
+    }
+
+    // El conductor debe ser socio aprobado de la cooperativa antes de aprobar el vehículo
+    if (vehicle.cooperative?.id && vehicle.owner?.id) {
+      const membership = await this.cooperativeOwnersRepo.findOne({
+        where: { owner: { id: vehicle.owner.id }, cooperative: { id: vehicle.cooperative.id } },
+      });
+      if (!membership || membership.approval_status !== OwnerApprovalStatus.APPROVED) {
+        throw new ForbiddenException('Debes aprobar al conductor como socio de la cooperativa antes de aprobar su vehículo.');
+      }
     }
 
     await this.vehiclesRepo.update(id, {
@@ -381,5 +401,16 @@ export class VehiclesService {
 
     const url = await this.storage.getPresignedUrl(doc.file_url);
     return { url, expires_in: 3600 };
+  }
+
+  private async notifyCoopAdmins(cooperativeId: string, payload: { title: string; body: string }): Promise<void> {
+    const members = await this.coopMembersRepo.find({
+      where: { cooperative: { id: cooperativeId } },
+      relations: ['user'],
+      select: { user: { id: true } },
+    });
+    const ids = members.map(m => m.user?.id).filter(Boolean) as string[];
+    if (!ids.length) return;
+    await this.notifications.sendToUsers(ids, { ...payload, data: {} });
   }
 }

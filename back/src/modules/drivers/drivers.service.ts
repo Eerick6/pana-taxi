@@ -18,6 +18,7 @@ import { DriverDocument, DriverDocumentType, DocumentStatus, REQUIRED_DOCS } fro
 import { DriverWallet } from '../wallet/entities/driver-wallet.entity';
 import { Cooperative, CooperativeStatus, CooperativeApprovalStatus } from '../cooperatives/entities/cooperative.entity';
 import { CooperativeOwner, OwnerApprovalStatus } from '../cooperatives/entities/cooperative-owner.entity';
+import { CooperativeMember } from '../cooperatives/entities/cooperative-member.entity';
 import { Vehicle, VehicleApprovalStatus } from '../vehicles/entities/vehicle.entity';
 import { VehicleAssignment, AssignmentStatus } from '../vehicles/entities/vehicle-assignment.entity';
 import { StorageService } from '../storage/storage.service';
@@ -52,6 +53,8 @@ export class DriversService {
     private cooperativesRepo: Repository<Cooperative>,
     @InjectRepository(CooperativeOwner)
     private cooperativeOwnersRepo: Repository<CooperativeOwner>,
+    @InjectRepository(CooperativeMember)
+    private coopMembersRepo: Repository<CooperativeMember>,
     @InjectRepository(Vehicle)
     private vehiclesRepo: Repository<Vehicle>,
     @InjectRepository(VehicleAssignment)
@@ -438,6 +441,11 @@ export class DriversService {
       this.cooperativeOwnersRepo.create({ owner: driver, cooperative }),
     );
 
+    this.notifyCoopAdmins(dto.cooperative_id, {
+      title: 'Nueva solicitud de membresía',
+      body: `${driver.full_name} solicita unirse a ${cooperative.name} como socio.`,
+    }).catch(() => {});
+
     return { message: `Solicitud enviada a ${cooperative.name}. Espera su aprobación.` };
   }
 
@@ -681,6 +689,17 @@ export class DriversService {
       lat: fuzz(parseFloat(d.current_lat as any)),
       lng: fuzz(parseFloat(d.current_lng as any)),
     }));
+  }
+
+  async notifyCoopAdmins(cooperativeId: string, payload: { title: string; body: string; data?: Record<string, string> }): Promise<void> {
+    const members = await this.coopMembersRepo.find({
+      where: { cooperative: { id: cooperativeId } },
+      relations: ['user'],
+      select: { user: { id: true } },
+    });
+    const ids = members.map(m => m.user.id).filter(Boolean);
+    if (!ids.length) return;
+    await this.notifications.sendToUsers(ids, { ...payload, data: payload.data ?? {} });
   }
 
   private async notifyPlatformAdmins(driverId: string, reason: string): Promise<void> {

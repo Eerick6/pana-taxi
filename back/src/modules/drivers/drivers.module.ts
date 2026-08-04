@@ -8,6 +8,7 @@ import { User } from '../users/entities/user.entity';
 import { DriverWallet } from '../wallet/entities/driver-wallet.entity';
 import { Cooperative } from '../cooperatives/entities/cooperative.entity';
 import { CooperativeOwner } from '../cooperatives/entities/cooperative-owner.entity';
+import { CooperativeMember } from '../cooperatives/entities/cooperative-member.entity';
 import { Vehicle } from '../vehicles/entities/vehicle.entity';
 import { VehicleAssignment } from '../vehicles/entities/vehicle-assignment.entity';
 import { StorageModule } from '../storage/storage.module';
@@ -18,7 +19,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Driver, DriverDocument, User, DriverWallet, Cooperative, CooperativeOwner, Vehicle, VehicleAssignment]),
+    TypeOrmModule.forFeature([Driver, DriverDocument, User, DriverWallet, Cooperative, CooperativeOwner, CooperativeMember, Vehicle, VehicleAssignment]),
     StorageModule,
     TermsModule,
     FareModule,
