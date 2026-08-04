@@ -14,7 +14,10 @@ class PanaDriverApp extends ConsumerWidget {
 
     // Conectar tap/acción de notificación FCM → navegación
     PushNotificationService.instance.onTripNotificationTap =
-        (tripId, {String? action}) => router.go('/home');
+        (tripId, {String? action}) {
+      PushNotificationService.pendingTripId = tripId;
+      router.go('/home');
+    };
 
     return MaterialApp.router(
       title: AppConfig.appName,

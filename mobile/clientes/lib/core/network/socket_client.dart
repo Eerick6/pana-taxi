@@ -22,7 +22,7 @@ class SocketClient {
   }
 
   Future<void> connect() async {
-    if (isConnected) return;
+    if (_socket != null) return; // socket already created — auto-reconnect handles the rest
     final token = await _storage.getAccessToken();
 
     _socket = io.io(

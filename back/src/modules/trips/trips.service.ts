@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
@@ -40,6 +41,8 @@ function generateOtp(): string {
 
 @Injectable()
 export class TripsService {
+  private readonly logger = new Logger(TripsService.name);
+
   constructor(
     @InjectRepository(Trip)
     private tripsRepo: Repository<Trip>,
@@ -151,30 +154,6 @@ export class TripsService {
         client_rating: clientProfile ? parseFloat(clientProfile.rating as any) : null,
         client_total_trips: clientProfile?.total_trips ?? 0,
       });
-
-      // FCM a conductores online — necesario cuando el app está en background o cerrada
-      // (el socket solo llega si el app está en primer plano)
-      this.driversRepo
-        .find({
-          where: { online_status: DriverOnlineStatus.ONLINE, approval_status: DriverApprovalStatus.APPROVED },
-          relations: ['user'],
-          select: { id: true, user: { id: true, fcm_token: true } as any },
-        })
-        .then(onlineDrivers => {
-          const userIds = onlineDrivers
-            .filter(d => d.user?.fcm_token)
-            .map(d => d.user.id);
-          if (userIds.length === 0) return;
-          const fareLabel = fareMode === 'negotiated'
-            ? `Oferta: $${(trip.client_offer ? parseFloat(trip.client_offer as any) : estimate.total).toFixed(2)}`
-            : `Est. $${estimate.total.toFixed(2)}`;
-          this.notificationsService.sendToUsers(userIds, {
-            title: '¡Nuevo viaje disponible!',
-            body: `${trip.origin_address} → ${trip.destination_address} · ${fareLabel}`,
-            data: { type: 'trip_new', trip_id: trip.id, event: 'trip.new' },
-          });
-        })
-        .catch(() => {});
 
       return trip;
     }
@@ -842,22 +821,32 @@ export class TripsService {
     await this.tripsRepo.update(tripId, { client_offer: newOffer as any });
 
     const clientProfile = await this.clientsRepo.findOne({ where: { user: { id: userId } } });
-    this.gateway.notifyAvailableDrivers('trip.price_updated', {
+    const originLat  = parseFloat(trip.origin_lat as any);
+    const originLng  = parseFloat(trip.origin_lng as any);
+    // current_search_radius_km es null antes de la primera expansión → fallback a 1.0
+    const searchKm   = parseFloat(trip.current_search_radius_km as any) || 1.0;
+
+    const pricePayload = {
       trip_id:             tripId,
       new_price:           newOffer,
       client_offer:        newOffer,
       origin_address:      trip.origin_address,
       destination_address: trip.destination_address,
-      origin_lat:          parseFloat(trip.origin_lat as any),
-      origin_lng:          parseFloat(trip.origin_lng as any),
-      search_radius_km:    parseFloat(trip.current_search_radius_km as any),
+      origin_lat:          originLat,
+      origin_lng:          originLng,
+      search_radius_km:    searchKm,
       suggested_fare:      parseFloat(trip.suggested_fare as any),
       fare_mode:           trip.fare_mode,
       distance_km:         parseFloat(trip.estimated_distance_km as any),
       client_name:         clientProfile?.full_name ?? (trip.client as any)?.full_name ?? null,
       client_rating:       clientProfile ? parseFloat(clientProfile.rating as any) : null,
       client_total_trips:  clientProfile?.total_trips ?? 0,
-    });
+    };
+
+    this.gateway.notifyAvailableDrivers('trip.price_updated', pricePayload);
+    this.gateway.sendPriceUpdateFcm(tripId, newOffer, originLat, originLng, searchKm,
+      trip.origin_address ?? 'Origen', trip.destination_address ?? 'Destino')
+      .catch(err => this.logger.warn(`FCM price update failed: ${err.message}`));
 
     return { message: `Oferta actualizada a $${newOffer}`, client_offer: newOffer };
   }
@@ -896,22 +885,31 @@ export class TripsService {
     await this.tripsRepo.update(tripId, { client_offer: newOffer as any });
 
     const clientProfileDecr = await this.clientsRepo.findOne({ where: { user: { id: userId } } });
-    this.gateway.notifyAvailableDrivers('trip.price_updated', {
+    const originLatDecr  = parseFloat(trip.origin_lat as any);
+    const originLngDecr  = parseFloat(trip.origin_lng as any);
+    const searchKmDecr   = parseFloat(trip.current_search_radius_km as any) || 1.0;
+
+    const decrPayload = {
       trip_id:             tripId,
       new_price:           newOffer,
       client_offer:        newOffer,
       origin_address:      trip.origin_address,
       destination_address: trip.destination_address,
-      origin_lat:          parseFloat(trip.origin_lat as any),
-      origin_lng:          parseFloat(trip.origin_lng as any),
-      search_radius_km:    parseFloat(trip.current_search_radius_km as any),
+      origin_lat:          originLatDecr,
+      origin_lng:          originLngDecr,
+      search_radius_km:    searchKmDecr,
       suggested_fare:      parseFloat(trip.suggested_fare as any),
       fare_mode:           trip.fare_mode,
       distance_km:         parseFloat(trip.estimated_distance_km as any),
       client_name:         clientProfileDecr?.full_name ?? (trip.client as any)?.full_name ?? null,
       client_rating:       clientProfileDecr ? parseFloat(clientProfileDecr.rating as any) : null,
       client_total_trips:  clientProfileDecr?.total_trips ?? 0,
-    });
+    };
+
+    this.gateway.notifyAvailableDrivers('trip.price_updated', decrPayload);
+    this.gateway.sendPriceUpdateFcm(tripId, newOffer, originLatDecr, originLngDecr, searchKmDecr,
+      trip.origin_address ?? 'Origen', trip.destination_address ?? 'Destino')
+      .catch(err => this.logger.warn(`FCM price update failed: ${err.message}`));
 
     return { message: `Oferta actualizada a $${newOffer}`, client_offer: newOffer };
   }
@@ -1001,7 +999,7 @@ export class TripsService {
       throw new BadRequestException('El viaje debe estar aceptado para iniciarse');
     }
 
-    const otpBypass = process.env.NODE_ENV === 'development' && dto.otp_code === '000000';
+    const otpBypass = process.env.NODE_ENV !== 'production' && dto.otp_code === '000000';
     if (trip.otp_code && !otpBypass && trip.otp_code !== dto.otp_code) {
       throw new BadRequestException('Código OTP incorrecto. Pide al pasajero su código.');
     }

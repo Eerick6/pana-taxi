@@ -48,6 +48,7 @@ export class NotificationProcessor extends WorkerHost {
       if (user?.fcm_token) tokens = [user.fcm_token];
     }
 
+    this.logger.log(`[FCM-JOB] userId=${data.userId} tokens found: ${tokens.length} | DB token: ${tokens[0]?.slice(0, 20) ?? 'NULL'}`);
     if (tokens.length === 0) {
       this.logger.debug(`FCM job for user ${data.userId ?? 'unknown'}: no FCM tokens found`);
       return;
@@ -91,6 +92,7 @@ export class NotificationProcessor extends WorkerHost {
       }
     } catch (err) {
       if (err.code === 'messaging/registration-token-not-registered') {
+        this.logger.warn(`[FCM-JOB] token inválido — limpiando: ${tokens.join(',').slice(0, 40)}`);
         await this.usersRepo.createQueryBuilder().update().set({ fcm_token: null })
           .where('fcm_token IN (:...tokens)', { tokens }).execute();
       } else {

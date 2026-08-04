@@ -69,7 +69,9 @@ export class NotificationsService implements OnModuleInit {
   }
 
   async registerToken(userId: string, token: string) {
+    this.logger.log(`[FCM-REG] userId=${userId} token=${token.slice(0, 20)}…`);
     await this.usersRepo.update(userId, { fcm_token: token });
+    this.logger.log(`[FCM-REG] token guardado OK`);
     return { message: 'Token FCM registrado' };
   }
 
@@ -214,7 +216,7 @@ export class NotificationsService implements OnModuleInit {
   }
 
   private async sendToToken(token: string, payload: PushPayload): Promise<void> {
-    const isTripAlert = payload.data?.['type'] === 'trip_new';
+    const isTripAlert = payload.data?.['type'] === 'trip_new' || payload.data?.['type'] === 'price_updated';
     const msg = isTripAlert
       ? {
           data: { ...payload.data ?? {}, title: payload.title, body: payload.body },
@@ -246,7 +248,7 @@ export class NotificationsService implements OnModuleInit {
   }
 
   private async sendToTokens(tokens: string[], payload: PushPayload): Promise<void> {
-    const isTripAlert = payload.data?.['type'] === 'trip_new';
+    const isTripAlert = payload.data?.['type'] === 'trip_new' || payload.data?.['type'] === 'price_updated';
     const msg = isTripAlert
       ? {
           data: { ...payload.data ?? {}, title: payload.title, body: payload.body },

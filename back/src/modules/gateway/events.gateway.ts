@@ -27,7 +27,7 @@ import { Conversation } from '../chat/entities/conversation.entity';
 import { FareService, GeoJsonLineString } from '../fare/fare.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { REDIS_CLIENT } from '../../redis/redis.module';
-import { TRIP_EXPANSION_QUEUE, EXPAND_RADIUS_JOB } from '../../queues/trips/trip-expansion.processor';
+import { TRIP_EXPANSION_QUEUE, EXPAND_RADIUS_JOB, TRIP_TIMEOUT_JOB } from '../../queues/trips/trip-expansion.processor';
 
 export const ROOM = {
   driver: (id: string) => `driver:${id}`,
@@ -43,6 +43,8 @@ export const ROOM = {
 @WebSocketGateway({
   cors: { origin: process.env.ALLOWED_ORIGINS?.split(',') ?? [], credentials: true },
   namespace: '/',
+  pingTimeout: 60000,   // 60s (default 20s) — more forgiving for mobile Doze throttling
+  pingInterval: 25000,
 })
 export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -399,18 +401,30 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       this.logger.warn(`FCM trip.new failed: ${err.message}`),
     );
 
-    // Schedule radius expansion job via Bull (cross-pod safe, replaces in-memory scheduler)
+    // Schedule radius expansion + timeout jobs via Bull
     if (payload.trip_id && this.tripExpansionQueue) {
       this.fareService.getConfig().then(config => {
-        const delayMs = (config.radius_expansion_interval_sec ?? 30) * 1000;
+        const expansionDelayMs = (config.radius_expansion_interval_sec ?? 30) * 1000;
+        const timeoutDelayMs = (config.trip_timeout_sec ?? 300) * 1000;
+
         this.tripExpansionQueue!
           .add(
             EXPAND_RADIUS_JOB,
             { tripId: payload.trip_id },
-            { delay: delayMs, attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
+            { delay: expansionDelayMs, attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
           )
           .catch(err =>
             this.logger.error(`Failed to enqueue radius expansion for trip ${payload.trip_id}: ${err.message}`),
+          );
+
+        this.tripExpansionQueue!
+          .add(
+            TRIP_TIMEOUT_JOB,
+            { tripId: payload.trip_id },
+            { delay: timeoutDelayMs, attempts: 1 },
+          )
+          .catch(err =>
+            this.logger.error(`Failed to enqueue trip timeout for ${payload.trip_id}: ${err.message}`),
           );
       }).catch(() => {});
     }
@@ -463,6 +477,55 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         suggested_fare: String(payload.suggested_fare ?? ''),
         client_offer:   String(payload.client_offer ?? ''),
         distance_km:    String(payload.distance_km ?? ''),
+      },
+    });
+  }
+
+  async sendPriceUpdateFcm(
+    tripId: string,
+    newPrice: number,
+    originLat: number,
+    originLng: number,
+    radiusKm: number,
+    originAddress: string,
+    destAddress: string,
+  ): Promise<void> {
+    const onlineDrivers = await this.driversRepo.find({
+      where: { online_status: DriverOnlineStatus.ONLINE },
+      relations: ['user'],
+      select: { id: true, current_lat: true, current_lng: true, user: { id: true } },
+    });
+
+    const userIds = onlineDrivers
+      .filter(d => {
+        if (!d.current_lat || !d.current_lng) return false;
+        const dist = this.fareService.haversineDistance(
+          originLat, originLng,
+          parseFloat(d.current_lat as any),
+          parseFloat(d.current_lng as any),
+        );
+        const inRadius   = dist <= radiusKm;
+        const hasSocket  = this.userSockets.has(d.user?.id);
+        this.logger.debug(`[FCM-price] driver=${d.user?.id} dist=${dist.toFixed(2)}km inRadius=${inRadius} hasSocket=${hasSocket}`);
+        return inRadius && !hasSocket;
+      })
+      .map(d => d.user.id);
+
+    this.logger.log(`[FCM-price] trip=${tripId} online=${onlineDrivers.length} needFcm=${userIds.length}`);
+    if (userIds.length === 0) return;
+
+    await this.notificationsService.sendToUsers(userIds, {
+      title: `Precio actualizado — $${newPrice.toFixed(2)}`,
+      body:  `${originAddress} → ${destAddress}`,
+      data: {
+        type:                'price_updated',
+        trip_id:             tripId,
+        new_price:           String(newPrice),
+        origin_address:      originAddress,
+        destination_address: destAddress,
+        origin_lat:          String(originLat),
+        origin_lng:          String(originLng),
+        search_radius_km:    String(radiusKm),
       },
     });
   }

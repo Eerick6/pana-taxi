@@ -85,6 +85,10 @@ export class FareConfig {
   @Column({ type: 'smallint', default: 5 })
   location_interval_trip_sec: number;
 
+  // Tiempo máximo de búsqueda de conductor (segundos) antes de cancelar automáticamente
+  @Column({ type: 'smallint', default: 300 })
+  trip_timeout_sec: number;
+
   @CreateDateColumn()
   created_at: Date;
 

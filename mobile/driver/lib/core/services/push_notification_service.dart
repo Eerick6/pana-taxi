@@ -51,9 +51,10 @@ Future<void> firebaseBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   print('[FCM-BG] firebase initialized');
 
-  if (message.data['type'] != 'trip_new') return;
+  final msgType = message.data['type'];
+  if (msgType != 'trip_new' && msgType != 'price_updated') return;
 
-  final title = message.data['title'] ?? 'Nuevo viaje disponible';
+  final title = message.data['title'] ?? (msgType == 'price_updated' ? 'Precio actualizado' : 'Nuevo viaje disponible');
   final body  = message.data['body']  ?? '';
 
   final plugin = FlutterLocalNotificationsPlugin();
@@ -93,6 +94,9 @@ class PushNotificationService {
   PushNotificationService._();
   static final PushNotificationService instance = PushNotificationService._();
 
+  // Trip pendiente de mostrar cuando la app abre desde notificación
+  static String? pendingTripId;
+
   final _messaging = FirebaseMessaging.instance;
   Dio? _dio;
 
@@ -129,6 +133,7 @@ class PushNotificationService {
       sound: true,
     );
 
+    debugPrint('[FCM] permission status: ${settings.authorizationStatus}');
     if (settings.authorizationStatus == AuthorizationStatus.authorized ||
         settings.authorizationStatus == AuthorizationStatus.provisional) {
       await _registerToken();
@@ -148,37 +153,28 @@ class PushNotificationService {
   }
 
   void _handleForegroundMessage(RemoteMessage message) {
-    final isTripAlert = message.data['type'] == 'trip_new';
-    final title = isTripAlert ? message.data['title'] : message.notification?.title;
-    final body  = isTripAlert ? message.data['body']  : message.notification?.body;
+    final type = message.data['type'];
+
+    // trip_new / price_updated: el socket muestra el overlay en foreground — no tocar
+    if (type == 'trip_new' || type == 'price_updated') return;
+
+    final title = message.notification?.title;
+    final body  = message.notification?.body;
     if (title == null) return;
 
-    // Si el overlay ya está visible, el socket ya maneja el sonido — no duplicar
-    if (isTripAlert && TripAlertManager.isShowing) return;
-
-    final fareMode    = message.data['fare_mode']    ?? 'meter';
-    final clientOffer = message.data['client_offer'] ?? '';
-    final tripId      = message.data['trip_id']      ?? '';
-
     _localNotif.show(
-      _kTripAlertNotifId,
+      0,
       title,
       body,
-      NotificationDetails(
+      const NotificationDetails(
         android: AndroidNotificationDetails(
-          _kTripChannel.id,
-          _kTripChannel.name,
-          channelDescription: _kTripChannel.description,
-          importance: Importance.max,
+          'general',
+          'General',
+          importance: Importance.high,
           priority: Priority.high,
-          sound: const RawResourceAndroidNotificationSound('trip_alert'),
-          playSound: true,
-          enableVibration: true,
           icon: '@mipmap/ic_launcher',
-          actions: _tripActions(fareMode, clientOffer),
         ),
       ),
-      payload: tripId,
     );
   }
 
@@ -192,6 +188,7 @@ class PushNotificationService {
   Future<void> _registerToken() async {
     try {
       final token = await _messaging.getToken();
+      debugPrint('[FCM] getToken result: ${token?.substring(0, 20) ?? 'NULL'}');
       if (token != null) await _sendTokenToServer(token);
     } catch (e) {
       debugPrint('[FCM] Error getting token: $e');

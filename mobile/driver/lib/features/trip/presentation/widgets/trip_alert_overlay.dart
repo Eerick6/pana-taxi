@@ -71,6 +71,36 @@ class TripAlertData {
     }
   }
 
+  // Mapea desde la respuesta de GET /trips/:id (Trip entity con relaciones)
+  static TripAlertData? fromTripDetail(String tripId, Map<String, dynamic> t) {
+    try {
+      final lat    = _d(t['origin_lat']);
+      final lng    = _d(t['origin_lng']);
+      final radius = _d(t['current_search_radius_km']);
+      if (lat == null || lng == null || radius == null) return null;
+      final client = t['client'] as Map<String, dynamic>?;
+      return TripAlertData(
+        tripId:             tripId,
+        originAddress:      t['origin_address']      as String? ?? '—',
+        destinationAddress: t['destination_address'] as String? ?? '—',
+        originLat:          lat,
+        originLng:          lng,
+        searchRadiusKm:     radius,
+        fareMode:           t['fare_mode']            as String? ?? 'meter',
+        suggestedFare:      _d(t['suggested_fare']),
+        clientOffer:        _d(t['client_offer']),
+        distanceKm:         _d(t['estimated_distance_km']),
+        clientName:         client?['full_name']      as String?,
+        clientRating:       _d(client?['rating']),
+        clientTotalTrips:   client?['total_trips'] is int
+            ? client!['total_trips'] as int
+            : int.tryParse(client?['total_trips']?.toString() ?? ''),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   static double? _d(dynamic v) {
     if (v == null) return null;
     if (v is num) return v.toDouble();
@@ -95,6 +125,7 @@ class TripAlertManager {
     required TripAlertData alert,
     required Dio dio,
     required void Function(String tripId) onAccepted,
+    bool playSound = true,
   }) async {
     dismiss();
 
@@ -108,31 +139,34 @@ class TripAlertManager {
       ),
     );
 
-    _player = AudioPlayer();
-    try {
-      await _player!.setReleaseMode(ReleaseMode.loop);
-      await _player!.play(
-        AssetSource('sounds/trip_alert.wav'),
-        ctx: AudioContext(
-          android: const AudioContextAndroid(
-            usageType: AndroidUsageType.notificationRingtone,
-            contentType: AndroidContentType.sonification,
-            audioFocus: AndroidAudioFocus.gainTransient,
-            stayAwake: true,
-          ),
-          iOS: AudioContextIOS(
-            category: AVAudioSessionCategory.playback,
-          ),
-        ),
-      );
-      final p = _player!;
-      Future.delayed(const Duration(seconds: 8), p.stop);
-    } catch (e) {
-      debugPrint('[TripAlert] audio error: $e');
-    }
-
+    // Insertar el overlay antes del await para no cruzar un gap async con el context
     Overlay.of(context).insert(_entry!);
     _timer = Timer(const Duration(seconds: 25), dismiss);
+
+    if (playSound) {
+      _player = AudioPlayer();
+      try {
+        await _player!.setReleaseMode(ReleaseMode.loop);
+        await _player!.play(
+          AssetSource('sounds/trip_alert.wav'),
+          ctx: AudioContext(
+            android: const AudioContextAndroid(
+              usageType: AndroidUsageType.alarm,
+              contentType: AndroidContentType.music,
+              audioFocus: AndroidAudioFocus.gain,
+              stayAwake: true,
+            ),
+            iOS: AudioContextIOS(
+              category: AVAudioSessionCategory.playback,
+            ),
+          ),
+        );
+        final p = _player!;
+        Future.delayed(const Duration(seconds: 8), p.stop);
+      } catch (e) {
+        debugPrint('[TripAlert] audio error: $e');
+      }
+    }
   }
 
   static void notifyOfferIgnored({required bool canReOffer}) {

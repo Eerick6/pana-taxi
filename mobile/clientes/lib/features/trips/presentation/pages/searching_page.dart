@@ -98,6 +98,8 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
   bool _socketActive = false;
 
   // Estado
+  bool _noDrivers = false;
+  bool _retrying  = false;
   late ActiveTrip    _trip;
   List<NearbyDriver> _drivers = [];
   List<DriverOffer>           _offers        = [];
@@ -162,9 +164,14 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     });
 
     // Viaje cancelado desde el backend (expirado, etc.)
-    socket.on('trip.cancelled', (_) {
+    socket.on('trip.cancelled', (data) {
       if (!_socketActive || !mounted) return;
-      context.go('/home');
+      final reason = (data is Map ? data['reason'] : null) as String?;
+      if (reason == 'no_drivers') {
+        setState(() => _noDrivers = true);
+      } else {
+        context.go('/home');
+      }
     });
   }
 
@@ -175,6 +182,41 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     _pulseAnim.removeListener(_onPulseTick);
     _pulseCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _retryTrip() async {
+    setState(() => _retrying = true);
+    try {
+      final api = ref.read(tripsApiProvider);
+      final newTrip = await api.createTrip(
+        originAddress:      _trip.originAddress,
+        originLat:          _trip.originLat,
+        originLng:          _trip.originLng,
+        destinationAddress: _trip.destinationAddress,
+        destinationLat:     _trip.destinationLat!,
+        destinationLng:     _trip.destinationLng!,
+        fareMode:           _trip.isNegotiated ? 'negotiated' : 'meter',
+        clientOffer:        _trip.clientOffer,
+      );
+      if (!mounted) return;
+      setState(() {
+        _trip = newTrip;
+        _tripCreatedAt = newTrip.createdAt;
+        _noDrivers = false;
+        _retrying  = false;
+        _offers    = [];
+        _offerArrivals.clear();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _retrying = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo crear el viaje. Intenta de nuevo.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   // ── Mapa ──────────────────────────────────────────────────────────────────
@@ -420,11 +462,15 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
                 )],
               ),
               child: Row(children: [
-                const SizedBox(
-                  width: 18, height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.2, color: AppColors.primary),
-                ),
+                if (_noDrivers)
+                  const Icon(Icons.search_off_rounded,
+                      size: 20, color: AppColors.error)
+                else
+                  const SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.2, color: AppColors.primary),
+                  ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -432,14 +478,18 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        _isNegotiated ? 'Esperando ofertas…' : 'Buscando conductor…',
-                        style: AppTextStyles.label,
+                        _noDrivers
+                            ? 'No encontramos conductor'
+                            : (_isNegotiated ? 'Esperando ofertas…' : 'Buscando conductor…'),
+                        style: AppTextStyles.label.copyWith(
+                          color: _noDrivers ? AppColors.error : null,
+                        ),
                       ),
-                      _ElapsedLabel(createdAt: _tripCreatedAt),
+                      if (!_noDrivers) _ElapsedLabel(createdAt: _tripCreatedAt),
                     ],
                   ),
                 ),
-                if (_drivers.isNotEmpty)
+                if (!_noDrivers && _drivers.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                     decoration: BoxDecoration(
@@ -459,21 +509,100 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
           // ── Panel inferior ────────────────────────────────────────────────
           Positioned(
             left: 0, right: 0, bottom: 0,
-            child: _isNegotiated
-                ? _NegotiatedPanel(
-                    trip:          trip,
-                    offers:        _offers,
-                    offerArrivals: _offerArrivals,
-                    bottomPad:     bottomPad,
-                    onSelect:      _selectOffer,
-                    onExpire:      _removeOffer,
+            child: _noDrivers
+                ? _NoDriversPanel(
+                    bottomPad: bottomPad,
+                    retrying:  _retrying,
+                    onRetry:   _retryTrip,
+                    onCancel:  () => context.go('/home'),
                   )
-                : _MeterPanel(trip: trip, bottomPad: bottomPad),
+                : _isNegotiated
+                    ? _NegotiatedPanel(
+                        trip:          trip,
+                        offers:        _offers,
+                        offerArrivals: _offerArrivals,
+                        bottomPad:     bottomPad,
+                        onSelect:      _selectOffer,
+                        onExpire:      _removeOffer,
+                      )
+                    : _MeterPanel(trip: trip, bottomPad: bottomPad),
           ),
         ],
       ),
     );
   }
+}
+
+// ── Panel sin conductores disponibles ────────────────────────────────────────
+
+class _NoDriversPanel extends StatelessWidget {
+  const _NoDriversPanel({
+    required this.bottomPad,
+    required this.retrying,
+    required this.onRetry,
+    required this.onCancel,
+  });
+  final double       bottomPad;
+  final bool         retrying;
+  final VoidCallback onRetry;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) => _PanelShell(
+    bottomPad: bottomPad,
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.directions_car_filled_rounded,
+            size: 48, color: AppColors.error),
+        const SizedBox(height: 12),
+        Text(
+          'Sin conductores disponibles',
+          style: AppTextStyles.label.copyWith(fontSize: 17),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'No encontramos conductor en tu zona. Puedes buscar de nuevo o volver al inicio.',
+          style: AppTextStyles.caption.copyWith(color: Colors.black54),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: retrying ? null : onRetry,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            child: retrying
+                ? const SizedBox(
+                    width: 20, height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.2, color: Colors.white),
+                  )
+                : const Text('Buscar de nuevo',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            onPressed: onCancel,
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            child: const Text('Volver al inicio',
+                style: TextStyle(fontSize: 15)),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 // ── Panel modo taxímetro (espera automática) ──────────────────────────────────

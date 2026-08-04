@@ -3,12 +3,13 @@ import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Job } from 'bullmq';
-import { Trip, TripStatus } from '../../modules/trips/entities/trip.entity';
+import { Trip, TripStatus, CancelledBy } from '../../modules/trips/entities/trip.entity';
 import { FareService } from '../../modules/fare/fare.service';
 import { EventsGateway } from '../../modules/gateway/events.gateway';
 
 export const TRIP_EXPANSION_QUEUE = 'trip-expansion';
 export const EXPAND_RADIUS_JOB = 'expand-radius';
+export const TRIP_TIMEOUT_JOB = 'trip-timeout';
 
 export interface TripExpansionJobData {
   tripId: string;
@@ -28,6 +29,11 @@ export class TripExpansionProcessor extends WorkerHost {
   }
 
   async process(job: Job<TripExpansionJobData>): Promise<void> {
+    if (job.name === TRIP_TIMEOUT_JOB) {
+      await this._handleTimeout(job.data.tripId);
+      return;
+    }
+
     if (job.name !== EXPAND_RADIUS_JOB) return;
 
     const { tripId } = job.data;
@@ -51,5 +57,35 @@ export class TripExpansionProcessor extends WorkerHost {
 
     this.gateway.notifyTripUpdate(tripId, 'trip.radius_expanded', { trip_id: tripId, search_radius_km: newRadius });
     this.logger.log(`Trip ${tripId}: radius ${currentRadius} → ${newRadius} km`);
+  }
+
+  private async _handleTimeout(tripId: string): Promise<void> {
+    const trip = await this.tripsRepo.findOne({
+      where: { id: tripId },
+      relations: ['client'],
+    });
+    if (!trip || trip.status !== TripStatus.REQUESTED) return;
+
+    await this.tripsRepo.update(tripId, {
+      status: TripStatus.CANCELLED,
+      cancelled_by: CancelledBy.PLATFORM,
+      cancellation_reason: 'no_drivers',
+      cancelled_at: new Date(),
+    });
+
+    const payload = {
+      trip_id: tripId,
+      status: TripStatus.CANCELLED,
+      cancelled_by: CancelledBy.PLATFORM,
+      reason: 'no_drivers',
+    };
+
+    // Client socket is in ROOM.user(id) during search, not ROOM.trip(id)
+    if (trip.client?.id) {
+      this.gateway.notifyUser(trip.client.id, 'trip.cancelled', payload);
+    }
+    this.gateway.notifyTripUpdate(tripId, 'trip.cancelled', payload);
+
+    this.logger.log(`Trip ${tripId} auto-cancelled: timeout reached, no drivers accepted`);
   }
 }

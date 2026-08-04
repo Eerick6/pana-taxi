@@ -7,6 +7,7 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/network/socket_client.dart';
+import '../../../../core/services/push_notification_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../profile/data/providers/profile_provider.dart';
 import '../../../trip/presentation/widgets/trip_alert_overlay.dart';
@@ -35,6 +36,31 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     WidgetsBinding.instance.addObserver(this);
     _requestLocationAndTrack();
     _initSocketAndListen();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkPendingTrip());
+  }
+
+  Future<void> _checkPendingTrip() async {
+    final tripId = PushNotificationService.pendingTripId;
+    if (tripId == null || tripId.isEmpty) return;
+    PushNotificationService.pendingTripId = null;
+    if (!mounted) return;
+    try {
+      final dio = ref.read(dioProvider);
+      final res = await dio.get('/trips/$tripId');
+      final data = Map<String, dynamic>.from(res.data as Map);
+      if (data['status'] != 'requested') return;
+      final alert = TripAlertData.fromTripDetail(tripId, data);
+      if (alert == null || !mounted || TripAlertManager.isShowing) return;
+      TripAlertManager.show(
+        context: context,
+        alert: alert,
+        dio: dio,
+        onAccepted: (_) => context.push('/trip/$tripId'),
+        playSound: false,
+      );
+    } catch (e) {
+      debugPrint('[HomePage] pending trip fetch error: $e');
+    }
   }
 
   Future<void> _initSocketAndListen() async {
@@ -173,6 +199,10 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     if (state == AppLifecycleState.resumed) {
       ref.read(driverProfileProvider.notifier).refresh();
       ref.read(myVehiclesGuardProvider.notifier).refresh();
+      // User may have tapped a trip notification while the app was in background.
+      // router.go('/home') from the tap handler may not rebuild this page if the
+      // route is already /home, so we also check here on every resume.
+      _checkPendingTrip();
     }
   }
 

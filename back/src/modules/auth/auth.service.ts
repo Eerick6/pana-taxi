@@ -76,7 +76,7 @@ export class AuthService {
     const user = await this.usersRepository.findOne({ where: { phone: dto.phone } });
     if (!user) throw new UnauthorizedException('Teléfono no registrado');
 
-    if (process.env.NODE_ENV === 'development' && dto.code === '000000') {
+    if (this.isDev && dto.code === '000000') {
       await this.usersRepository.update(user.id, { otp_code: null, otp_expires_at: null });
       return this.generateTokens(user);
     }
@@ -112,7 +112,7 @@ export class AuthService {
     const user = await this.usersRepository.findOne({ where: { email: dto.email } });
     if (!user) throw new UnauthorizedException('Correo no registrado');
 
-    if (process.env.NODE_ENV === 'development' && dto.code === '000000') {
+    if (this.isDev && dto.code === '000000') {
       await this.usersRepository.update(user.id, { otp_code: null, otp_expires_at: null });
       return this.generateTokens(user);
     }
@@ -362,7 +362,7 @@ export class AuthService {
   }
 
   private validateOtp(user: User, code: string) {
-    if (process.env.NODE_ENV === 'development' && code === '000000') return;
+    if (this.isDev && code === '000000') return;
     if (!user.otp_code || user.otp_code !== code) throw new UnauthorizedException('Código inválido');
     if (new Date() > user.otp_expires_at) throw new UnauthorizedException('Código expirado');
   }

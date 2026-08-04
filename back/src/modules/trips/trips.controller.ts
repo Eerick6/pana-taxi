@@ -223,7 +223,8 @@ export class TripsController {
 
     if (user.role === UserRole.CLIENT && (trip as any).client?.id !== user.id)
       throw new ForbiddenException('No eres el cliente de este viaje');
-    if (user.role === UserRole.DRIVER && (trip as any).driver?.user?.id !== user.id)
+    // Si el viaje aún no tiene conductor asignado (status requested), cualquier driver puede verlo
+    if (user.role === UserRole.DRIVER && (trip as any).driver != null && (trip as any).driver?.user?.id !== user.id)
       throw new ForbiddenException('No eres el conductor de este viaje');
 
     if (user.role !== UserRole.CLIENT) {
