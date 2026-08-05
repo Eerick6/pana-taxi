@@ -53,7 +53,7 @@ export class FareConfig {
   slow_speed_threshold_kmh: number;
 
   // Radio inicial para mostrar viajes al conductor (km)
-  @Column({ type: 'decimal', precision: 6, scale: 2, default: '1.00' })
+  @Column({ type: 'decimal', precision: 6, scale: 2, default: '0.50' })
   search_radius_km: number;
 
   // Radio máximo al que puede crecer (km)
@@ -61,11 +61,11 @@ export class FareConfig {
   radius_max_km: number;
 
   // Cuántos km crece el radio en cada expansión
-  @Column({ type: 'decimal', precision: 5, scale: 2, default: '1.00' })
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: '0.50' })
   radius_expansion_km: number;
 
   // Cada cuántos segundos expande el radio si no hay conductor
-  @Column({ type: 'smallint', default: 30 })
+  @Column({ type: 'smallint', default: 120 })
   radius_expansion_interval_sec: number;
 
   // Descuento máximo que puede ofrecer el cliente en modo negociación (%)

@@ -14,7 +14,10 @@ export async function getFareConfig(): Promise<FareConfig> {
 }
 
 export async function updateFareConfig(body: Partial<FareConfig>): Promise<FareConfig> {
-  const { data } = await api.patch('/fares/config', body);
+  // Strip entity metadata fields that the DTO doesn't accept
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { id, cooperative_id, created_at, updated_at, ...payload } = body as Record<string, unknown>;
+  const { data } = await api.patch('/fares/config', payload);
   return data;
 }
 

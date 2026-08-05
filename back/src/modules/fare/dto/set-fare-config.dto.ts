@@ -96,6 +96,13 @@ export class SetFareConfigDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @Min(30)
+  @Max(1800)
+  trip_timeout_sec?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
   @Min(50)
   @Max(2000)
   deviation_threshold_m?: number;

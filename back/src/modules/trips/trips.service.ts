@@ -857,7 +857,7 @@ export class TripsService {
     const originLat  = parseFloat(trip.origin_lat as any);
     const originLng  = parseFloat(trip.origin_lng as any);
     // current_search_radius_km es null antes de la primera expansión → fallback a 1.0
-    const searchKm   = parseFloat(trip.current_search_radius_km as any) || 1.0;
+    const searchKm   = parseFloat(trip.current_search_radius_km as any) || 0.5;
 
     const pricePayload = {
       trip_id:             tripId,
@@ -917,7 +917,7 @@ export class TripsService {
     const clientProfile = await this.clientsRepo.findOne({ where: { user: { id: userId } } });
     const originLat     = parseFloat(trip.origin_lat as any);
     const originLng     = parseFloat(trip.origin_lng as any);
-    const searchKm      = parseFloat(trip.current_search_radius_km as any) || 1.0;
+    const searchKm      = parseFloat(trip.current_search_radius_km as any) || 0.5;
 
     const payload = {
       trip_id:             tripId,
@@ -980,7 +980,7 @@ export class TripsService {
     const clientProfileDecr = await this.clientsRepo.findOne({ where: { user: { id: userId } } });
     const originLatDecr  = parseFloat(trip.origin_lat as any);
     const originLngDecr  = parseFloat(trip.origin_lng as any);
-    const searchKmDecr   = parseFloat(trip.current_search_radius_km as any) || 1.0;
+    const searchKmDecr   = parseFloat(trip.current_search_radius_km as any) || 0.5;
 
     const decrPayload = {
       trip_id:             tripId,

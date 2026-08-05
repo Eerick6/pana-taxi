@@ -254,7 +254,7 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     final lng    = _trip.originLng;
     final dLat   = _trip.destinationLat;
     final dLng   = _trip.destinationLng;
-    final radius = (_trip.searchRadiusKm ?? 3.0).clamp(1.0, 20.0);
+    final radius = (_trip.searchRadiusKm ?? 0.5).clamp(0.5, 20.0);
 
     // 1. Ruta (capa más baja)
     final geom = _trip.routeGeometry;
@@ -265,11 +265,18 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
           {'type': 'Feature', 'geometry': geom, 'properties': <String, dynamic>{}}
         ],
       });
+      await c.addLineLayer('route-src', 'route-shadow',
+          const LineLayerProperties(
+            lineColor: '#000000', lineWidth: 18.0, lineOpacity: 0.12, lineBlur: 5.0,
+            lineCap: 'round', lineJoin: 'round'));
+      await c.addLineLayer('route-src', 'route-casing',
+          const LineLayerProperties(
+            lineColor: '#1A52C4', lineWidth: 11.0,
+            lineCap: 'round', lineJoin: 'round'));
       await c.addLineLayer('route-src', 'route-line',
           const LineLayerProperties(
-            lineColor: '#4285F4', lineWidth: 5.0,
-            lineCap: 'round', lineJoin: 'round',
-          ));
+            lineColor: '#5689FB', lineWidth: 7.0,
+            lineCap: 'round', lineJoin: 'round'));
     }
 
     // 2. Círculo de radio de búsqueda (pulsante)
@@ -352,7 +359,7 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     if (latest.searchRadiusKm != prevRadius &&
         latest.originLat != null && latest.originLng != null &&
         _mapReady) {
-      final r = (latest.searchRadiusKm ?? 1.0).clamp(1.0, 20.0);
+      final r = (latest.searchRadiusKm ?? 0.5).clamp(0.5, 20.0);
       _ctrl?.setGeoJsonSource('circle-src', _circleGeoJson(latest.originLat!, latest.originLng!, r));
     }
   }
@@ -365,7 +372,7 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     final lng = _trip.originLng;
     if (lat == null || lng == null) return;
 
-    final radius  = (_trip.searchRadiusKm ?? 3.0).clamp(1.0, 20.0);
+    final radius  = (_trip.searchRadiusKm ?? 0.5).clamp(0.5, 20.0);
     final drivers = await ref.read(tripsApiProvider).getNearbyDrivers(lat, lng, radius);
     if (!mounted) return;
     setState(() => _drivers = drivers);
