@@ -92,7 +92,7 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
                 barrierDismissible: false,
                 builder: (ctx) => AlertDialog(
                   title: const Text('Viaje cancelado'),
-                  content: Text('El cliente canceló el viaje:\n$reason'),
+                  content: Text(reason),
                   actions: [
                     ElevatedButton(
                       onPressed: () => Navigator.pop(ctx),

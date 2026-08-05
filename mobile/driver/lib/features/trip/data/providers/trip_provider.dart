@@ -27,10 +27,15 @@ class ActiveTripNotifier extends AsyncNotifier<TripModel?> {
 
     void onCancelled(dynamic data) {
       if (data is Map) {
-        final reason = data['reason'] as String?;
+        final reason      = data['reason']       as String?;
         final cancelledBy = data['cancelled_by'] as String?;
-        if (reason != null && cancelledBy == 'client') {
-          ref.read(tripCancelReasonProvider.notifier).state = reason;
+        // Mostrar razón cuando cancela el cliente, la cooperativa o la plataforma
+        if (cancelledBy != 'driver') {
+          final who = cancelledBy == 'client'
+              ? 'El cliente canceló el viaje'
+              : 'El viaje fue cancelado';
+          final msg = (reason != null && reason.isNotEmpty) ? '$who:\n$reason' : who;
+          ref.read(tripCancelReasonProvider.notifier).state = msg;
         }
       }
       state = const AsyncData(null);

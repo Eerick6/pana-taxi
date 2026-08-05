@@ -1226,12 +1226,24 @@ export class TripsService {
       }
     });
 
-    this.gateway.notifyTripUpdate(tripId, 'trip.cancelled', {
-      trip_id: tripId,
-      status: TripStatus.CANCELLED,
+    const cancelPayload = {
+      trip_id:      tripId,
+      status:       TripStatus.CANCELLED,
       cancelled_by: cancelledBy,
-      reason: dto.reason,
-    });
+      reason:       dto.reason ?? null,
+    };
+
+    // ROOM.trip + panel
+    this.gateway.notifyTripUpdate(tripId, 'trip.cancelled', cancelPayload);
+
+    // Cliente — puede estar en ROOM.user si el viaje aún está en búsqueda
+    if (trip.client?.id) {
+      this.gateway.notifyUser(trip.client.id, 'trip.cancelled', cancelPayload);
+    }
+    // Taxista — siempre en ROOM.driver, no en ROOM.trip durante búsqueda
+    if (trip.driver?.id) {
+      this.gateway.notifyDriver(trip.driver.id, 'trip.cancelled', cancelPayload);
+    }
 
     return { message: 'Viaje cancelado' };
   }

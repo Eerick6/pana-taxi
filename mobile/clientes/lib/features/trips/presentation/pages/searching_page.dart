@@ -165,15 +165,40 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
       context.go('/trip/${tripId ?? _trip.id}');
     });
 
-    // Viaje cancelado desde el backend (expirado, etc.)
-    socket.on('trip.cancelled', (data) {
+    // Viaje cancelado desde el backend (expirado, taxista, panel, etc.)
+    socket.on('trip.cancelled', (data) async {
       if (!_socketActive || !mounted) return;
-      final reason = (data is Map ? data['reason'] : null) as String?;
+      final map         = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      final reason      = map['reason']       as String?;
+      final cancelledBy = map['cancelled_by'] as String?;
+
       if (reason == 'no_drivers') {
         setState(() => _noDrivers = true);
-      } else {
-        context.go('/home');
+        return;
       }
+
+      // Mostrar razón si canceló el taxista, la cooperativa o la plataforma
+      if (cancelledBy != 'client' && (reason != null && reason.isNotEmpty)) {
+        final who = cancelledBy == 'driver'
+            ? 'El taxista canceló el viaje'
+            : 'El viaje fue cancelado';
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Viaje cancelado'),
+            content: Text('$who:\n$reason'),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Entendido'),
+              ),
+            ],
+          ),
+        );
+      }
+
+      if (mounted) context.go('/home');
     });
 
     // Radio de búsqueda expandido por el backend

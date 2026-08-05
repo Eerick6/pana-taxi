@@ -209,16 +209,20 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
       String? reason;
       String? cancelledBy;
       if (data is Map) {
-        reason = data['reason'] as String?;
+        reason      = data['reason']       as String?;
         cancelledBy = data['cancelled_by'] as String?;
       }
-      if (reason != null && cancelledBy == 'driver' && mounted) {
+      // Mostrar razón si cancela el taxista, cooperativa o plataforma
+      if (cancelledBy != 'client' && reason != null && reason.isNotEmpty && mounted) {
+        final who = cancelledBy == 'driver'
+            ? 'El taxista canceló el viaje'
+            : 'El viaje fue cancelado';
         await showDialog<void>(
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
             title: const Text('Viaje cancelado'),
-            content: Text('El conductor canceló el viaje:\n$reason'),
+            content: Text('$who:\n$reason'),
             actions: [
               ElevatedButton(
                 onPressed: () => Navigator.pop(ctx),
