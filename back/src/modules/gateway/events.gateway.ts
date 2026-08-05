@@ -537,6 +537,73 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     this.server.to(ROOM.platform).emit(event, { trip_id: tripId, ...payload });
   }
 
+  // Re-notifica a conductores cuando el radio crece. Solo envía FCM al anillo nuevo
+  // (previousRadiusKm < dist <= newRadiusKm) y re-emite trip.new por socket para
+  // conductores que se pusieron online después de que el viaje fue creado.
+  async notifyDriversRadiusExpanded(
+    payload: Record<string, unknown> & { trip_id?: string },
+    cooperativeId?: string,
+    previousRadiusKm?: number,
+  ): Promise<void> {
+    const originLat  = payload.origin_lat  as number | null;
+    const originLng  = payload.origin_lng  as number | null;
+    const newRadius  = payload.search_radius_km as number | null;
+    if (!originLat || !originLng || !newRadius) return;
+
+    // Socket: reenviar a conductores disponibles (cubre los que se conectaron después)
+    if (cooperativeId) {
+      this.server.to(ROOM.coop(cooperativeId)).emit('trip.new', payload);
+    } else {
+      this.server.to(ROOM.available).emit('trip.new', payload);
+    }
+
+    // FCM: solo al anillo nuevo (entre radio anterior y radio nuevo)
+    const minR = previousRadiusKm ?? 0;
+    const onlineDrivers = await this.driversRepo.find({
+      where: { online_status: DriverOnlineStatus.ONLINE },
+      relations: ['user'],
+      select: { id: true, current_lat: true, current_lng: true, user: { id: true } },
+    });
+
+    const userIds = onlineDrivers
+      .filter(d => {
+        if (!d.current_lat || !d.current_lng) return false;
+        const dist = this.fareService.haversineDistance(
+          originLat, originLng,
+          parseFloat(d.current_lat as any),
+          parseFloat(d.current_lng as any),
+        );
+        return dist > minR && dist <= newRadius;
+      })
+      .map(d => d.user?.id)
+      .filter(Boolean) as string[];
+
+    if (userIds.length === 0) return;
+
+    const origin  = payload.origin_address      as string ?? 'Origen';
+    const dest    = payload.destination_address as string ?? 'Destino';
+    const fare    = payload.client_offer ?? payload.suggested_fare;
+    const fareStr = fare ? `$${(fare as number).toFixed(2)}` : '';
+
+    await this.notificationsService.sendToUsers(userIds, {
+      title: `🚖 Nuevo viaje${fareStr ? ` — ${fareStr}` : ''}`,
+      body:  `${origin} → ${dest}`,
+      data: {
+        type:               'trip_new',
+        trip_id:            payload.trip_id ?? '',
+        origin_address:     origin,
+        destination_address: dest,
+        origin_lat:         String(originLat),
+        origin_lng:         String(originLng),
+        search_radius_km:   String(newRadius),
+        fare_mode:          String(payload.fare_mode ?? 'meter'),
+        suggested_fare:     String(payload.suggested_fare ?? ''),
+        client_offer:       String(payload.client_offer ?? ''),
+        distance_km:        String(payload.distance_km ?? ''),
+      },
+    });
+  }
+
   notifyDriver(driverId: string, event: string, payload: object) {
     this.server.to(ROOM.driver(driverId)).emit(event, payload);
   }

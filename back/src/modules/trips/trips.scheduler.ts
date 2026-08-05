@@ -66,6 +66,12 @@ export class TripsScheduler {
       if (trip.client?.id) {
         this.gateway.notifyUser(trip.client.id, 'trip.radius_expanded', expansionPayload);
       }
+      // Re-notificar conductores: socket a todos disponibles + FCM al anillo nuevo
+      this.gateway.notifyDriversRadiusExpanded(
+        expansionPayload,
+        trip.cooperative?.id ?? undefined,
+        currentRadius,
+      ).catch(() => {});
     }
   }
 
