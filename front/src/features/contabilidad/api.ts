@@ -60,9 +60,9 @@ export async function getCoopStatement(cooperative_id?: string, from_date?: stri
   return data;
 }
 
-export async function getSettlements(cooperative_id?: string): Promise<PaginatedResponse<Settlement>> {
+export async function getSettlements(cooperative_id?: string, page = 1): Promise<PaginatedResponse<Settlement>> {
   const { data } = await api.get('/accounting/settlements', {
-    params: { cooperative_id, limit: 20, page: 1 },
+    params: { cooperative_id, limit: 20, page },
   });
   return data;
 }
@@ -90,9 +90,9 @@ export async function getPlatformFee(): Promise<{ commission_pct: number }> {
   return data;
 }
 
-export async function getRecharges(status?: string): Promise<PaginatedResponse<RechargeRow>> {
+export async function getRecharges(status?: string, page = 1): Promise<PaginatedResponse<RechargeRow>> {
   const { data } = await api.get('/wallet/recharges', {
-    params: { ...(status ? { status } : {}), limit: 50, page: 1 },
+    params: { ...(status ? { status } : {}), limit: 20, page },
   });
   return data;
 }

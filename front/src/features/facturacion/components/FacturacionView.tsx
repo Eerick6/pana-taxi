@@ -34,10 +34,16 @@ const RENEWAL_STATUS_LABEL: Record<string, string> = { upcoming: 'Próxima', ove
 const METHOD_LABEL: Record<string, string> = { transfer: 'Transferencia', card: 'Tarjeta', cash: 'Efectivo', other: 'Otro' };
 
 export default function FacturacionView() {
+  const LIMIT = 20;
   const [tab, setTab] = useState<Tab>('invoices');
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoicesTotal, setInvoicesTotal] = useState(0);
+  const [invoicesPage, setInvoicesPage] = useState(1);
   const [payments, setPayments] = useState<BillingPayment[]>([]);
+  const [paymentsTotal, setPaymentsTotal] = useState(0);
+  const [paymentsPage, setPaymentsPage] = useState(1);
   const [renewals, setRenewals] = useState<Renewal[]>([]);
+  const [renewalsPage, setRenewalsPage] = useState(1);
   const [stats, setStats] = useState<{
     total_billed: number; total_paid: number; total_pending: number; total_overdue: number; active_subscriptions: number;
   } | null>(null);
@@ -49,19 +55,19 @@ export default function FacturacionView() {
     setLoading(true);
     try {
       const [inv, pay, ren, st] = await Promise.allSettled([
-        getInvoices(),
-        getPayments(),
+        getInvoices({ status: filterStatus || undefined, page: invoicesPage, limit: LIMIT }),
+        getPayments({ status: filterStatus || undefined, page: paymentsPage, limit: LIMIT }),
         getRenewals(),
         getBillingStats(),
       ]);
-      if (inv.status === 'fulfilled') setInvoices(inv.value.items ?? []);
-      if (pay.status === 'fulfilled') setPayments(pay.value.items ?? []);
+      if (inv.status === 'fulfilled') { setInvoices(inv.value.items ?? []); setInvoicesTotal(inv.value.total ?? 0); }
+      if (pay.status === 'fulfilled') { setPayments(pay.value.items ?? []); setPaymentsTotal(pay.value.total ?? 0); }
       if (ren.status === 'fulfilled') setRenewals(ren.value);
       if (st.status === 'fulfilled') setStats(st.value);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filterStatus, invoicesPage, paymentsPage]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -70,8 +76,10 @@ export default function FacturacionView() {
     try { await fn(); await load(); } finally { setActionLoading(null); }
   };
 
-  const filteredInvoices = filterStatus ? invoices.filter((i) => i.status === filterStatus) : invoices;
-  const filteredPayments = filterStatus ? payments.filter((p) => p.status === filterStatus) : payments;
+  const invoicesPages = Math.max(1, Math.ceil(invoicesTotal / LIMIT));
+  const paymentsPages = Math.max(1, Math.ceil(paymentsTotal / LIMIT));
+  const renewalsPaged = renewals.slice((renewalsPage - 1) * LIMIT, renewalsPage * LIMIT);
+  const renewalsPages = Math.max(1, Math.ceil(renewals.length / LIMIT));
 
   const Spinner = () => (
     <svg className="w-4 h-4 animate-spin text-brand-500" fill="none" viewBox="0 0 24 24">
@@ -118,7 +126,7 @@ export default function FacturacionView() {
           ] as { v: Tab; l: string }[]).map(({ v, l }) => (
             <button
               key={v}
-              onClick={() => { setTab(v); setFilterStatus(''); }}
+              onClick={() => { setTab(v); setFilterStatus(''); setInvoicesPage(1); setPaymentsPage(1); setRenewalsPage(1); }}
               className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${tab === v ? 'bg-white dark:bg-gray-900 text-gray-800 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
             >
               {l}
@@ -129,7 +137,7 @@ export default function FacturacionView() {
         {tab !== 'renewals' && (
           <select
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
+            onChange={(e) => { setFilterStatus(e.target.value); setInvoicesPage(1); setPaymentsPage(1); }}
             className="px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
           >
             <option value="">Todo estado</option>
@@ -146,7 +154,7 @@ export default function FacturacionView() {
         <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
             <p className="text-sm font-semibold text-gray-800 dark:text-white">
-              {loading ? '...' : `${filteredInvoices.length} facturas`}
+              {loading ? '...' : `${invoicesTotal} facturas`}
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -167,7 +175,7 @@ export default function FacturacionView() {
                         ))}
                       </tr>
                     ))
-                  : filteredInvoices.map((inv) => (
+                  : invoices.map((inv) => (
                       <tr key={inv.id} className="border-b border-gray-50 dark:border-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
                         <td className="px-5 py-3.5 font-medium text-gray-800 dark:text-white">{inv.cooperative?.name ?? '—'}</td>
                         <td className="px-5 py-3.5 text-gray-600 dark:text-gray-400">{inv.plan?.name ?? '—'}</td>
@@ -204,8 +212,17 @@ export default function FacturacionView() {
               </tbody>
             </table>
           </div>
-          {!loading && filteredInvoices.length === 0 && (
+          {!loading && invoices.length === 0 && (
             <div className="py-12 text-center text-sm text-gray-400">Sin facturas</div>
+          )}
+          {invoicesPages > 1 && (
+            <div className="flex items-center justify-between px-5 py-4 border-t border-gray-100 dark:border-gray-800">
+              <p className="text-xs text-gray-400">{invoicesTotal} registros · página {invoicesPage} de {invoicesPages}</p>
+              <div className="flex gap-2">
+                <button onClick={() => setInvoicesPage((p) => Math.max(1, p - 1))} disabled={invoicesPage === 1} className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Anterior</button>
+                <button onClick={() => setInvoicesPage((p) => Math.min(invoicesPages, p + 1))} disabled={invoicesPage === invoicesPages} className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Siguiente</button>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -215,7 +232,7 @@ export default function FacturacionView() {
         <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
             <p className="text-sm font-semibold text-gray-800 dark:text-white">
-              {loading ? '...' : `${filteredPayments.length} pagos`}
+              {loading ? '...' : `${paymentsTotal} pagos`}
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -236,7 +253,7 @@ export default function FacturacionView() {
                         ))}
                       </tr>
                     ))
-                  : filteredPayments.map((p) => (
+                  : payments.map((p) => (
                       <tr key={p.id} className="border-b border-gray-50 dark:border-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
                         <td className="px-5 py-3.5 font-medium text-gray-800 dark:text-white">{p.cooperative?.name ?? '—'}</td>
                         <td className="px-5 py-3.5 font-bold text-gray-800 dark:text-white">{currency(p.amount)}</td>
@@ -270,8 +287,17 @@ export default function FacturacionView() {
               </tbody>
             </table>
           </div>
-          {!loading && filteredPayments.length === 0 && (
+          {!loading && payments.length === 0 && (
             <div className="py-12 text-center text-sm text-gray-400">Sin pagos</div>
+          )}
+          {paymentsPages > 1 && (
+            <div className="flex items-center justify-between px-5 py-4 border-t border-gray-100 dark:border-gray-800">
+              <p className="text-xs text-gray-400">{paymentsTotal} registros · página {paymentsPage} de {paymentsPages}</p>
+              <div className="flex gap-2">
+                <button onClick={() => setPaymentsPage((p) => Math.max(1, p - 1))} disabled={paymentsPage === 1} className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Anterior</button>
+                <button onClick={() => setPaymentsPage((p) => Math.min(paymentsPages, p + 1))} disabled={paymentsPage === paymentsPages} className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Siguiente</button>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -283,6 +309,7 @@ export default function FacturacionView() {
             <p className="text-sm font-semibold text-gray-800 dark:text-white">
               {loading ? '...' : `${renewals.length} renovaciones próximas`}
             </p>
+
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -302,7 +329,7 @@ export default function FacturacionView() {
                         ))}
                       </tr>
                     ))
-                  : renewals.map((r) => (
+                  : renewalsPaged.map((r) => (
                       <tr key={r.cooperative_id} className="border-b border-gray-50 dark:border-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
                         <td className="px-5 py-3.5 font-medium text-gray-800 dark:text-white">{r.cooperative_name}</td>
                         <td className="px-5 py-3.5 text-gray-600 dark:text-gray-400">{r.plan_name}</td>
@@ -320,6 +347,15 @@ export default function FacturacionView() {
           </div>
           {!loading && renewals.length === 0 && (
             <div className="py-12 text-center text-sm text-gray-400">Sin renovaciones próximas</div>
+          )}
+          {renewalsPages > 1 && (
+            <div className="flex items-center justify-between px-5 py-4 border-t border-gray-100 dark:border-gray-800">
+              <p className="text-xs text-gray-400">{renewals.length} registros · página {renewalsPage} de {renewalsPages}</p>
+              <div className="flex gap-2">
+                <button onClick={() => setRenewalsPage((p) => Math.max(1, p - 1))} disabled={renewalsPage === 1} className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Anterior</button>
+                <button onClick={() => setRenewalsPage((p) => Math.min(renewalsPages, p + 1))} disabled={renewalsPage === renewalsPages} className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Siguiente</button>
+              </div>
+            </div>
           )}
         </div>
       )}

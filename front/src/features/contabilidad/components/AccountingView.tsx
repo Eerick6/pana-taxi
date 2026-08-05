@@ -410,7 +410,11 @@ export default function AccountingView({ initialTab = 'settlements' }: { initial
 
   const [tab, setTab] = useState<Tab>(initialTab);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [settlementsTotal, setSettlementsTotal] = useState(0);
+  const [settlementsPage, setSettlementsPage] = useState(1);
   const [recharges, setRecharges] = useState<RechargeRow[]>([]);
+  const [rechargesTotal, setRechargesTotal] = useState(0);
+  const [rechargesPage, setRechargesPage] = useState(1);
   const [rechargeFilter, setRechargeFilter] = useState<string>('');
   const [banks, setBanks] = useState<BankAccount[]>([]);
   const [account, setAccount] = useState<CoopAccount | null>(null);
@@ -427,27 +431,28 @@ export default function AccountingView({ initialTab = 'settlements' }: { initial
     setLoading(true);
     try {
       const [s, r, a, b] = await Promise.allSettled([
-        getSettlements(coopId),
-        getRecharges(rechargeFilter || undefined),
+        getSettlements(coopId, settlementsPage),
+        getRecharges(rechargeFilter || undefined, rechargesPage),
         coopId ? getCoopAccount(coopId) : Promise.resolve(null),
         getBankAccounts(),
       ]);
-      if (s.status === 'fulfilled') setSettlements(s.value.items ?? []);
-      if (r.status === 'fulfilled') setRecharges(r.value.items ?? []);
+      if (s.status === 'fulfilled') { setSettlements(s.value.items ?? []); setSettlementsTotal(s.value.total ?? 0); }
+      if (r.status === 'fulfilled') { setRecharges(r.value.items ?? []); setRechargesTotal(r.value.total ?? 0); }
       if (a.status === 'fulfilled' && a.value) setAccount(a.value);
       if (b.status === 'fulfilled') setBanks(b.value);
     } finally {
       setLoading(false);
     }
-  }, [coopId, rechargeFilter]);
+  }, [coopId, rechargeFilter, settlementsPage, rechargesPage]);
 
   // Silent poll — solo recargas, sin spinner global
   const pollRecharges = useCallback(async () => {
     try {
-      const r = await getRecharges(rechargeFilter || undefined);
+      const r = await getRecharges(rechargeFilter || undefined, rechargesPage);
       setRecharges(r.items ?? []);
+      setRechargesTotal(r.total ?? 0);
     } catch { /* silent */ }
-  }, [rechargeFilter]);
+  }, [rechargeFilter, rechargesPage]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -508,6 +513,11 @@ export default function AccountingView({ initialTab = 'settlements' }: { initial
   const toggleBank = async (bank: BankAccount) => {
     await act(() => updateBankAccount(bank.id, { is_active: !bank.is_active }), bank.id);
   };
+
+  const LIMIT_S = 20;
+  const LIMIT_R = 20;
+  const settlementsPages = Math.max(1, Math.ceil(settlementsTotal / LIMIT_S));
+  const rechargesPages   = Math.max(1, Math.ceil(rechargesTotal / LIMIT_R));
 
   return (
     <>
@@ -619,6 +629,15 @@ export default function AccountingView({ initialTab = 'settlements' }: { initial
             {!loading && settlements.length === 0 && (
               <div className="py-12 text-center text-sm text-gray-400">Sin liquidaciones</div>
             )}
+            {settlementsPages > 1 && (
+              <div className="flex items-center justify-between px-5 py-4 border-t border-gray-100 dark:border-gray-800">
+                <p className="text-xs text-gray-400">{settlementsTotal} registros · página {settlementsPage} de {settlementsPages}</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setSettlementsPage((p) => Math.max(1, p - 1))} disabled={settlementsPage === 1} className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Anterior</button>
+                  <button onClick={() => setSettlementsPage((p) => Math.min(settlementsPages, p + 1))} disabled={settlementsPage === settlementsPages} className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Siguiente</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -636,7 +655,7 @@ export default function AccountingView({ initialTab = 'settlements' }: { initial
               <select
                 className="text-xs border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-500"
                 value={rechargeFilter}
-                onChange={(e) => setRechargeFilter(e.target.value)}
+                onChange={(e) => { setRechargeFilter(e.target.value); setRechargesPage(1); }}
               >
                 <option value="">Todas</option>
                 <option value="pending">Pendientes</option>
@@ -737,6 +756,15 @@ export default function AccountingView({ initialTab = 'settlements' }: { initial
             {!loading && recharges.length === 0 && (
               <div className="py-12 text-center text-sm text-gray-400">
                 Sin recargas {rechargeFilter ? RECHARGE_LABEL[rechargeFilter]?.toLowerCase() + 's' : ''}
+              </div>
+            )}
+            {rechargesPages > 1 && (
+              <div className="flex items-center justify-between px-5 py-4 border-t border-gray-100 dark:border-gray-800">
+                <p className="text-xs text-gray-400">{rechargesTotal} registros · página {rechargesPage} de {rechargesPages}</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setRechargesPage((p) => Math.max(1, p - 1))} disabled={rechargesPage === 1} className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Anterior</button>
+                  <button onClick={() => setRechargesPage((p) => Math.min(rechargesPages, p + 1))} disabled={rechargesPage === rechargesPages} className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Siguiente</button>
+                </div>
               </div>
             )}
           </div>
