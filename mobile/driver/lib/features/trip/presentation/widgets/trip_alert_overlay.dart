@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -20,6 +21,7 @@ class TripAlertData {
     this.clientOffer,
     this.distanceKm,
     this.clientName,
+    this.clientPhoto,
     this.clientRating,
     this.clientTotalTrips,
   });
@@ -35,6 +37,7 @@ class TripAlertData {
   final double? clientOffer;
   final double? distanceKm;
   final String? clientName;
+  final String? clientPhoto;
   final double? clientRating;
   final int?    clientTotalTrips;
 
@@ -61,6 +64,7 @@ class TripAlertData {
         clientOffer:        _d(data['client_offer']),
         distanceKm:         _d(data['distance_km']),
         clientName:         data['client_name']          as String?,
+        clientPhoto:        data['client_photo_url']     as String?,
         clientRating:       _d(data['client_rating']),
         clientTotalTrips:   data['client_total_trips'] is int
             ? data['client_total_trips'] as int
@@ -90,7 +94,8 @@ class TripAlertData {
         suggestedFare:      _d(t['suggested_fare']),
         clientOffer:        _d(t['client_offer']),
         distanceKm:         _d(t['estimated_distance_km']),
-        clientName:         client?['full_name']      as String?,
+        clientName:         client?['full_name']           as String?,
+        clientPhoto:        client?['profile_photo_url']   as String?,
         clientRating:       _d(client?['rating']),
         clientTotalTrips:   client?['total_trips'] is int
             ? client!['total_trips'] as int
@@ -396,7 +401,14 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
                             Container(
                               width: 48, height: 48,
                               decoration: const BoxDecoration(color: AppColors.primaryLight, shape: BoxShape.circle),
-                              child: const Icon(Icons.person, color: AppColors.secondary, size: 26),
+                              child: alert.clientPhoto != null
+                                  ? ClipOval(child: CachedNetworkImage(
+                                      imageUrl: alert.clientPhoto!,
+                                      width: 48, height: 48, fit: BoxFit.cover,
+                                      errorWidget: (_, __, ___) => const Icon(Icons.person, color: AppColors.secondary, size: 26),
+                                      placeholder: (_, __) => const SizedBox.shrink(),
+                                    ))
+                                  : const Icon(Icons.person, color: AppColors.secondary, size: 26),
                             ),
                             const SizedBox(width: 12),
                             Expanded(

@@ -151,6 +151,7 @@ export class TripsService {
         duration_min: estimate.duration_min,
         is_night_rate: estimate.is_night_rate,
         client_name: clientProfile?.full_name ?? (user as any).full_name ?? null,
+        client_photo_url: clientProfile?.profile_photo_url ?? null,
         client_rating: clientProfile ? parseFloat(clientProfile.rating as any) : null,
         client_total_trips: clientProfile?.total_trips ?? 0,
       });
@@ -554,6 +555,10 @@ export class TripsService {
     // Notificar al cliente con info completa del taxista
     this.logger.log(`[makeOffer] tripId=${tripId} driverId=${driver.id} clientId=${trip.client?.id ?? 'null'} amount=${offerAmount} isMeter=${isMeter} isCounter=${!isMeter && dto.amount != null}`);
     if (trip.client) {
+      const driverMember = await this.coopMembersRepo.findOne({
+        where: { user: { id: driver.user.id } },
+        relations: ['cooperative'],
+      });
       const offerPayload = {
         trip_id:        tripId,
         offer_id:       offerId,
@@ -561,6 +566,7 @@ export class TripsService {
         driver_name:    driver.full_name ?? null,
         driver_photo:   driver.profile_photo_url ?? null,
         driver_rating:  (driver as any).rating ? parseFloat((driver as any).rating) : null,
+        coop_name:      driverMember?.cooperative?.name ?? null,
         vehicle_plate:  vehicle ? (vehicle as any).plate : null,
         vehicle_model:  vehicle ? `${(vehicle as any).brand ?? ''} ${(vehicle as any).model ?? ''}`.trim() : null,
         amount:         offerAmount,

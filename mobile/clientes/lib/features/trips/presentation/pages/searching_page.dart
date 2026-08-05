@@ -1075,6 +1075,10 @@ class _OfferCardState extends State<_OfferCard>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(offer.driverName, style: AppTextStyles.label),
+                        if (offer.coopName != null)
+                          Text(offer.coopName!,
+                              style: AppTextStyles.caption.copyWith(
+                                  color: AppColors.primary, fontWeight: FontWeight.w600)),
                         Row(children: [
                           if (offer.driverRating != null) ...[
                             const Icon(Icons.star_rounded, size: 14, color: Color(0xFFF59E0B)),

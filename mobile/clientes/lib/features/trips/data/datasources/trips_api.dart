@@ -26,6 +26,7 @@ class DriverOffer {
     this.fareMode = 'negotiated',
     this.driverPhoto,
     this.driverRating,
+    this.coopName,
     this.vehiclePlate,
     this.vehicleModel,
     this.etaMin,
@@ -40,6 +41,7 @@ class DriverOffer {
   final String  fareMode;
   final String? driverPhoto;
   final double? driverRating;
+  final String? coopName;
   final String? vehiclePlate;
   final String? vehicleModel;
   final int?    etaMin;
@@ -62,6 +64,7 @@ class DriverOffer {
       driverName:          driver['name']             as String? ?? 'Conductor',
       driverPhoto:         driver['photo']            as String?,
       driverRating:        _d(driver['rating']),
+      coopName:            j['coop_name']             as String?,
       amount:              (_d(j['amount']) ?? 0),
       fareMode:            j['fare_mode']             as String? ?? 'negotiated',
       isCounter:           j['is_counter']            as bool? ?? false,
@@ -80,6 +83,7 @@ class DriverOffer {
       driverName:          j['driver_name']           as String? ?? 'Conductor',
       driverPhoto:         j['driver_photo']          as String?,
       driverRating:        _d(j['driver_rating']),
+      coopName:            j['coop_name']             as String?,
       amount:              (_d(j['amount']) ?? 0),
       fareMode:            j['fare_mode']             as String? ?? 'negotiated',
       isCounter:           j['is_counter']            as bool? ?? false,
