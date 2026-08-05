@@ -14,6 +14,7 @@ import { PlatformMember } from '../platform/entities/platform-member.entity';
 import { CooperativeMember } from '../cooperatives/entities/cooperative-member.entity';
 import { TermsModule } from '../terms/terms.module';
 import { NOTIFICATION_QUEUE } from '../../queues/notifications/notification-queue.types';
+import { RedisModule } from '../../redis/redis.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { NOTIFICATION_QUEUE } from '../../queues/notifications/notification-queu
     TypeOrmModule.forFeature([User, Client, PlatformMember, CooperativeMember]),
     TermsModule,
     BullModule.registerQueue({ name: NOTIFICATION_QUEUE }),
+    RedisModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, JwtGuard, RolesGuard],

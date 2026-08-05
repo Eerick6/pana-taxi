@@ -12,8 +12,10 @@ class ApiConstants {
   static const String loginPhone     = '/auth/login/phone';
   static const String refresh         = '/auth/refresh';
   static const String logout          = '/auth/logout';
-  static const String forgotPassword  = '/auth/password/forgot';
-  static const String resetPassword   = '/auth/password/reset';
+  static const String forgotPassword      = '/auth/password/forgot';
+  static const String resetPassword       = '/auth/password/reset';
+  static const String forgotPasswordPhone = '/auth/password/forgot-phone';
+  static const String resetPasswordPhone  = '/auth/password/reset-phone';
 
   // Terms
   static const String clientTerms = '/terms/client';

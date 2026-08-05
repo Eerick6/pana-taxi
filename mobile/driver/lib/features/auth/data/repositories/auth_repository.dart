@@ -11,6 +11,12 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   );
 });
 
+class PendingVerificationException implements Exception {
+  final String phone;
+  final String? devCode;
+  const PendingVerificationException({required this.phone, this.devCode});
+}
+
 class AuthRepository {
   AuthRepository({required this.dio, required this.storage});
 
@@ -55,6 +61,13 @@ class AuthRepository {
       final meRes = await dio.get('/auth/me');
       return UserModel.fromJson(meRes.data as Map<String, dynamic>);
     } on DioException catch (e) {
+      final data = e.response?.data;
+      if (data is Map && data['error'] == 'PENDING_VERIFICATION') {
+        throw PendingVerificationException(
+          phone:   phone,
+          devCode: data['dev_code'] as String?,
+        );
+      }
       final msg = e.response?.data?['message'];
       throw Exception(msg is List ? msg.first : msg ?? 'Teléfono o contraseña incorrectos');
     }
@@ -133,25 +146,26 @@ class AuthRepository {
     }
   }
 
-  Future<void> forgotPassword(String email) async {
+  Future<String?> forgotPasswordPhone(String phone) async {
     try {
-      await dio.post('/auth/password/forgot', data: {'email': email});
+      final res = await dio.post('/auth/password/forgot-phone', data: {'phone': phone, 'role': 'driver'});
+      return res.data?['dev_code'] as String?;
     } on DioException catch (e) {
       final msg = e.response?.data?['message'];
-      throw Exception(msg is List ? msg.first : msg ?? 'Error al enviar correo');
+      throw Exception(msg is List ? msg.first : msg ?? 'Error al enviar código');
     }
   }
 
-  Future<void> resetPassword(String email, String token, String password) async {
+  Future<void> resetPasswordPhone(String phone, String otp, String password) async {
     try {
-      await dio.post('/auth/password/reset', data: {
-        'email':    email,
-        'token':    token,
+      await dio.post('/auth/password/reset-phone', data: {
+        'phone':    phone,
+        'otp':      otp,
         'password': password,
       });
     } on DioException catch (e) {
       final msg = e.response?.data?['message'];
-      throw Exception(msg is List ? msg.first : msg ?? 'Token inválido o expirado');
+      throw Exception(msg is List ? msg.first : msg ?? 'Código inválido o expirado');
     }
   }
 

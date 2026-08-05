@@ -114,6 +114,27 @@ class AuthApi {
     }
   }
 
+  Future<String?> forgotPasswordPhone(String phone) async {
+    try {
+      final res = await _dio.post(ApiConstants.forgotPasswordPhone, data: {'phone': phone, 'role': 'client'});
+      return res.data?['dev_code'] as String?;
+    } on DioException catch (e) {
+      throw Exception(_parseError(e));
+    }
+  }
+
+  Future<void> resetPasswordPhone(String phone, String otp, String password) async {
+    try {
+      await _dio.post(ApiConstants.resetPasswordPhone, data: {
+        'phone':    phone,
+        'otp':      otp,
+        'password': password,
+      });
+    } on DioException catch (e) {
+      throw Exception(_parseError(e));
+    }
+  }
+
   Future<String> uploadPhoto(List<int> bytes, String filename) async {
     try {
       final res = await _dio.post(

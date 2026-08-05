@@ -1,7 +1,9 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../data/providers/auth_provider.dart';
@@ -22,9 +24,11 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   final _passCtrl     = TextEditingController();
   final _passConfCtrl = TextEditingController();
   _DriverTypeOption _driverType = _DriverTypeOption.owner;
-  bool _loading         = false;
-  bool _obscurePass     = true;
-  bool _obscureConfPass = true;
+  bool       _loading         = false;
+  bool       _obscurePass     = true;
+  bool       _obscureConfPass = true;
+  XFile?     _photo;
+  List<int>? _photoBytes;
 
   @override
   void dispose() {
@@ -35,8 +39,79 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
     super.dispose();
   }
 
+  Future<void> _pickPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.gray300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('Foto de perfil', style: AppTextStyles.h3),
+              const SizedBox(height: 16),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFFEEF6FF),
+                  child: Icon(Icons.camera_alt_outlined, color: AppColors.primary),
+                ),
+                title: Text('Tomar selfie', style: AppTextStyles.bodyMedium),
+                subtitle: Text('Usa la cámara frontal', style: AppTextStyles.caption),
+                onTap: () => Navigator.pop(context, ImageSource.camera),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFFEEF6FF),
+                  child: Icon(Icons.photo_library_outlined, color: AppColors.primary),
+                ),
+                title: Text('Elegir de galería', style: AppTextStyles.bodyMedium),
+                subtitle: Text('Selecciona una foto existente', style: AppTextStyles.caption),
+                onTap: () => Navigator.pop(context, ImageSource.gallery),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+    final img = await ImagePicker().pickImage(
+      source: source,
+      preferredCameraDevice: CameraDevice.front,
+      maxWidth: 512,
+      imageQuality: 80,
+    );
+    if (img == null || !mounted) return;
+    final bytes = await img.readAsBytes();
+    setState(() { _photo = img; _photoBytes = bytes; });
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_photoBytes == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('La foto de perfil es obligatoria'),
+        backgroundColor: AppColors.error,
+      ));
+      return;
+    }
     setState(() => _loading = true);
     try {
       final phone = '+593${_phoneCtrl.text.trim()}';
@@ -46,7 +121,11 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
         driverType: _driverType == _DriverTypeOption.owner ? 'owner_driver' : 'driver',
         password:   _passCtrl.text,
       );
-      if (mounted) context.go('/auth/otp', extra: {'phone': phone, 'dev_code': devCode});
+      if (mounted) context.go('/auth/otp', extra: {
+        'phone':      phone,
+        'dev_code':   devCode,
+        'photo_path': _photo?.path,
+      });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -89,7 +168,75 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                   'Regístrate para empezar a trabajar con Pana',
                   style: AppTextStyles.body.copyWith(color: AppColors.gray500),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 28),
+
+                // ── Foto de perfil ────────────────────────────────────────────
+                Center(
+                  child: GestureDetector(
+                    onTap: _pickPhoto,
+                    child: Stack(
+                      children: [
+                        Container(
+                          width: 98, height: 98,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: _photoBytes == null
+                                  ? AppColors.error
+                                  : AppColors.primary,
+                              width: 2.5,
+                            ),
+                          ),
+                          child: CircleAvatar(
+                            radius: 46,
+                            backgroundColor: AppColors.gray100,
+                            backgroundImage: _photoBytes != null
+                                ? MemoryImage(Uint8List.fromList(_photoBytes!))
+                                : null,
+                            child: _photoBytes == null
+                                ? const Icon(Icons.person, size: 46, color: AppColors.gray400)
+                                : null,
+                          ),
+                        ),
+                        Positioned(
+                          bottom: 0, right: 0,
+                          child: Container(
+                            width: 32, height: 32,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: AppColors.white, width: 2),
+                            ),
+                            child: const Icon(Icons.camera_alt, size: 16, color: AppColors.secondary),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 4),
+                    child: Text(
+                      'Foto de perfil *',
+                      style: AppTextStyles.caption.copyWith(
+                        color: _photoBytes == null ? AppColors.error : AppColors.gray500,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 24),
+                    child: Text(
+                      _photoBytes == null
+                          ? 'Toca para agregar tu foto'
+                          : 'Toca para cambiar la foto',
+                      style: AppTextStyles.caption.copyWith(color: AppColors.gray400),
+                    ),
+                  ),
+                ),
 
                 // Nombre completo
                 Text('Nombre completo', style: AppTextStyles.labelLg),
@@ -136,9 +283,6 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                   validator: (v) {
                     if (v == null || v.isEmpty) return 'Ingresa tu número';
                     if (v.length < 9) return 'Número incompleto';
-                    if (!v.startsWith('09'.substring(1))) {
-                      // acepta 9XXXXXXXX (sin el 0 inicial)
-                    }
                     return null;
                   },
                 ),

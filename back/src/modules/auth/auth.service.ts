@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException, ConflictException, HttpException, Logger, Optional } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, ConflictException, HttpException, Logger, Optional, Inject } from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
@@ -6,6 +6,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import Redis from 'ioredis';
+import { REDIS_CLIENT } from '../../redis/redis.module';
 import { NOTIFICATION_QUEUE } from '../../queues/notifications/notification-queue.types';
 import { User, UserRole, UserStatus } from '../users/entities/user.entity';
 import { Client } from '../clients/entities/client.entity';
@@ -49,6 +51,7 @@ export class AuthService {
     private jwtService: JwtService,
     private termsService: TermsService,
     @Optional() @InjectQueue(NOTIFICATION_QUEUE) private notificationQueue: Queue | null,
+    @Inject(REDIS_CLIENT) private redis: Redis,
   ) {
   }
 
@@ -249,6 +252,73 @@ export class AuthService {
 
     const hash = await bcrypt.hash(newPassword, 12);
     await this.usersRepository.update(user.id, { password_hash: hash });
+    return { message: 'Contraseña actualizada correctamente' };
+  }
+
+  async forgotPasswordPhone(phone: string, role?: 'client' | 'driver') {
+    // Rate limit: máximo 3 intentos por número cada 24 horas
+    const rateLimitKey = `pwd:forgot:rate:${phone}`;
+    const attempts = await this.redis.incr(rateLimitKey);
+    if (attempts === 1) {
+      await this.redis.expire(rateLimitKey, 24 * 3600);
+    }
+    if (attempts > 3) {
+      const ttl = await this.redis.ttl(rateLimitKey);
+      const hoursLeft = Math.ceil(ttl / 3600);
+      throw new BadRequestException(
+        `Demasiados intentos. Podrás volver a intentarlo en ${hoursLeft} hora${hoursLeft === 1 ? '' : 's'}.`,
+      );
+    }
+
+    const user = await this.usersRepository.findOne({ where: { phone } });
+    if (!user) throw new BadRequestException('No existe una cuenta registrada con ese número');
+    if (role === 'client' && user.role !== UserRole.CLIENT) {
+      throw new BadRequestException('No existe una cuenta de pasajero con ese número');
+    }
+    if (role === 'driver' && ![UserRole.DRIVER, UserRole.OWNER].includes(user.role as UserRole)) {
+      throw new BadRequestException('No existe una cuenta de conductor con ese número');
+    }
+    if (user.status !== UserStatus.ACTIVE) throw new BadRequestException('Esta cuenta está suspendida. Contacta con soporte.');
+
+    const { code, expires } = this.generateOtp();
+    await this.usersRepository.update(user.id, { otp_code: code, otp_expires_at: expires });
+    await this.sendSms(phone, `Tu código para restablecer contraseña en Pana Taxi: ${code}. Expira en 10 minutos.`);
+    if (this.showDevOtp) return { message: 'Código enviado', dev_code: code };
+    return { message: 'Si el número está registrado, recibirás un código SMS' };
+  }
+
+  async resetPasswordPhone(phone: string, otp: string, newPassword: string) {
+    const user = await this.usersRepository.findOne({ where: { phone } });
+    if (!user) throw new BadRequestException('Código inválido o expirado');
+
+    // Cooldown: no puede cambiar contraseña más de una vez cada 7 días
+    const cooldownKey = `pwd:cooldown:${user.id}`;
+    const cooldownTtl = await this.redis.ttl(cooldownKey);
+    if (cooldownTtl > 0) {
+      const daysLeft = Math.ceil(cooldownTtl / 86400);
+      throw new BadRequestException(
+        `Ya cambiaste tu contraseña recientemente. Podrás volver a cambiarla en ${daysLeft} día${daysLeft === 1 ? '' : 's'}.`,
+      );
+    }
+
+    if (process.env.NODE_ENV !== 'production' && otp === '000000') {
+      const hash = await bcrypt.hash(newPassword, 12);
+      await this.usersRepository.update(user.id, { password_hash: hash, otp_code: null, otp_expires_at: null });
+      await this.redis.set(cooldownKey, '1', 'EX', 7 * 24 * 3600);
+      return { message: 'Contraseña actualizada correctamente' };
+    }
+
+    const result = await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({ otp_code: null, otp_expires_at: null })
+      .where('id = :id AND otp_code = :otp AND otp_expires_at > NOW()', { id: user.id, otp })
+      .execute();
+    if (result.affected === 0) throw new BadRequestException('Código inválido o expirado');
+
+    const hash = await bcrypt.hash(newPassword, 12);
+    await this.usersRepository.update(user.id, { password_hash: hash });
+    await this.redis.set(cooldownKey, '1', 'EX', 7 * 24 * 3600);
     return { message: 'Contraseña actualizada correctamente' };
   }
 

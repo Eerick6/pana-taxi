@@ -29,6 +29,7 @@ class TripActivePage extends ConsumerStatefulWidget {
 
 class _TripActivePageState extends ConsumerState<TripActivePage> {
   bool _loading = false;
+  bool _socketActive = false;
 
   @override
   void initState() {
@@ -37,12 +38,13 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
   }
 
   void _listenOfferAccepted() {
+    _socketActive = true;
     final socket = ref.read(socketClientProvider);
     socket.on('trip.offer_accepted', (data) async {
-      if (!mounted) return;
+      if (!_socketActive || !mounted) return;
       final repo = ref.read(tripRepositoryProvider);
       final updated = await repo.getActiveTrip();
-      if (mounted && updated != null) {
+      if (_socketActive && mounted && updated != null) {
         ref.read(activeTripProvider.notifier).setTrip(updated);
       }
     });
@@ -50,7 +52,8 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
 
   @override
   void dispose() {
-    ref.read(socketClientProvider).off('trip.offer_accepted');
+    _socketActive = false;
+    // NO llamar socket.off('trip.offer_accepted') — home_page también tiene ese listener
     super.dispose();
   }
 

@@ -118,28 +118,52 @@ class GeocodingService {
 
   // Reverse geocoding via Nominatim — gratis, sin API key, sin plugin nativo.
   Future<String?> reverseGeocode(double lat, double lng) async {
-    // Retornar caché si el pin no se movió más de 30m
     if (_cachedLat != null && _cachedLng != null && _cachedAddr != null) {
-      final dist = _haversineM(_cachedLat!, _cachedLng!, lat, lng);
-      if (dist < _cacheThresholdM) return _cachedAddr;
+      if (_haversineM(_cachedLat!, _cachedLng!, lat, lng) < _cacheThresholdM) {
+        return _cachedAddr;
+      }
     }
     try {
       final res = await _nominatim.get<Map<String, dynamic>>(
         '/reverse',
-        queryParameters: {'lat': lat, 'lon': lng, 'format': 'jsonv2', 'accept-language': 'es', 'zoom': 17},
+        queryParameters: {
+          'lat': lat, 'lon': lng,
+          'format': 'jsonv2',
+          'accept-language': 'es',
+          'zoom': 17,
+        },
       );
       final data = res.data ?? {};
       final addr = data['address'] as Map? ?? {};
-      final parts = <String>[
-        if ((addr['road']         as String?)?.isNotEmpty == true) addr['road']         as String,
-        if ((addr['neighbourhood']as String?)?.isNotEmpty == true) addr['neighbourhood']as String,
-        if ((addr['city']         as String?)?.isNotEmpty == true) addr['city']         as String
-            else if ((addr['town'] as String?)?.isNotEmpty == true) addr['town']        as String,
-      ];
-      final result = parts.isEmpty ? null : parts.join(', ');
+
+      String? pick(List<String> keys) {
+        for (final k in keys) {
+          final v = addr[k] as String?;
+          if (v != null && v.isNotEmpty) return v;
+        }
+        return null;
+      }
+
+      final road  = pick(['road', 'pedestrian', 'path', 'footway', 'cycleway']);
+      final sector = pick(['neighbourhood', 'suburb', 'city_district', 'quarter']);
+      final city  = pick(['city', 'town', 'village', 'municipality', 'county']);
+
+      final parts = [road, sector, city].whereType<String>().toList();
+
+      String? result;
+      if (parts.isNotEmpty) {
+        result = parts.join(', ');
+      } else {
+        // Fallback: primeras partes del display_name de Nominatim
+        final display = data['display_name'] as String?;
+        if (display != null && display.isNotEmpty) {
+          result = display.split(', ').take(3).join(', ');
+        }
+      }
+
       if (result != null) {
-        _cachedLat = lat;
-        _cachedLng = lng;
+        _cachedLat  = lat;
+        _cachedLng  = lng;
         _cachedAddr = result;
       }
       return result;

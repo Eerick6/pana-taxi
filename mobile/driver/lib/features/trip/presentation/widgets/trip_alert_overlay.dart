@@ -323,9 +323,19 @@ class _TripAlertOverlayState extends State<_TripAlertOverlay>
           TripAlertManager.dismiss,
         );
       } else {
-        // Meter mode: directly accept the trip
+        // Meter mode: PATCH /accept → backend crea oferta (makeOffer), no acepta directamente.
+        // Esperar a que el cliente seleccione la oferta (trip.offer_accepted).
         await widget.dio.patch('/trips/${widget.alert.tripId}/accept');
-        widget.onAccepted(widget.alert.tripId);
+        if (!mounted) return;
+        setState(() { _sending = false; _waiting = true; });
+        _countdown?.cancel();
+        _countdown = null;
+        TripAlertManager._timer?.cancel();
+        TripAlertManager._timer = null;
+        TripAlertManager._timer = Timer(
+          const Duration(seconds: 90),
+          TripAlertManager.dismiss,
+        );
       }
     } catch (e) {
       if (!mounted) return;

@@ -89,10 +89,12 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
   bool _loadingEstimate = false;
 
   // Pin picker inline
-  bool   _pinPickMode     = false;
-  bool   _pinPickIsOrigin = false;
-  bool   _pinPickLoading  = false;
-  String? _pinPickAddress;
+  bool        _pinPickMode     = false;
+  bool        _pinPickIsOrigin = false;
+  bool        _pinPickLoading  = false;
+  String?     _pinPickAddress;
+  Uint8List?  _originPinBytes;
+  Uint8List?  _destPinBytes;
 
   // Búsqueda inline
   _SearchTarget _target = _SearchTarget.none;
@@ -126,8 +128,10 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
 
   Future<void> _onMapCreated(MapLibreMapController c) async {
     _ctrl = c;
-    await c.addImage('origin-pin', await _buildOriginPinBytes());
-    await c.addImage('dest-pin',   await _buildDestPinBytes());
+    _originPinBytes = await _buildOriginPinBytes();
+    _destPinBytes   = await _buildDestPinBytes();
+    await c.addImage('origin-pin', _originPinBytes!);
+    await c.addImage('dest-pin',   _destPinBytes!);
     _mapReady = true;
 
     // Restaurar ruta si ya existe (usuario regresó a esta pantalla)
@@ -219,44 +223,60 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
 
   // ── Detección de origen ────────────────────────────────────────────────────
 
-  // Obtiene la posición GPS y aplica el origen inmediatamente.
-  // El reverse geocoding corre en background — la UI nunca se traba esperando la dirección.
+  // Obtiene posición GPS y aplica el origen con su nombre real.
+  // Espera hasta 4 s el geocoding antes de mostrar "Ubicación actual".
   Future<void> _kickGps() async {
-    Position? pos;
-    try { pos = await Geolocator.getLastKnownPosition(); } catch (_) {}
-    pos ??= await _fetchCurrentPos();
+    // Animar cámara con last known mientras carga la posición real
+    try {
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null && _mapReady && mounted) {
+        _cam(last.latitude, last.longitude, 15);
+      }
+    } catch (_) {}
+
+    final pos = await _fetchCurrentPos();
     if (pos == null || !mounted) {
       if (mounted) setState(() => _loadingOrigin = false);
       return;
     }
 
-    // 1 — Aplica coordenadas de inmediato con texto provisional
-    if (_mapReady) {
-      await _applyGpsOrigin(pos.latitude, pos.longitude, null);
-    } else {
-      _pendingOrigin = (lat: pos.latitude, lng: pos.longitude, address: null);
-    }
-
-    // 2 — Geocoding en background: actualiza solo el nombre cuando llega
-    final address = await ref
+    // Lanzar geocoding en paralelo — esperar hasta 4 s antes de usar placeholder
+    final geocodeFuture = ref
         .read(geocodingServiceProvider)
         .reverseGeocode(pos.latitude, pos.longitude);
-    if (!mounted || address == null || address.isEmpty) return;
-    if (ref.read(tripRouteProvider).origin == null) return;
-    final current = ref.read(tripRouteProvider).origin!;
-    ref.read(tripRouteProvider.notifier).setOrigin(PlaceResult(
-      displayName: address,
-      shortName:   _short(address),
-      lat:         current.lat,
-      lng:         current.lng,
-    ));
+
+    String? address;
+    try {
+      address = await geocodeFuture.timeout(const Duration(seconds: 4));
+    } catch (_) {}
+
+    // Aplicar con nombre real si llegó, o placeholder si tardó demasiado
+    if (_mapReady) {
+      await _applyGpsOrigin(pos.latitude, pos.longitude, address);
+    } else {
+      _pendingOrigin = (lat: pos.latitude, lng: pos.longitude, address: address);
+    }
+
+    // Si el geocoding no llegó a tiempo, actualizar en cuanto llegue
+    if (address == null) {
+      final late = await geocodeFuture;
+      if (!mounted || late == null || late.isEmpty) return;
+      if (ref.read(tripRouteProvider).origin == null) return;
+      final current = ref.read(tripRouteProvider).origin!;
+      ref.read(tripRouteProvider.notifier).setOrigin(PlaceResult(
+        displayName: late,
+        shortName:   _short(late),
+        lat:         current.lat,
+        lng:         current.lng,
+      ));
+    }
   }
 
   Future<Position?> _fetchCurrentPos() async {
     try {
       return await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
-      ).timeout(const Duration(seconds: 8));
+      ).timeout(const Duration(seconds: 12));
     } catch (_) { return null; }
   }
 
@@ -367,7 +387,7 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
 
   // ── Pin picker inline ─────────────────────────────────────────────────────
 
-  void _enterPinPickMode(bool isOrigin) {
+  Future<void> _enterPinPickMode(bool isOrigin) async {
     final route   = ref.read(tripRouteProvider);
     final current = isOrigin ? route.origin : route.stops.firstOrNull;
     if (current != null) {
@@ -375,10 +395,19 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
         CameraUpdate.newLatLngZoom(LatLng(current.lat, current.lng), 17),
       );
     }
+    // Elimina el símbolo del mapa — el overlay fijo lo reemplaza durante el pick
+    if (isOrigin && _originSym != null) {
+      await _ctrl?.removeSymbol(_originSym!);
+      _originSym = null;
+    }
+    if (!isOrigin && _destSym != null) {
+      await _ctrl?.removeSymbol(_destSym!);
+      _destSym = null;
+    }
     setState(() {
       _pinPickMode     = true;
       _pinPickIsOrigin = isOrigin;
-      _pinPickAddress  = current?.displayName;
+      _pinPickAddress  = null; // se actualiza en _geocodeCamera tras la animación
       _pinPickLoading  = false;
     });
   }
@@ -394,15 +423,7 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
     final pos = _ctrl?.cameraPosition?.target;
     if (pos == null) return;
     setState(() => _pinPickLoading = true);
-
-    // Mover el símbolo existente al centro de la cámara (sin overlay extra)
-    final ll = LatLng(pos.latitude, pos.longitude);
-    if (_pinPickIsOrigin && _originSym != null) {
-      await _ctrl?.updateSymbol(_originSym!, SymbolOptions(geometry: ll));
-    } else if (!_pinPickIsOrigin && _destSym != null) {
-      await _ctrl?.updateSymbol(_destSym!, SymbolOptions(geometry: ll));
-    }
-
+    // Solo reverse geocode — el overlay fijo ya muestra la posición exacta
     final addr = await ref
         .read(geocodingServiceProvider)
         .reverseGeocode(pos.latitude, pos.longitude);
@@ -414,21 +435,48 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
   }
 
   Future<void> _confirmPinPick() async {
+    // Cancelar geocoding pendiente — no queremos que sobreescriba después
+    _geocodeDebounce?.cancel();
+
     final pos = _ctrl?.cameraPosition?.target;
     if (pos == null) return;
+
+    // Salir del modo pick y aplicar posición inmediatamente con nombre provisional
     final name = _pinPickAddress ?? '';
-    // Si no hay dirección, hacer un último intento
-    final resolvedName = name.isNotEmpty
-        ? name
-        : await ref.read(geocodingServiceProvider).reverseGeocode(pos.latitude, pos.longitude)
-            ?? 'Lat ${pos.latitude.toStringAsFixed(5)}, Lng ${pos.longitude.toStringAsFixed(5)}';
-    final parts = resolvedName.split(', ');
-    final short = parts.length >= 2 ? '${parts[0]}, ${parts[1]}' : parts[0];
+    final shortName = name.isNotEmpty ? _short(name) : '';
     setState(() => _pinPickMode = false);
+
     await _applyPlace(
-      PlaceResult(displayName: resolvedName, shortName: short, lat: pos.latitude, lng: pos.longitude),
+      PlaceResult(
+        displayName: name.isNotEmpty ? name : '...',
+        shortName:   shortName.isNotEmpty ? shortName : '...',
+        lat: pos.latitude,
+        lng: pos.longitude,
+      ),
       _pinPickIsOrigin ? _SearchTarget.origin : _SearchTarget.destination,
     );
+
+    // Geocoding en background para obtener nombre real si no lo tenemos
+    if (name.isEmpty) {
+      final address = await ref
+          .read(geocodingServiceProvider)
+          .reverseGeocode(pos.latitude, pos.longitude);
+      if (!mounted || address == null || address.isEmpty) return;
+      if (_pinPickIsOrigin) {
+        final o = ref.read(tripRouteProvider).origin;
+        if (o == null) return;
+        ref.read(tripRouteProvider.notifier).setOrigin(
+          PlaceResult(displayName: address, shortName: _short(address), lat: o.lat, lng: o.lng),
+        );
+      } else {
+        final d = ref.read(tripRouteProvider).stops.firstOrNull;
+        if (d == null) return;
+        ref.read(tripRouteProvider.notifier).updateStop(
+          0,
+          PlaceResult(displayName: address, shortName: _short(address), lat: d.lat, lng: d.lng),
+        );
+      }
+    }
   }
 
   Future<void> _clearMapDest() async {
@@ -488,8 +536,9 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
           GestureDetector(
             onTap: _target != _SearchTarget.none ? _closeSearch : null,
             child: MapLibreMap(
-              onMapCreated: _onMapCreated,
-              onCameraIdle: _onMapIdle,
+              onMapCreated:  _onMapCreated,
+              onCameraIdle:  _onMapIdle,
+
               initialCameraPosition: const CameraPosition(
                 target: LatLng(-0.2295, -78.5243),
                 zoom: 13,
@@ -502,6 +551,31 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
 
           // ── Overlay pin pick inline ──────────────────────────────────────
           if (_pinPickMode) ...[
+            // Pin fijo en el centro — mismo tear-drop que los pins del mapa
+            if (_originPinBytes != null && _destPinBytes != null)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Builder(builder: (ctx) {
+                    // El Canvas dibuja en px físicos; dividir por dpr da el tamaño
+                    // visual idéntico al símbolo del mapa (iconSize: 1.0)
+                    final dpr = MediaQuery.of(ctx).devicePixelRatio;
+                    final w = (_pinPickIsOrigin ? 56.0 : 64.0) / dpr;
+                    final h = (_pinPickIsOrigin ? 78.0 : 90.0) / dpr;
+                    return Center(
+                      child: Transform.translate(
+                        offset: Offset(0, -h / 2),
+                        child: Image.memory(
+                          _pinPickIsOrigin ? _originPinBytes! : _destPinBytes!,
+                          width:  w,
+                          height: h,
+                          gaplessPlayback: true,
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+
             // Botón atrás
             Positioned(
               top: MediaQuery.of(context).padding.top + 8,

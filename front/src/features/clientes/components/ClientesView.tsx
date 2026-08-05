@@ -34,7 +34,7 @@ function OtpLookup() {
       <div className="flex items-center gap-2 mb-3">
         <span className="text-lg">🔐</span>
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Consultar OTP de usuario</h2>
-        <span className="ml-auto text-xs text-gray-400">Soporte — código no recibido</span>
+        <span className="ml-auto text-xs text-gray-400">Soporte — registro o recuperación de contraseña</span>
       </div>
       <div className="flex gap-2">
         <input
@@ -57,7 +57,7 @@ function OtpLookup() {
       {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
 
       {result && !result.found && (
-        <p className="mt-3 text-sm text-gray-500">No hay OTP pendiente para ese número (ya verificó o no existe).</p>
+        <p className="mt-3 text-sm text-gray-500">No hay OTP pendiente para ese número (ya verificó, número no registrado, o el código expiró hace tiempo).</p>
       )}
 
       {result?.found && (

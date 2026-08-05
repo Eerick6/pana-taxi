@@ -58,7 +58,13 @@ final appRouter = GoRouter(
     ),
     GoRoute(
       path: '/reset-password',
-      builder: (context, state) => ResetPasswordPage(email: state.extra as String? ?? ''),
+      builder: (context, state) {
+        final extra = state.extra as Map? ?? {};
+        return ResetPasswordPage(
+          phone:   extra['phone'] as String? ?? '',
+          devCode: extra['dev_code'] as String?,
+        );
+      },
     ),
     GoRoute(
       path: '/home',

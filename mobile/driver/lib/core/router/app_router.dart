@@ -45,8 +45,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           final extra = state.extra;
           if (extra is Map) {
             return OtpPage(
-              phone: extra['phone'] as String,
-              devCode: extra['dev_code'] as String?,
+              phone:     extra['phone'] as String,
+              devCode:   extra['dev_code'] as String?,
+              photoPath: extra['photo_path'] as String?,
             );
           }
           return OtpPage(phone: extra as String);
@@ -56,7 +57,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/auth/forgot-password',  builder: (_, _) => const ForgotPasswordPage()),
       GoRoute(
         path: '/auth/reset-password',
-        builder: (_, state) => ResetPasswordPage(email: state.extra as String? ?? ''),
+        builder: (_, state) {
+          final extra = state.extra as Map? ?? {};
+          return ResetPasswordPage(
+            phone:   extra['phone'] as String? ?? '',
+            devCode: extra['dev_code'] as String?,
+          );
+        },
       ),
 
       // ── Main shell (4 tabs: Mapa | Mensajes | Billetera | Perfil) ────────────

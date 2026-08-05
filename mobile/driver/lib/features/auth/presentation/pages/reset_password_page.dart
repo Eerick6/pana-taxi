@@ -8,8 +8,9 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../data/repositories/auth_repository.dart';
 
 class ResetPasswordPage extends ConsumerStatefulWidget {
-  const ResetPasswordPage({super.key, required this.email});
-  final String email;
+  const ResetPasswordPage({super.key, required this.phone, this.devCode});
+  final String  phone;
+  final String? devCode;
 
   @override
   ConsumerState<ResetPasswordPage> createState() => _ResetPasswordPageState();
@@ -19,7 +20,7 @@ class _ResetPasswordPageState extends ConsumerState<ResetPasswordPage> {
   final _tokenCtrl    = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmCtrl  = TextEditingController();
-  bool _loading = false;
+  bool _loading  = false;
   bool _obscure1 = true;
   bool _obscure2 = true;
 
@@ -32,11 +33,11 @@ class _ResetPasswordPageState extends ConsumerState<ResetPasswordPage> {
   }
 
   Future<void> _submit() async {
-    final token    = _tokenCtrl.text.trim();
+    final otp      = _tokenCtrl.text.trim();
     final password = _passwordCtrl.text;
     final confirm  = _confirmCtrl.text;
 
-    if (token.length != 6) {
+    if (otp.length != 6) {
       _snack('El código debe tener 6 dígitos', isError: true);
       return;
     }
@@ -49,9 +50,30 @@ class _ResetPasswordPageState extends ConsumerState<ResetPasswordPage> {
       return;
     }
 
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('⚠️ Recuerda tu contraseña'),
+        content: const Text(
+          'Una vez cambiada, no podrás volver a cambiar tu contraseña durante 7 días.\n\n¿Estás seguro de que recuerdas la nueva contraseña?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sí, cambiar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
     setState(() => _loading = true);
     try {
-      await ref.read(authRepositoryProvider).resetPassword(widget.email, token, password);
+      await ref.read(authRepositoryProvider).resetPasswordPhone(widget.phone, otp, password);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Contraseña actualizada correctamente'),
@@ -76,9 +98,10 @@ class _ResetPasswordPageState extends ConsumerState<ResetPasswordPage> {
 
   @override
   Widget build(BuildContext context) {
-    final displayEmail = widget.email.isNotEmpty
-        ? widget.email.replaceRange(3, widget.email.indexOf('@'), '***')
-        : '';
+    final display = widget.phone.length > 6
+        ? '${widget.phone.substring(0, 6)}****'
+        : widget.phone;
+    final showDevHint = AppConfig.isDev && (widget.devCode?.isNotEmpty ?? false);
 
     return Scaffold(
       backgroundColor: AppColors.white,
@@ -98,13 +121,25 @@ class _ResetPasswordPageState extends ConsumerState<ResetPasswordPage> {
               Text('Restablecer contraseña', style: AppTextStyles.h2),
               const SizedBox(height: 8),
               Text(
-                displayEmail.isNotEmpty
-                    ? 'Ingresa el código enviado a $displayEmail y tu nueva contraseña.'
-                    : 'Ingresa el código enviado a tu correo y tu nueva contraseña.',
+                'Ingresa el código enviado a $display y tu nueva contraseña.',
                 style: AppTextStyles.body.copyWith(color: AppColors.gray500),
               ),
 
-              if (AppConfig.isDev) ...[
+              if (showDevHint) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.developer_mode, size: 16, color: AppColors.secondary),
+                    const SizedBox(width: 8),
+                    Text('DEV — código: ${widget.devCode}  (o usa 000000)', style: AppTextStyles.caption),
+                  ]),
+                ),
+              ] else if (AppConfig.isDev) ...[
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),

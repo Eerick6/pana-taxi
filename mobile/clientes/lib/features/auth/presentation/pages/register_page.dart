@@ -124,8 +124,61 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   // ── Photo ──────────────────────────────────────────────────────────────────
 
   Future<void> _pickPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.gray300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('Foto de perfil', style: AppTextStyles.h3),
+              const SizedBox(height: 16),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(
+                  backgroundColor: AppColors.primaryLight,
+                  child: Icon(Icons.camera_alt_outlined, color: AppColors.primary),
+                ),
+                title: Text('Tomar selfie', style: AppTextStyles.bodyMedium),
+                subtitle: Text('Usa la cámara frontal', style: AppTextStyles.caption),
+                onTap: () => Navigator.pop(context, ImageSource.camera),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(
+                  backgroundColor: AppColors.primaryLight,
+                  child: Icon(Icons.photo_library_outlined, color: AppColors.primary),
+                ),
+                title: Text('Elegir de galería', style: AppTextStyles.bodyMedium),
+                subtitle: Text('Selecciona una foto existente', style: AppTextStyles.caption),
+                onTap: () => Navigator.pop(context, ImageSource.gallery),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
     final img = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
+      source: source,
+      preferredCameraDevice: CameraDevice.front,
       maxWidth: 512,
       imageQuality: 80,
     );
@@ -144,6 +197,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
     final phone    = '+593${_phoneCtrl.text.trim()}';
     final password = _passCtrl.text;
 
+    if (_photoBytes == null) return _snack('La foto de perfil es obligatoria', isError: true);
     if (!_termsAccepted)   return _snack('Debes aceptar los Términos de uso');
     if (_termsVersion == null) return _snack('No se cargaron los términos. Intenta de nuevo.');
 
@@ -213,16 +267,28 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                         onTap: _pickPhoto,
                         child: Stack(
                           children: [
-                            CircleAvatar(
-                              radius: 48,
-                              backgroundColor: AppColors.gray100,
-                              backgroundImage: _photoBytes != null
-                                  ? MemoryImage(Uint8List.fromList(_photoBytes!))
-                                  : null,
-                              child: _photoBytes == null
-                                  ? const Icon(Icons.person,
-                                      size: 48, color: AppColors.gray400)
-                                  : null,
+                            Container(
+                              width: 98, height: 98,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: _photoBytes == null
+                                      ? AppColors.error
+                                      : AppColors.primary,
+                                  width: 2.5,
+                                ),
+                              ),
+                              child: CircleAvatar(
+                                radius: 46,
+                                backgroundColor: AppColors.gray100,
+                                backgroundImage: _photoBytes != null
+                                    ? MemoryImage(Uint8List.fromList(_photoBytes!))
+                                    : null,
+                                child: _photoBytes == null
+                                    ? const Icon(Icons.person,
+                                        size: 46, color: AppColors.gray400)
+                                    : null,
+                              ),
                             ),
                             Positioned(
                               bottom: 0, right: 0,
@@ -243,9 +309,25 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                     ),
                     Center(
                       child: Padding(
-                        padding: const EdgeInsets.only(top: 8, bottom: 24),
-                        child: Text('Foto de perfil (opcional)',
-                            style: AppTextStyles.caption),
+                        padding: const EdgeInsets.only(top: 8, bottom: 4),
+                        child: Text(
+                          'Foto de perfil *',
+                          style: AppTextStyles.caption.copyWith(
+                            color: _photoBytes == null ? AppColors.error : AppColors.gray500,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 20),
+                        child: Text(
+                          _photoBytes == null
+                              ? 'Toca para agregar tu foto'
+                              : 'Toca para cambiar la foto',
+                          style: AppTextStyles.caption.copyWith(color: AppColors.gray400),
+                        ),
                       ),
                     ),
 

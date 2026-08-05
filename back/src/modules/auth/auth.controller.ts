@@ -1,5 +1,5 @@
 import { Controller, Post, Get, Body, Query, UseGuards } from '@nestjs/common';
-import { IsEmail, IsString, MinLength, Matches } from 'class-validator';
+import { IsEmail, IsString, IsOptional, IsIn, MinLength, Matches } from 'class-validator';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { JwtGuard } from './guards/jwt.guard';
@@ -26,6 +26,22 @@ class LoginPhoneDto {
 
 class ForgotPasswordDto {
   @IsEmail() email: string;
+}
+
+class ForgotPasswordPhoneDto {
+  @IsString() @Matches(/^\+\d{7,15}$/) phone: string;
+  @IsOptional() @IsIn(['client', 'driver']) role?: 'client' | 'driver';
+}
+
+class ResetPasswordPhoneDto {
+  @IsString() @Matches(/^\+\d{7,15}$/) phone: string;
+  @IsString() otp: string;
+  @IsString()
+  @MinLength(8)
+  @Matches(/^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^()\-_=+])/, {
+    message: 'La contraseña debe tener al menos 1 mayúscula, 1 número y 1 carácter especial',
+  })
+  password: string;
 }
 
 class ResendInviteDto {
@@ -93,6 +109,17 @@ export class AuthController {
   @Post('password/reset')
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto.email, dto.token, dto.password);
+  }
+
+  @Post('password/forgot-phone')
+  forgotPasswordPhone(@Body() dto: ForgotPasswordPhoneDto) {
+    return this.authService.forgotPasswordPhone(dto.phone, dto.role);
+  }
+
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  @Post('password/reset-phone')
+  resetPasswordPhone(@Body() dto: ResetPasswordPhoneDto) {
+    return this.authService.resetPasswordPhone(dto.phone, dto.otp, dto.password);
   }
 
   @Throttle({ default: { ttl: 60000, limit: 3 } })

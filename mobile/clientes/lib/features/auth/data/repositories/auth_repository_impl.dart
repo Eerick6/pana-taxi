@@ -90,6 +90,13 @@ class AuthRepositoryImpl implements AuthRepository {
       _api.resetPassword(email, token, password);
 
   @override
+  Future<String?> forgotPasswordPhone(String phone) => _api.forgotPasswordPhone(phone);
+
+  @override
+  Future<void> resetPasswordPhone(String phone, String otp, String password) =>
+      _api.resetPasswordPhone(phone, otp, password);
+
+  @override
   Future<String> uploadPhoto(List<int> bytes, String filename) =>
       _api.uploadPhoto(bytes, filename);
 }

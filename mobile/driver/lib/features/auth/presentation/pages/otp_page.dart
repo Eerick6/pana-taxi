@@ -1,11 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/config/app_config.dart';
-import 'package:dio/dio.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/services/push_notification_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -17,9 +17,10 @@ import '../../../documents/data/providers/document_provider.dart';
 import '../../data/providers/auth_provider.dart';
 
 class OtpPage extends ConsumerStatefulWidget {
-  const OtpPage({super.key, required this.phone, this.devCode});
+  const OtpPage({super.key, required this.phone, this.devCode, this.photoPath});
   final String  phone;
   final String? devCode;
+  final String? photoPath;
 
   @override
   ConsumerState<OtpPage> createState() => _OtpPageState();
@@ -80,6 +81,19 @@ class _OtpPageState extends ConsumerState<OtpPage> {
     if (index > 0) _focusNodes[index - 1].requestFocus();
   }
 
+  void _onPasteAll(String digits) {
+    for (var i = 0; i < _length && i < digits.length; i++) {
+      _controllers[i].text = digits[i];
+    }
+    final filled = digits.length >= _length;
+    if (filled) {
+      _focusNodes[_length - 1].unfocus();
+      if (_code.length == _length) _verify();
+    } else {
+      _focusNodes[digits.length].requestFocus();
+    }
+  }
+
   void _snack(String msg, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
@@ -94,14 +108,26 @@ class _OtpPageState extends ConsumerState<OtpPage> {
     setState(() => _loading = true);
     try {
       await ref.read(authStateProvider.notifier).verifyOtp(widget.phone, code);
+
+      // Subir foto de perfil si viene del registro
+      if (widget.photoPath != null) {
+        try {
+          await ref.read(documentRepositoryProvider).uploadDocument(
+            'profile_photo',
+            File(widget.photoPath!),
+          );
+        } catch (_) {}
+      }
+
       ref.invalidate(driverProfileProvider);
       ref.invalidate(vehicleRequestsProvider);
       ref.invalidate(myApplicationsProvider);
       ref.invalidate(ownerRequestsProvider);
       ref.invalidate(myVehiclesProvider);
       ref.invalidate(documentsProvider);
-      final dio = ref.read(dioProvider);
-      await PushNotificationService.instance.initialize(dio);
+      PushNotificationService.instance
+          .ensureTokenRegistered(ref.read(dioProvider))
+          .catchError((_) {});
       if (mounted) context.go('/home');
     } catch (e) {
       if (!mounted) return;
@@ -204,10 +230,11 @@ class _OtpPageState extends ConsumerState<OtpPage> {
                 children: List.generate(
                   _length,
                   (i) => _OtpBox(
-                    controller: _controllers[i],
-                    focusNode:  _focusNodes[i],
+                    controller:  _controllers[i],
+                    focusNode:   _focusNodes[i],
                     onDigit:     (d) => _onDigit(i, d),
                     onBackspace: ()  => _onBackspace(i),
+                    onPasteAll:  (s) => _onPasteAll(s),
                   ),
                 ),
               ),
@@ -298,12 +325,14 @@ class _OtpBox extends StatefulWidget {
     required this.focusNode,
     required this.onDigit,
     required this.onBackspace,
+    required this.onPasteAll,
   });
 
   final TextEditingController controller;
   final FocusNode             focusNode;
   final ValueChanged<String>  onDigit;
   final VoidCallback          onBackspace;
+  final ValueChanged<String>  onPasteAll;
 
   @override
   State<_OtpBox> createState() => _OtpBoxState();
@@ -326,8 +355,13 @@ class _OtpBoxState extends State<_OtpBox> {
           if (value.isEmpty) {
             widget.onBackspace();
           } else {
-            final digit = value.replaceAll(RegExp(r'\D'), '');
-            if (digit.isNotEmpty) widget.onDigit(digit[0]);
+            final digits = value.replaceAll(RegExp(r'\D'), '');
+            if (digits.length > 1) {
+              widget.controller.text = digits[0];
+              widget.onPasteAll(digits);
+            } else if (digits.isNotEmpty) {
+              widget.onDigit(digits[0]);
+            }
           }
         },
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],

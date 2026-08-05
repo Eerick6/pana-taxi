@@ -6,7 +6,7 @@ import '../../../../core/services/biometric_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../data/providers/auth_provider.dart';
-import '../../data/repositories/auth_repository.dart';
+import '../../data/repositories/auth_repository.dart' show authRepositoryProvider, PendingVerificationException;
 
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
@@ -53,6 +53,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       final password = _passwordCtrl.text;
       await ref.read(authStateProvider.notifier).loginWithPhone(phone, password);
       if (mounted) context.go('/home');
+    } on PendingVerificationException catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      context.go('/auth/otp', extra: {'phone': e.phone, 'dev_code': e.devCode ?? ''});
     } catch (e) {
       if (mounted) {
         final msg = e.toString().replaceAll('Exception: ', '');
@@ -265,6 +269,21 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 ],
 
                 const SizedBox(height: 24),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text('¿No tienes cuenta? ',
+                        style: AppTextStyles.body.copyWith(color: AppColors.gray500)),
+                    GestureDetector(
+                      onTap: () => context.go('/auth/register'),
+                      child: Text('Crear cuenta',
+                          style: AppTextStyles.label.copyWith(color: AppColors.secondary)),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 12),
 
                 Center(
                   child: Text(
