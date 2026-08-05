@@ -176,6 +176,39 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
       }
     });
 
+    // Radio de búsqueda expandido por el backend
+    socket.on('trip.radius_expanded', (data) {
+      if (!_socketActive || !mounted || data is! Map) return;
+      final map = Map<String, dynamic>.from(data);
+      final newRadius = (map['search_radius_km'] as num?)?.toDouble();
+      if (newRadius == null) return;
+      setState(() {
+        _trip = ActiveTrip(
+          id:                  _trip.id,
+          status:              _trip.status,
+          fareMode:            _trip.fareMode,
+          originAddress:       _trip.originAddress,
+          destinationAddress:  _trip.destinationAddress,
+          originLat:           _trip.originLat,
+          originLng:           _trip.originLng,
+          destinationLat:      _trip.destinationLat,
+          destinationLng:      _trip.destinationLng,
+          suggestedFare:       _trip.suggestedFare,
+          clientOffer:         _trip.clientOffer,
+          searchRadiusKm:      newRadius,
+          routeGeometry:       _trip.routeGeometry,
+          estimatedDistanceKm: _trip.estimatedDistanceKm,
+          createdAt:           _trip.createdAt,
+          isActive:            _trip.isActive,
+          isNegotiated:        _trip.isNegotiated,
+        );
+      });
+      if (_mapReady && _trip.originLat != null && _trip.originLng != null) {
+        final r = newRadius.clamp(0.5, 20.0);
+        _ctrl?.setGeoJsonSource('circle-src', _circleGeoJson(_trip.originLat!, _trip.originLng!, r));
+      }
+    });
+
     // Rescatar ofertas enviadas antes de que el socket estuviera listo
     // y mantener sincronía cada 10s como respaldo al socket
     if (_showOffersPanel) {

@@ -21,7 +21,7 @@ export class TripsScheduler {
   async expandSearchRadii(): Promise<void> {
     const pendingTrips = await this.tripsRepo.find({
       where: { status: TripStatus.REQUESTED },
-      relations: ['cooperative'],
+      relations: ['cooperative', 'client'],
     });
 
     for (const trip of pendingTrips) {
@@ -49,7 +49,7 @@ export class TripsScheduler {
         radius_last_expanded_at: new Date(),
       });
 
-      this.gateway.notifyTripUpdate(trip.id, 'trip.radius_expanded', {
+      const expansionPayload = {
         trip_id: trip.id,
         search_radius_km: newRadius,
         origin_lat: trip.origin_lat ? parseFloat(trip.origin_lat as any) : null,
@@ -60,7 +60,12 @@ export class TripsScheduler {
         fare_mode: trip.fare_mode,
         client_offer: trip.client_offer ? parseFloat(trip.client_offer as any) : null,
         distance_km: trip.estimated_distance_km ? parseFloat(trip.estimated_distance_km as any) : null,
-      });
+      };
+      this.gateway.notifyTripUpdate(trip.id, 'trip.radius_expanded', expansionPayload);
+      // Client is in ROOM.user during search, not ROOM.trip — notify directly
+      if (trip.client?.id) {
+        this.gateway.notifyUser(trip.client.id, 'trip.radius_expanded', expansionPayload);
+      }
     }
   }
 
