@@ -28,17 +28,19 @@ class TripActivePage extends ConsumerStatefulWidget {
 }
 
 class _TripActivePageState extends ConsumerState<TripActivePage> {
-  bool _loading = false;
+  bool _loading      = false;
   bool _socketActive = false;
+  void Function(dynamic)? _onCancelled;
 
   @override
   void initState() {
     super.initState();
+    _socketActive = true;
     _listenOfferAccepted();
+    _listenCancelled();
   }
 
   void _listenOfferAccepted() {
-    _socketActive = true;
     final socket = ref.read(socketClientProvider);
     socket.on('trip.offer_accepted', (data) async {
       if (!_socketActive || !mounted) return;
@@ -50,9 +52,47 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
     });
   }
 
+  void _listenCancelled() {
+    final socket = ref.read(socketClientProvider);
+    _onCancelled = (data) async {
+      if (!_socketActive || !mounted) return;
+      final map         = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      final reason      = map['reason']       as String?;
+      final cancelledBy = map['cancelled_by'] as String?;
+
+      // Limpiar viaje del provider antes del dialog para que al volver al home
+      // no intente redirigir de nuevo a esta página
+      ref.read(activeTripProvider.notifier).clear();
+
+      if (cancelledBy != 'driver' && reason != null && reason.isNotEmpty && mounted) {
+        final who = cancelledBy == 'client'
+            ? 'El cliente canceló el viaje'
+            : 'El viaje fue cancelado';
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Viaje cancelado'),
+            content: Text('$who:\n$reason'),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Entendido'),
+              ),
+            ],
+          ),
+        );
+      }
+      if (mounted) context.go('/home');
+    };
+    socket.on('trip.cancelled', _onCancelled!);
+  }
+
   @override
   void dispose() {
     _socketActive = false;
+    final socket = ref.read(socketClientProvider);
+    socket.off('trip.cancelled');
     // NO llamar socket.off('trip.offer_accepted') — home_page también tiene ese listener
     super.dispose();
   }
@@ -82,26 +122,9 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
       error: (e, _) => Scaffold(body: Center(child: Text('Error: $e'))),
       data: (trip) {
         if (trip == null) {
-          WidgetsBinding.instance.addPostFrameCallback((_) async {
-            if (!mounted) return;
-            final reason = ref.read(tripCancelReasonProvider);
-            if (reason != null) {
-              ref.read(tripCancelReasonProvider.notifier).state = null;
-              await showDialog<void>(
-                context: context,
-                barrierDismissible: false,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Viaje cancelado'),
-                  content: Text(reason),
-                  actions: [
-                    ElevatedButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Entendido'),
-                    ),
-                  ],
-                ),
-              );
-            }
+          // El listener _listenCancelled maneja el dialog y la navegación.
+          // Si llegamos aquí sin cancelación (ej: viaje completado), ir al home.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) context.go('/home');
           });
           return const Scaffold(body: Center(child: CircularProgressIndicator()));

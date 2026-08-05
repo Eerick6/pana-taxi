@@ -12,9 +12,6 @@ final liveMeterProvider = StateProvider<({double amount, double incPerSec})>(
   (ref) => (amount: 0, incPerSec: 0),
 );
 
-// Razón de cancelación por parte del cliente — mostrada antes de ir al home
-final tripCancelReasonProvider = StateProvider<String?>((ref) => null);
-
 final activeTripProvider = AsyncNotifierProvider<ActiveTripNotifier, TripModel?>(
   ActiveTripNotifier.new,
 );
@@ -25,22 +22,6 @@ class ActiveTripNotifier extends AsyncNotifier<TripModel?> {
     final socket = ref.read(socketClientProvider);
     await socket.connect();
 
-    void onCancelled(dynamic data) {
-      if (data is Map) {
-        final reason      = data['reason']       as String?;
-        final cancelledBy = data['cancelled_by'] as String?;
-        // Mostrar razón cuando cancela el cliente, la cooperativa o la plataforma
-        if (cancelledBy != 'driver') {
-          final who = cancelledBy == 'client'
-              ? 'El cliente canceló el viaje'
-              : 'El viaje fue cancelado';
-          final msg = (reason != null && reason.isNotEmpty) ? '$who:\n$reason' : who;
-          ref.read(tripCancelReasonProvider.notifier).state = msg;
-        }
-      }
-      state = const AsyncData(null);
-    }
-
     void onMeterUpdate(dynamic data) {
       if (data is! Map) return;
       final amount = (data['meter_amount'] as num?)?.toDouble() ?? 0;
@@ -48,11 +29,9 @@ class ActiveTripNotifier extends AsyncNotifier<TripModel?> {
       ref.read(liveMeterProvider.notifier).state = (amount: amount, incPerSec: inc);
     }
 
-    socket.on('trip.cancelled',    onCancelled);
     socket.on('trip.meter_update', onMeterUpdate);
 
     ref.onDispose(() {
-      socket.off('trip.cancelled');
       socket.off('trip.meter_update');
     });
 
