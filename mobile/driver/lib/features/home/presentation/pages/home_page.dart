@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:go_router/go_router.dart';
@@ -19,6 +22,22 @@ import '../widgets/home_pending_screen.dart';
 import '../widgets/home_top_bar.dart';
 import '../widgets/home_trip_banner.dart';
 
+Uint8List? _locationDotCache;
+Future<Uint8List> _getLocationDotBytes() async =>
+    _locationDotCache ??= await _buildLogoBytes();
+
+Future<Uint8List> _buildLogoBytes() async {
+  final data = await rootBundle.load('assets/images/logo.webp');
+  final codec = await ui.instantiateImageCodec(
+    data.buffer.asUint8List(),
+    targetWidth: 36,
+    targetHeight: 36,
+  );
+  final frame = await codec.getNextFrame();
+  final bytes = await frame.image.toByteData(format: ui.ImageByteFormat.png);
+  return bytes!.buffer.asUint8List();
+}
+
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
@@ -28,6 +47,8 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver {
   MapLibreMapController? _mapController;
+  Symbol? _locationSymbol;
+  bool _imageReady = false;
   StreamSubscription<geo.Position>? _locationSub;
   geo.Position? _pendingPosition;
   bool _resumeChecked = false;
@@ -219,7 +240,10 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
         locationSettings: const geo.LocationSettings(accuracy: geo.LocationAccuracy.high),
       );
       _pendingPosition = pos;
-      _flyTo(pos);
+      if (_imageReady) {
+        await _updateSymbol(pos);
+        _flyTo(pos);
+      }
     } catch (_) {}
 
     _locationSub = geo.Geolocator.getPositionStream(
@@ -229,6 +253,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       ),
     ).listen((pos) {
       _pendingPosition = pos;
+      if (_imageReady) _updateSymbol(pos);
       _flyTo(pos);
       ref.read(socketClientProvider).emit('location.update', {
         'lat': pos.latitude,
@@ -236,6 +261,32 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
         'speed_kmh': pos.speed > 0 ? pos.speed * 3.6 : 0.0,
       });
     });
+  }
+
+  Future<void> _onStyleLoaded() async {
+    final bytes = await _getLocationDotBytes();
+    await _mapController?.addImage('location-dot', bytes);
+    _imageReady = true;
+    if (_pendingPosition != null) {
+      await _updateSymbol(_pendingPosition!);
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          LatLng(_pendingPosition!.latitude, _pendingPosition!.longitude), 15),
+      );
+    }
+  }
+
+  Future<void> _updateSymbol(geo.Position pos) async {
+    final latlng = LatLng(pos.latitude, pos.longitude);
+    if (_locationSymbol == null) {
+      _locationSymbol = await _mapController?.addSymbol(
+        SymbolOptions(geometry: latlng, iconImage: 'location-dot', iconSize: 1.0),
+      );
+    } else {
+      await _mapController?.updateSymbol(
+        _locationSymbol!, SymbolOptions(geometry: latlng),
+      );
+    }
   }
 
   void _flyTo(geo.Position pos) {
@@ -324,14 +375,11 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
           MapLibreMap(
             styleString: 'https://tiles.openfreemap.org/styles/liberty',
             initialCameraPosition: const CameraPosition(
-              target: LatLng(-0.2295, -78.5243), zoom: 13,
+              target: LatLng(-0.2295, -78.5243), zoom: 13, tilt: 40,
             ),
-            onMapCreated: (controller) {
-              _mapController = controller;
-              if (_pendingPosition != null) _flyTo(_pendingPosition!);
-            },
-            myLocationEnabled: true,
-            myLocationRenderMode: MyLocationRenderMode.normal,
+            onMapCreated: (controller) => _mapController = controller,
+            onStyleLoadedCallback: _onStyleLoaded,
+            myLocationEnabled: false,
             trackCameraPosition: false,
           ),
 

@@ -204,6 +204,11 @@ class PushNotificationService {
     }
   }
 
+  Future<void> ensureTokenRegistered(Dio dio) async {
+    _dio = dio;
+    await _registerToken();
+  }
+
   Future<void> deleteToken(Dio dio) async {
     try {
       await _messaging.deleteToken();

@@ -202,6 +202,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             initialCameraPosition: const CameraPosition(
               target: LatLng(-0.2295, -78.5243),
               zoom: 13,
+              tilt: 40,
             ),
             styleString: 'https://tiles.openfreemap.org/styles/liberty',
             myLocationEnabled: false,

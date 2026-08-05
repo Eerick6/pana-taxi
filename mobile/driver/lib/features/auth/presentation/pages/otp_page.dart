@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:dio/dio.dart';
 import '../../../../core/config/app_config.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/services/push_notification_service.dart';
@@ -14,6 +15,7 @@ import '../../../profile/data/providers/profile_provider.dart';
 import '../../../vehicle_request/data/providers/vehicle_request_provider.dart';
 import '../../../vehicles/data/providers/vehicle_provider.dart';
 import '../../../documents/data/providers/document_provider.dart';
+import '../../../documents/data/repositories/document_repository.dart';
 import '../../data/providers/auth_provider.dart';
 
 class OtpPage extends ConsumerStatefulWidget {

@@ -25,17 +25,12 @@ enum _SearchTarget { none, origin, destination }
 
 // ── Canvas markers ────────────────────────────────────────────────────────────
 
-Future<Uint8List> _buildTearDropPin(Color color, {double w = 56, double h = 78}) async {
-  final cx    = w / 2;
-  final headR = w * 0.36;
+Future<Uint8List> _buildFlatPin(Color color, {double w = 56, double h = 78, bool isOrigin = true}) async {
+  final cx     = w / 2;
+  final headR  = w * 0.36;
   final headCY = headR + 4;
   final rec    = ui.PictureRecorder();
   final canvas = Canvas(rec, Rect.fromLTWH(0, 0, w, h));
-
-  canvas.drawOval(
-    Rect.fromCenter(center: Offset(cx, h - 4), width: 18, height: 6),
-    Paint()..color = Colors.black.withValues(alpha: 0.22),
-  );
 
   final path = Path()
     ..addOval(Rect.fromCircle(center: Offset(cx, headCY), radius: headR))
@@ -49,9 +44,29 @@ Future<Uint8List> _buildTearDropPin(Color color, {double w = 56, double h = 78})
       Paint()
         ..color       = Colors.white
         ..style       = PaintingStyle.stroke
-        ..strokeWidth = 2.5);
+        ..strokeWidth = 3.0);
 
-  canvas.drawCircle(Offset(cx, headCY), headR * 0.34, Paint()..color = Colors.white);
+  final iconPaint = Paint()
+    ..color       = Colors.white
+    ..style       = PaintingStyle.stroke
+    ..strokeWidth = 2.5
+    ..strokeCap   = StrokeCap.round
+    ..strokeJoin  = StrokeJoin.round;
+
+  final s = headR * 0.38;
+  if (isOrigin) {
+    canvas.drawPath(
+      Path()
+        ..moveTo(cx - s, headCY + s * 0.2)
+        ..lineTo(cx - s * 0.1, headCY + s * 0.9)
+        ..lineTo(cx + s, headCY - s * 0.7),
+      iconPaint,
+    );
+  } else {
+    final d = s * 0.7;
+    canvas.drawLine(Offset(cx - d, headCY - d), Offset(cx + d, headCY + d), iconPaint);
+    canvas.drawLine(Offset(cx + d, headCY - d), Offset(cx - d, headCY + d), iconPaint);
+  }
 
   final img   = await rec.endRecording().toImage(w.toInt(), h.toInt());
   final bytes = await img.toByteData(format: ui.ImageByteFormat.png);
@@ -59,10 +74,10 @@ Future<Uint8List> _buildTearDropPin(Color color, {double w = 56, double h = 78})
 }
 
 Future<Uint8List> _buildOriginPinBytes() =>
-    _buildTearDropPin(const Color(0xFF34A853));           // verde
+    _buildFlatPin(const Color(0xFF22C55E), w: 72, h: 100, isOrigin: true);
 
 Future<Uint8List> _buildDestPinBytes() =>
-    _buildTearDropPin(const Color(0xFFEA4335), w: 64, h: 90); // rojo, más grande
+    _buildFlatPin(const Color(0xFFEF4444), w: 80, h: 112, isOrigin: false);
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -73,13 +88,12 @@ class RequestTripPage extends ConsumerStatefulWidget {
   ConsumerState<RequestTripPage> createState() => _RequestTripPageState();
 }
 
-class _RequestTripPageState extends ConsumerState<RequestTripPage> {
+class _RequestTripPageState extends ConsumerState<RequestTripPage>
+    with SingleTickerProviderStateMixin {
   // Mapa
   MapLibreMapController? _ctrl;
   bool    _mapReady    = false;
   bool    _routeAdded  = false;
-  Symbol? _originSym;
-  Symbol? _destSym;
 
   // Origen
   bool _loadingOrigin = true;
@@ -95,6 +109,8 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
   String?     _pinPickAddress;
   Uint8List?  _originPinBytes;
   Uint8List?  _destPinBytes;
+  late AnimationController _pinFloatCtrl;
+  late Animation<double>   _pinFloat;
 
   // Búsqueda inline
   _SearchTarget _target = _SearchTarget.none;
@@ -108,6 +124,10 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
   @override
   void initState() {
     super.initState();
+    _pinFloatCtrl = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 850));
+    _pinFloat = Tween<double>(begin: -5.0, end: 5.0).animate(
+      CurvedAnimation(parent: _pinFloatCtrl, curve: Curves.easeInOut));
     if (ref.read(tripRouteProvider).origin == null) {
       _kickGps(); // arranca en paralelo con la carga del mapa
     } else {
@@ -117,6 +137,7 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
 
   @override
   void dispose() {
+    _pinFloatCtrl.dispose();
     _searchCtrl.dispose();
     _searchFocus.dispose();
     _debounce?.cancel();
@@ -132,6 +153,12 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
     _destPinBytes   = await _buildDestPinBytes();
     await c.addImage('origin-pin', _originPinBytes!);
     await c.addImage('dest-pin',   _destPinBytes!);
+    await c.addGeoJsonSource('origin-pin-src', _emptyGeoJson());
+    await c.addGeoJsonSource('dest-pin-src',   _emptyGeoJson());
+    await c.addSymbolLayer('origin-pin-src', 'origin-pin-layer',
+      const SymbolLayerProperties(iconImage: 'origin-pin', iconAnchor: 'bottom', iconSize: 1.0, iconAllowOverlap: true));
+    await c.addSymbolLayer('dest-pin-src', 'dest-pin-layer',
+      const SymbolLayerProperties(iconImage: 'dest-pin', iconAnchor: 'bottom', iconSize: 1.0, iconAllowOverlap: true));
     _mapReady = true;
 
     // Restaurar ruta si ya existe (usuario regresó a esta pantalla)
@@ -161,27 +188,21 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
   void _cam(double lat, double lng, double zoom) =>
       _ctrl?.animateCamera(CameraUpdate.newLatLngZoom(LatLng(lat, lng), zoom));
 
-  Future<void> _placeOriginMarker(double lat, double lng) async {
-    if (_ctrl == null) return;
-    final ll = LatLng(lat, lng);
-    if (_originSym == null) {
-      _originSym = await _ctrl!.addSymbol(
-          SymbolOptions(geometry: ll, iconImage: 'origin-pin', iconSize: 1.0, iconAnchor: 'bottom'));
-    } else {
-      await _ctrl!.updateSymbol(_originSym!, SymbolOptions(geometry: ll));
-    }
-  }
+  Future<void> _placeOriginMarker(double lat, double lng) async =>
+      _ctrl?.setGeoJsonSource('origin-pin-src', _pinGeoJson(lat, lng));
 
-  Future<void> _placeDestMarker(double lat, double lng) async {
-    if (_ctrl == null) return;
-    final ll = LatLng(lat, lng);
-    if (_destSym == null) {
-      _destSym = await _ctrl!.addSymbol(
-          SymbolOptions(geometry: ll, iconImage: 'dest-pin', iconSize: 1.0, iconAnchor: 'bottom'));
-    } else {
-      await _ctrl!.updateSymbol(_destSym!, SymbolOptions(geometry: ll));
-    }
-  }
+  Future<void> _placeDestMarker(double lat, double lng) async =>
+      _ctrl?.setGeoJsonSource('dest-pin-src', _pinGeoJson(lat, lng));
+
+  Map<String, dynamic> _emptyGeoJson() =>
+      {'type': 'FeatureCollection', 'features': <dynamic>[]};
+
+  Map<String, dynamic> _pinGeoJson(double lat, double lng) => {
+    'type': 'FeatureCollection',
+    'features': [
+      {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [lng, lat]}, 'properties': <String, dynamic>{}},
+    ],
+  };
 
   Future<void> _drawRoute(Map<String, dynamic> geometry) async {
     if (_ctrl == null) return;
@@ -195,18 +216,35 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
       await _ctrl!.setGeoJsonSource('route-src', geojson);
     } else {
       await _ctrl!.addGeoJsonSource('route-src', geojson);
+      // Sombra difusa — debajo de los pins
+      await _ctrl!.addLineLayer(
+        'route-src', 'route-shadow',
+        const LineLayerProperties(
+          lineColor: '#000000', lineWidth: 18.0, lineOpacity: 0.12, lineBlur: 5.0,
+          lineCap: 'round', lineJoin: 'round',
+        ),
+        belowLayerId: 'origin-pin-layer',
+      );
+      // Borde/casing oscuro — debajo de los pins
+      await _ctrl!.addLineLayer(
+        'route-src', 'route-casing',
+        const LineLayerProperties(
+          lineColor: '#1A52C4', lineWidth: 11.0, lineCap: 'round', lineJoin: 'round',
+        ),
+        belowLayerId: 'origin-pin-layer',
+      );
+      // Línea principal — debajo de los pins
       await _ctrl!.addLineLayer(
         'route-src', 'route-line',
         const LineLayerProperties(
-          lineColor: '#4285F4',
-          lineWidth: 5.0,
-          lineCap:   'round',
-          lineJoin:  'round',
+          lineColor: '#5689FB', lineWidth: 7.0, lineCap: 'round', lineJoin: 'round',
         ),
+        belowLayerId: 'origin-pin-layer',
       );
       _routeAdded = true;
     }
   }
+
 
   Future<void> _fitBounds(PlaceResult o, PlaceResult d) async {
     if (_ctrl == null) return;
@@ -395,19 +433,14 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
         CameraUpdate.newLatLngZoom(LatLng(current.lat, current.lng), 17),
       );
     }
-    // Elimina el símbolo del mapa — el overlay fijo lo reemplaza durante el pick
-    if (isOrigin && _originSym != null) {
-      await _ctrl?.removeSymbol(_originSym!);
-      _originSym = null;
-    }
-    if (!isOrigin && _destSym != null) {
-      await _ctrl?.removeSymbol(_destSym!);
-      _destSym = null;
-    }
+    // Oculta el pin del mapa — el overlay fijo lo reemplaza durante el pick
+    if (isOrigin) await _ctrl?.setGeoJsonSource('origin-pin-src', _emptyGeoJson());
+    if (!isOrigin) await _ctrl?.setGeoJsonSource('dest-pin-src', _emptyGeoJson());
+    _pinFloatCtrl.repeat(reverse: true);
     setState(() {
       _pinPickMode     = true;
       _pinPickIsOrigin = isOrigin;
-      _pinPickAddress  = null; // se actualiza en _geocodeCamera tras la animación
+      _pinPickAddress  = null;
       _pinPickLoading  = false;
     });
   }
@@ -444,6 +477,7 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
     // Salir del modo pick y aplicar posición inmediatamente con nombre provisional
     final name = _pinPickAddress ?? '';
     final shortName = name.isNotEmpty ? _short(name) : '';
+    _pinFloatCtrl.stop();
     setState(() => _pinPickMode = false);
 
     await _applyPlace(
@@ -481,10 +515,7 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
 
   Future<void> _clearMapDest() async {
     if (_ctrl == null) return;
-    if (_destSym != null) {
-      await _ctrl!.removeSymbol(_destSym!);
-      _destSym = null;
-    }
+    await _ctrl!.setGeoJsonSource('dest-pin-src', _emptyGeoJson());
     if (_routeAdded) {
       await _ctrl!.setGeoJsonSource('route-src', {
         'type': 'FeatureCollection',
@@ -555,22 +586,22 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
             if (_originPinBytes != null && _destPinBytes != null)
               Positioned.fill(
                 child: IgnorePointer(
-                  child: Builder(builder: (ctx) {
-                    // El Canvas dibuja en px físicos; dividir por dpr da el tamaño
-                    // visual idéntico al símbolo del mapa (iconSize: 1.0)
-                    final dpr = MediaQuery.of(ctx).devicePixelRatio;
-                    final w = (_pinPickIsOrigin ? 56.0 : 64.0) / dpr;
-                    final h = (_pinPickIsOrigin ? 78.0 : 90.0) / dpr;
-                    return Center(
-                      child: Transform.translate(
-                        offset: Offset(0, -h / 2),
-                        child: Image.memory(
-                          _pinPickIsOrigin ? _originPinBytes! : _destPinBytes!,
-                          width:  w,
-                          height: h,
-                          gaplessPlayback: true,
+                  child: AnimatedBuilder(
+                    animation: _pinFloat,
+                    builder: (ctx, _) {
+                      final dpr = MediaQuery.of(ctx).devicePixelRatio;
+                      final w = (_pinPickIsOrigin ? 72.0 : 80.0) / dpr;
+                      final h = (_pinPickIsOrigin ? 100.0 : 112.0) / dpr;
+                      return Center(
+                        child: Transform.translate(
+                          offset: Offset(0, -h / 2 + _pinFloat.value),
+                          child: Image.memory(
+                            _pinPickIsOrigin ? _originPinBytes! : _destPinBytes!,
+                            width:  w,
+                            height: h,
+                            gaplessPlayback: true,
+                          ),
                         ),
-                      ),
                     );
                   }),
                 ),
@@ -587,7 +618,7 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage> {
                   elevation: 4,
                   child: InkWell(
                     customBorder: const CircleBorder(),
-                    onTap: () => setState(() => _pinPickMode = false),
+                    onTap: () { _pinFloatCtrl.stop(); setState(() => _pinPickMode = false); },
                     child: const Padding(
                       padding: EdgeInsets.all(10),
                       child: Icon(Icons.arrow_back_ios_new, size: 18),
