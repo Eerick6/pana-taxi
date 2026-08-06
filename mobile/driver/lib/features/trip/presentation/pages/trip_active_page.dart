@@ -191,6 +191,11 @@ class _TripViewState extends ConsumerState<_TripView> {
   double _meterIncPerSec = 0;
   Timer? _meterTimer;
 
+  // Navegación paso a paso
+  List<Map<String, dynamic>> _navSteps  = [];
+  int    _currentStepIdx = 0;
+  double _distToNextM    = 0;
+
   @override
   void initState() {
     super.initState();
@@ -298,6 +303,24 @@ class _TripViewState extends ConsumerState<_TripView> {
     return data!.buffer.asUint8List();
   }
 
+  void _updateNavStep(geo.Position pos) {
+    if (_navSteps.length < 2 || _disposed) return;
+    final nextIdx = _currentStepIdx + 1;
+    if (nextIdx >= _navSteps.length) return;
+
+    final nextLoc = (_navSteps[nextIdx]['maneuver'] as Map)['location'] as List;
+    final dist = geo.Geolocator.distanceBetween(
+      pos.latitude, pos.longitude,
+      (nextLoc[1] as num).toDouble(),
+      (nextLoc[0] as num).toDouble(),
+    );
+    if (!mounted) return;
+    setState(() => _distToNextM = dist);
+    if (dist < 35 && _currentStepIdx < _navSteps.length - 2) {
+      setState(() => _currentStepIdx++);
+    }
+  }
+
   void _moveCamera(CameraUpdate update) {
     _suppressCameraIdle = true;
     _mapController?.animateCamera(update);
@@ -358,6 +381,7 @@ class _TripViewState extends ConsumerState<_TripView> {
       });
       _lastKnownPos = pos;
       _updateMySymbol(driverPos, heading: pos.heading >= 0 ? pos.heading : 0);
+      _updateNavStep(pos);
       if (_followDriver) {
         _moveCamera(CameraUpdate.newCameraPosition(
           CameraPosition(
@@ -462,7 +486,7 @@ class _TripViewState extends ConsumerState<_TripView> {
       final dio = _externalDio;
       final url = 'https://api.mapbox.com/directions/v5/mapbox/driving-traffic/'
           '$startLng,$startLat;$endLng,$endLat'
-          '?geometries=geojson&overview=full&access_token=${AppConfig.mapboxToken}';
+          '?geometries=geojson&overview=full&steps=true&language=es&access_token=${AppConfig.mapboxToken}';
 
       final response = await dio.get<Map<String, dynamic>>(url);
       final routes = response.data?['routes'] as List?;
@@ -471,6 +495,23 @@ class _TripViewState extends ConsumerState<_TripView> {
       if (trip.status == 'accepted') {
         final secs = (routes[0]['duration'] as num?)?.toDouble();
         if (secs != null && !_disposed) setState(() => _etaMinutes = secs / 60);
+      }
+
+      // Pasos de navegación
+      final legs = routes[0]['legs'] as List?;
+      if (legs != null && legs.isNotEmpty) {
+        final rawSteps = (legs[0]['steps'] as List?)
+            ?.map((s) => Map<String, dynamic>.from(s as Map))
+            .toList() ?? [];
+        if (!_disposed && mounted) {
+          setState(() {
+            _navSteps       = rawSteps;
+            _currentStepIdx = 0;
+            _distToNextM    = rawSteps.length > 1
+                ? (rawSteps[0]['distance'] as num).toDouble()
+                : 0;
+          });
+        }
       }
 
       final coords = routes[0]['geometry']['coordinates'] as List;
@@ -715,6 +756,19 @@ class _TripViewState extends ConsumerState<_TripView> {
             },
           ),
 
+          // Banner de navegación
+          if (_navSteps.length > 1 &&
+              (trip.status == 'accepted' || trip.status == 'in_progress'))
+            Positioned(
+              top: 0, left: 0, right: 0,
+              child: _NavBanner(
+                steps:          _navSteps,
+                currentIdx:     _currentStepIdx,
+                distToNextM:    _distToNextM,
+                tripStatus:     trip.status,
+              ),
+            ),
+
           // Botón re-centrar (aparece cuando el usuario scrolleó)
           if (!_followDriver)
             Positioned(
@@ -746,25 +800,27 @@ class _TripViewState extends ConsumerState<_TripView> {
               ),
             ),
 
-          // Back button
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: GestureDetector(
-                onTap: () => context.go('/home'),
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: AppColors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 8)],
+          // Back button — solo cuando NO hay banner de navegación activo
+          if (_navSteps.length <= 1 ||
+              (trip.status != 'accepted' && trip.status != 'in_progress'))
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: GestureDetector(
+                  onTap: () => context.go('/home'),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppColors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 8)],
+                    ),
+                    child: const Icon(Icons.arrow_back_ios_new, size: 18),
                   ),
-                  child: const Icon(Icons.arrow_back_ios_new, size: 18),
                 ),
               ),
             ),
-          ),
 
           // Bottom sheet
           Positioned(
@@ -880,6 +936,100 @@ class _TripViewState extends ConsumerState<_TripView> {
 }
 
 // ── Reusable widgets ──────────────────────────────────────────────────────────
+
+class _NavBanner extends StatelessWidget {
+  const _NavBanner({
+    required this.steps,
+    required this.currentIdx,
+    required this.distToNextM,
+    required this.tripStatus,
+  });
+  final List<Map<String, dynamic>> steps;
+  final int    currentIdx;
+  final double distToNextM;
+  final String tripStatus;
+
+  static String _fmtDist(double m) {
+    if (m >= 1000) return '${(m / 1000).toStringAsFixed(1)} km';
+    return '${m.round()} m';
+  }
+
+  static IconData _maneuverIcon(Map maneuver) {
+    final type     = maneuver['type']     as String? ?? '';
+    final modifier = maneuver['modifier'] as String? ?? '';
+    if (type == 'arrive') return Icons.location_on_rounded;
+    if (type == 'roundabout' || type == 'rotary') return Icons.roundabout_left_rounded;
+    switch (modifier) {
+      case 'left':        return Icons.turn_left_rounded;
+      case 'right':       return Icons.turn_right_rounded;
+      case 'slight left': return Icons.turn_slight_left_rounded;
+      case 'slight right':return Icons.turn_slight_right_rounded;
+      case 'sharp left':  return Icons.turn_sharp_left_rounded;
+      case 'sharp right': return Icons.turn_sharp_right_rounded;
+      case 'uturn':       return Icons.u_turn_left_rounded;
+      default:            return Icons.straight_rounded;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final nextIdx   = (currentIdx + 1).clamp(0, steps.length - 1);
+    final nextStep  = steps[nextIdx];
+    final maneuver  = Map<String, dynamic>.from(nextStep['maneuver'] as Map);
+    final street    = (nextStep['name'] as String? ?? '').trim();
+    final icon      = _maneuverIcon(maneuver);
+    final bannerClr = tripStatus == 'accepted'
+        ? const Color(0xFF1565C0)   // azul oscuro
+        : const Color(0xFF1B5E20);  // verde oscuro
+
+    return Container(
+      color: bannerClr,
+      padding: EdgeInsets.fromLTRB(
+        16,
+        MediaQuery.of(context).padding.top + 12,
+        16,
+        14,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(icon, color: Colors.white, size: 52),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _fmtDist(distToNextM),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                  ),
+                ),
+                if (street.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    street,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _LiveMeterDisplay extends StatelessWidget {
   const _LiveMeterDisplay({required this.amount});
