@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_mapbox_navigation/flutter_mapbox_navigation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:go_router/go_router.dart';
@@ -415,67 +414,6 @@ class _TripViewState extends ConsumerState<_TripView> {
     });
   }
 
-  Future<void> _launchNavigation(TripModel trip) async {
-    final pos = _lastKnownPos;
-
-    // Destino según estado del viaje
-    final double destLat;
-    final double destLng;
-    final String destName;
-
-    if (trip.status == 'in_progress') {
-      if (trip.destinationLat == null || trip.destinationLng == null) return;
-      destLat  = trip.destinationLat!;
-      destLng  = trip.destinationLng!;
-      destName = trip.destinationAddress;
-    } else {
-      // accepted / driver_arrived → ir al punto de recogida
-      destLat  = trip.originLat;
-      destLng  = trip.originLng;
-      destName = trip.originAddress;
-    }
-
-    final wayPoints = <WayPoint>[
-      if (pos != null)
-        WayPoint(
-          name:      'Mi ubicación',
-          latitude:  pos.latitude,
-          longitude: pos.longitude,
-        ),
-      WayPoint(
-        name:      destName,
-        latitude:  destLat,
-        longitude: destLng,
-      ),
-    ];
-
-    if (wayPoints.length < 2) return;
-
-    final options = MapBoxOptions(
-      zoom:                     15.0,
-      tilt:                     0.0,
-      bearing:                  0.0,
-      alternatives:             false,
-      voiceInstructionsEnabled: true,
-      bannerInstructionsEnabled: true,
-      language:                 'es',
-      mode:                     MapBoxNavigationMode.drivingWithTraffic,
-      isOptimized:              true,
-      units:                    VoiceUnits.metric,
-      simulateRoute:            false,
-      enableRefresh:            true,
-      longPressDestinationEnabled: false,
-      animateBuildRoute:        true,
-      showReportFeedbackButton: false,
-      showEndOfRouteFeedback:   false,
-    );
-
-    await MapBoxNavigation.instance.startNavigation(
-      wayPoints: wayPoints,
-      options:   options,
-    );
-  }
-
   Future<void> _fetchAndDrawRoute(TripModel trip) async {
     final ctrl = _mapController;
     if (ctrl == null) return;
@@ -775,25 +713,6 @@ class _TripViewState extends ConsumerState<_TripView> {
                 setState(() => _followDriver = false);
               }
             },
-          ),
-
-          // Botón Navegar con Mapbox (siempre visible durante el viaje)
-          Positioned(
-            right: 16,
-            top: 64,
-            child: GestureDetector(
-              onTap: () => _launchNavigation(widget.trip),
-              child: Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1A73E8),
-                  shape: BoxShape.circle,
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 10)],
-                ),
-                child: const Icon(Icons.turn_right_rounded, color: Colors.white, size: 24),
-              ),
-            ),
           ),
 
           // Botón re-centrar (aparece cuando el usuario scrolleó)
