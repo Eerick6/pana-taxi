@@ -414,10 +414,11 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage>
   Future<void> _applyPlace(PlaceResult place, _SearchTarget target) async {
     if (target == _SearchTarget.origin) {
       ref.read(tripRouteProvider.notifier).setOrigin(place);
-      await _placeOriginMarker(place.lat, place.lng);
-      _cam(place.lat, place.lng, 15);
       final dest = ref.read(tripRouteProvider).stops.firstOrNull;
-      if (dest != null) await _fetchEstimate(place, dest);
+      await Future.wait([
+        _placeOriginMarker(place.lat, place.lng).then((_) => _cam(place.lat, place.lng, 15)),
+        if (dest != null) _fetchEstimate(place, dest),
+      ]);
     } else {
       final current = ref.read(tripRouteProvider);
       if (current.stops.isEmpty) {
@@ -425,9 +426,11 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage>
       } else {
         ref.read(tripRouteProvider.notifier).updateStop(0, place);
       }
-      await _placeDestMarker(place.lat, place.lng);
       final origin = ref.read(tripRouteProvider).origin;
-      if (origin != null) await _fetchEstimate(origin, place);
+      await Future.wait([
+        _placeDestMarker(place.lat, place.lng),
+        if (origin != null) _fetchEstimate(origin, place),
+      ]);
     }
   }
 
