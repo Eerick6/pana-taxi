@@ -417,6 +417,7 @@ class _TripViewState extends ConsumerState<_TripView> {
 
     try {
       await ref.read(tripRepositoryProvider).cancelTrip(trip.id, reason);
+      if (!mounted) return;
       ref.read(activeTripProvider.notifier).clear();
     } catch (e) {
       if (mounted) {
