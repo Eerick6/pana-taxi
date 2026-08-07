@@ -61,8 +61,17 @@ class _DestinationSearchPageState
     });
   }
 
-  void _select(SearchSuggestion s) {
-    if (s.resolvedPlace != null) context.pop(s.resolvedPlace!);
+  Future<void> _select(SearchSuggestion s) async {
+    if (s.resolvedPlace != null) {
+      context.pop(s.resolvedPlace!);
+      return;
+    }
+    if (s.placeId == null) return;
+    setState(() => _searching = true);
+    final place = await ref.read(geocodingServiceProvider).getPlaceDetails(s.placeId!);
+    if (!mounted) return;
+    setState(() => _searching = false);
+    if (place != null) context.pop(place);
   }
 
   Future<void> _openPinPicker() async {

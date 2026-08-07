@@ -4,13 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../features/trips/domain/entities/place_result.dart';
 import '../../features/trips/domain/entities/search_suggestion.dart';
 
+const _kGoogleApiKey = 'AIzaSyARdXsYNXD9dd5Q57rA9Mv0essqk6243kU';
+
 class GeocodingService {
   GeocodingService()
-      : _photon = Dio(BaseOptions(
-          baseUrl: 'https://photon.komoot.io',
-          connectTimeout: const Duration(seconds: 4),
-          receiveTimeout: const Duration(seconds: 4),
-          headers: {'User-Agent': 'PanaTaxi/1.0'},
+      : _google = Dio(BaseOptions(
+          baseUrl: 'https://maps.googleapis.com',
+          connectTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
         )),
         _nominatim = Dio(BaseOptions(
           baseUrl: 'https://nominatim.openstreetmap.org',
@@ -19,107 +20,88 @@ class GeocodingService {
           headers: {'User-Agent': 'PanaTaxi/1.0'},
         ));
 
-  final Dio _photon;
+  final Dio _google;
   final Dio _nominatim;
 
-  // Caché de reverse geocode — evita llamadas repetidas cuando el pin no se movió
   double? _cachedLat;
   double? _cachedLng;
   String? _cachedAddr;
-  static const _cacheThresholdM = 30.0; // metros
+  static const _cacheThresholdM = 30.0;
 
-  // Autocomplete via Photon (OSM) — gratis, sin API key, retorna POIs + calles + coords directas.
+  // Google Places Autocomplete
   Future<List<SearchSuggestion>> suggest(
     String query, {
     double? lat,
     double? lng,
   }) async {
     if (query.trim().length < 2) return [];
-    if (kDebugMode) debugPrint('[Geocoding] buscando: "$query" lat=$lat lng=$lng');
     try {
       final params = <String, dynamic>{
-        'q':     query.trim(),
-        'limit': 8,
+        'input':      query.trim(),
+        'key':        _kGoogleApiKey,
+        'language':   'es',
+        'components': 'country:ec',
+        'types':      'geocode|establishment',
       };
       if (lat != null && lng != null) {
-        params['lat'] = lat;
-        params['lon'] = lng;
-      } else {
-        // Sin GPS: restringir a Ecuador por bounding box
-        params['bbox'] = '-81.0,-5.0,-75.0,2.0';
+        params['location'] = '$lat,$lng';
+        params['radius']   = 50000;
       }
 
-      final res = await _photon.get<Map<String, dynamic>>('/api/', queryParameters: params);
-      final features = res.data?['features'] as List? ?? [];
-      if (kDebugMode) debugPrint('[Geocoding] ${features.length} features recibidas');
-      final results = features
-          .map((f) => _toSuggestion(f as Map<String, dynamic>))
-          .where((s) => s.resolvedPlace != null)
+      final res = await _google.get<Map<String, dynamic>>(
+        '/maps/api/place/autocomplete/json',
+        queryParameters: params,
+      );
+
+      final predictions = res.data?['predictions'] as List? ?? [];
+      return predictions
+          .map((p) => SearchSuggestion.fromGooglePlaces(p as Map<String, dynamic>))
           .toList();
-      if (kDebugMode) debugPrint('[Geocoding] ${results.length} sugerencias devueltas');
-      return results;
     } catch (e) {
-      if (kDebugMode) debugPrint('[GeocodingService] suggest error: $e');
+      if (kDebugMode) debugPrint('[Geocoding] suggest error: $e');
       return [];
     }
   }
 
-  SearchSuggestion _toSuggestion(Map<String, dynamic> feature) {
-    final props   = feature['properties'] as Map<String, dynamic>;
-    final coords  = (feature['geometry']?['coordinates'] as List?) ?? [];
-    if (coords.length < 2) return SearchSuggestion.fromV6(_emptyPlace(), 'address');
+  // Google Place Details — obtiene lat/lng a partir de un place_id
+  Future<PlaceResult?> getPlaceDetails(String placeId) async {
+    try {
+      final res = await _google.get<Map<String, dynamic>>(
+        '/maps/api/place/details/json',
+        queryParameters: {
+          'place_id': placeId,
+          'key':      _kGoogleApiKey,
+          'language': 'es',
+          'fields':   'geometry,name,formatted_address',
+        },
+      );
+      final result = res.data?['result'] as Map<String, dynamic>?;
+      if (result == null) return null;
 
-    final lng     = (coords[0] as num).toDouble();
-    final lat     = (coords[1] as num).toDouble();
-    final name    = props['name']     as String? ?? '';
-    final street  = props['street']   as String? ?? '';
-    final city    = props['city']     as String?
-        ?? props['county']  as String?
-        ?? props['state']   as String? ?? '';
-    final osmKey  = props['osm_key']  as String? ?? '';
-    final osmVal  = props['osm_value'] as String? ?? '';
-    final type    = props['type']     as String? ?? '';
+      final loc    = (result['geometry'] as Map?)?['location'] as Map?;
+      final lat    = (loc?['lat'] as num?)?.toDouble();
+      final lng    = (loc?['lng'] as num?)?.toDouble();
+      if (lat == null || lng == null) return null;
 
-    // Nombre principal: el nombre del lugar o la calle
-    final mainName = name.isNotEmpty ? name : street;
+      final name    = result['name']              as String? ?? '';
+      final address = result['formatted_address'] as String? ?? name;
 
-    // Dirección secundaria: calle + ciudad
-    final parts = <String>[
-      if (name.isNotEmpty && street.isNotEmpty) street,
-      if (city.isNotEmpty) city,
-    ];
-    final address = parts.isNotEmpty ? '$mainName, ${parts.join(', ')}' : mainName;
-
-    final featureType = _featureType(osmKey, osmVal, type);
-
-    final place = PlaceResult(
-      displayName: address,
-      shortName:   mainName,
-      lat: lat,
-      lng: lng,
-    );
-    return SearchSuggestion.fromV6(place, featureType);
+      return PlaceResult(
+        displayName: address,
+        shortName:   name,
+        lat: lat,
+        lng: lng,
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Geocoding] getPlaceDetails error: $e');
+      return null;
+    }
   }
 
-  PlaceResult _emptyPlace() => const PlaceResult(
-    displayName: '', shortName: '', lat: 0, lng: 0,
-  );
-
-  String _featureType(String osmKey, String osmVal, String type) {
-    if (type == 'street') return 'street';
-    if (osmKey == 'highway') return 'street';
-    if (osmKey == 'shop' || osmVal == 'mall' || osmVal == 'supermarket') return 'poi';
-    if (osmKey == 'amenity') return 'poi';
-    if (osmKey == 'tourism' || osmKey == 'leisure') return 'poi';
-    if (osmKey == 'place') return 'place';
-    if (osmVal == 'residential' || osmVal == 'tertiary') return 'street';
-    return 'address';
-  }
-
-  // Reverse geocoding via Nominatim — gratis, sin API key, sin plugin nativo.
+  // Reverse geocoding via Nominatim (gratis, sin key)
   Future<String?> reverseGeocode(double lat, double lng) async {
     if (_cachedLat != null && _cachedLng != null && _cachedAddr != null) {
-      if (_haversineM(_cachedLat!, _cachedLng!, lat, lng) < _cacheThresholdM) {
+      if (_distanceM(_cachedLat!, _cachedLng!, lat, lng) < _cacheThresholdM) {
         return _cachedAddr;
       }
     }
@@ -144,17 +126,15 @@ class GeocodingService {
         return null;
       }
 
-      final road  = pick(['road', 'pedestrian', 'path', 'footway', 'cycleway']);
+      final road   = pick(['road', 'pedestrian', 'path', 'footway', 'cycleway']);
       final sector = pick(['neighbourhood', 'suburb', 'city_district', 'quarter']);
-      final city  = pick(['city', 'town', 'village', 'municipality', 'county']);
+      final city   = pick(['city', 'town', 'village', 'municipality', 'county']);
 
       final parts = [road, sector, city].whereType<String>().toList();
-
       String? result;
       if (parts.isNotEmpty) {
         result = parts.join(', ');
       } else {
-        // Fallback: primeras partes del display_name de Nominatim
         final display = data['display_name'] as String?;
         if (display != null && display.isNotEmpty) {
           result = display.split(', ').take(3).join(', ');
@@ -168,13 +148,12 @@ class GeocodingService {
       }
       return result;
     } catch (e) {
-      if (kDebugMode) debugPrint('[GeocodingService] reverseGeocode error: $e');
+      if (kDebugMode) debugPrint('[Geocoding] reverseGeocode error: $e');
       return null;
     }
   }
 
-  // Manhattan distance en metros — suficiente para el umbral de 30m del caché
-  double _haversineM(double lat1, double lng1, double lat2, double lng2) {
+  double _distanceM(double lat1, double lng1, double lat2, double lng2) {
     const degToM = 111000.0;
     return ((lat2 - lat1).abs() + (lng2 - lng1).abs()) * degToM;
   }

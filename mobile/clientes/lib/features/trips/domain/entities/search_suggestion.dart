@@ -5,26 +5,26 @@ class SearchSuggestion {
     required this.name,
     required this.address,
     required this.featureType,
-    this.mapboxId,
+    this.placeId,
     this.resolvedPlace,
   });
 
-  // From Search Box /suggest — needs a /retrieve call to get coords
-  factory SearchSuggestion.fromSearchBox(Map<String, dynamic> s) {
-    final name = s['name'] as String? ?? '';
-    final address = s['full_address'] as String?
-        ?? s['place_formatted'] as String?
-        ?? name;
+  // From Google Places Autocomplete — needs a Details call to get coords
+  factory SearchSuggestion.fromGooglePlaces(Map<String, dynamic> p) {
+    final main      = p['structured_formatting'] as Map<String, dynamic>? ?? {};
+    final name      = main['main_text']      as String? ?? p['description'] as String? ?? '';
+    final secondary = main['secondary_text'] as String? ?? '';
+    final address   = secondary.isNotEmpty ? '$name, $secondary' : name;
     return SearchSuggestion._(
       name:        name,
       address:     address,
-      featureType: s['feature_type'] as String? ?? 'poi',
-      mapboxId:    s['mapbox_id'] as String?,
+      featureType: _googleType(p['types'] as List? ?? []),
+      placeId:     p['place_id'] as String?,
     );
   }
 
-  // From Geocoding v6 — coords already available, no retrieve needed
-  factory SearchSuggestion.fromV6(PlaceResult place, String featureType) {
+  // Coords already available (reverse geocode, saved location)
+  factory SearchSuggestion.fromResolved(PlaceResult place, String featureType) {
     return SearchSuggestion._(
       name:          place.shortName,
       address:       place.displayName,
@@ -33,11 +33,18 @@ class SearchSuggestion {
     );
   }
 
-  final String name;
-  final String address;
-  final String featureType;
-  final String? mapboxId;           // set for Search Box results
-  final PlaceResult? resolvedPlace; // set for v6 results
+  final String       name;
+  final String       address;
+  final String       featureType;
+  final String?      placeId;       // set for Google Places results
+  final PlaceResult? resolvedPlace; // set when coords are known
 
-  bool get needsRetrieve => resolvedPlace == null;
+  bool get needsRetrieve => resolvedPlace == null && placeId != null;
+
+  static String _googleType(List types) {
+    if (types.contains('establishment') || types.contains('point_of_interest')) return 'poi';
+    if (types.contains('street_address') || types.contains('route'))            return 'address';
+    if (types.contains('neighborhood') || types.contains('sublocality'))        return 'neighborhood';
+    return 'address';
+  }
 }

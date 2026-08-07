@@ -220,6 +220,16 @@ class _TripViewState extends ConsumerState<_TripView> {
   Future<void> _onNavViewCreated(GoogleNavigationViewController ctrl) async {
     _navCtrl = ctrl;
     await ctrl.setMyLocationEnabled(true);
+
+    final accepted = await GoogleMapsNavigator.areTermsAccepted();
+    if (!accepted) {
+      final userAccepted = await GoogleMapsNavigator.showTermsAndConditionsDialog(
+        'Términos de navegación',
+        'Pana Taxista',
+      );
+      if (!userAccepted) return;
+    }
+
     await _initNavSession(widget.trip);
   }
 
@@ -261,7 +271,9 @@ class _TripViewState extends ConsumerState<_TripView> {
         await _navCtrl?.setNavigationUIEnabled(true);
         await _navCtrl?.followMyLocation(CameraPerspective.tilted, zoomLevel: 17);
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[Navigation] Error: $e');
+    }
   }
 
   Future<void> _updateNavigation(TripModel trip) async {
@@ -419,21 +431,20 @@ class _TripViewState extends ConsumerState<_TripView> {
   Widget build(BuildContext context) {
     final trip = widget.trip;
 
-    // Taxímetro en vivo
-    if (trip.status == 'in_progress' && trip.isMeterMode) {
-      ref.listen<({double amount, double incPerSec})>(liveMeterProvider, (_, next) {
-        if (_disposed || !mounted) return;
-        _meterTimer?.cancel();
-        setState(() {
-          _meterDisplay   = next.amount;
-          _meterIncPerSec = next.incPerSec;
-        });
-        _meterTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-          if (_disposed || !mounted) { _meterTimer?.cancel(); return; }
-          setState(() => _meterDisplay += _meterIncPerSec);
-        });
+    // Taxímetro en vivo — ref.listen debe ser incondicional en build()
+    ref.listen<({double amount, double incPerSec})>(liveMeterProvider, (_, next) {
+      if (_disposed || !mounted) return;
+      if (widget.trip.status != 'in_progress' || !widget.trip.isMeterMode) return;
+      _meterTimer?.cancel();
+      setState(() {
+        _meterDisplay   = next.amount;
+        _meterIncPerSec = next.incPerSec;
       });
-    }
+      _meterTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (_disposed || !mounted) { _meterTimer?.cancel(); return; }
+        setState(() => _meterDisplay += _meterIncPerSec);
+      });
+    });
 
     final (actionLabel, actionColor, action) = switch (trip.status) {
       'accepted' => (
@@ -489,13 +500,15 @@ class _TripViewState extends ConsumerState<_TripView> {
             bottom: 0,
             left: 0,
             right: 0,
-            child: Container(
+            child: SafeArea(
+              top: false,
+              child: Container(
               decoration: const BoxDecoration(
                 color: AppColors.white,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                 boxShadow: [BoxShadow(color: Color(0x18000000), blurRadius: 24, offset: Offset(0, -4))],
               ),
-              padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).padding.bottom + 16),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -577,6 +590,7 @@ class _TripViewState extends ConsumerState<_TripView> {
                     ),
                 ],
               ),
+            ),
             ),
           ),
         ],
