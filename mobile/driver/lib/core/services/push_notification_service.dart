@@ -126,6 +126,16 @@ class PushNotificationService {
       onDidReceiveBackgroundNotificationResponse: onBackgroundNotificationAction,
     );
 
+    // App cerrada y relanzada por tap en notificación local (acción "Ver viaje")
+    final launchDetails = await _localNotif.getNotificationAppLaunchDetails();
+    if (launchDetails?.didNotificationLaunchApp == true) {
+      final payload = launchDetails!.notificationResponse?.payload ?? '';
+      if (payload.isNotEmpty) {
+        pendingTripId = payload;
+        debugPrint('[FCM] app lanzada por notificación local, tripId=$payload');
+      }
+    }
+
     // Pedir permisos (Android 13+, iOS)
     final settings = await _messaging.requestPermission(
       alert: true,

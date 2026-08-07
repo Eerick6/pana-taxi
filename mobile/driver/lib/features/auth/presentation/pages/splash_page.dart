@@ -32,7 +32,9 @@ class _SplashPageState extends ConsumerState<SplashPage> {
       if (!mounted) return;
 
       // Si hay un viaje activo, ir directo a él en lugar del home
-      final activeTrip = await ref.read(tripRepositoryProvider).getActiveTrip();
+      final activeTrip = await ref.read(tripRepositoryProvider)
+          .getActiveTrip()
+          .timeout(const Duration(seconds: 6), onTimeout: () => null);
       if (!mounted) return;
 
       if (activeTrip != null) {
