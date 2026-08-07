@@ -500,15 +500,13 @@ class _TripViewState extends ConsumerState<_TripView> {
             bottom: 0,
             left: 0,
             right: 0,
-            child: SafeArea(
-              top: false,
-              child: Container(
+            child: Container(
               decoration: const BoxDecoration(
                 color: AppColors.white,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                 boxShadow: [BoxShadow(color: Color(0x18000000), blurRadius: 24, offset: Offset(0, -4))],
               ),
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewPadding.bottom + 16),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -590,7 +588,6 @@ class _TripViewState extends ConsumerState<_TripView> {
                     ),
                 ],
               ),
-            ),
             ),
           ),
         ],
