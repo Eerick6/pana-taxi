@@ -53,6 +53,7 @@ dependencies:
 
   # Maps
   maplibre_gl: ^0.21.0
+  webview_flutter: ^4.10.0
 
   # Location
   geolocator: ^13.0.2

@@ -24,6 +24,9 @@ class ActiveTrip {
     this.driverRating,
     this.vehiclePlate,
     this.vehicleModel,
+    this.paymentMethodSlug,
+    this.paymentStatus,
+    this.fareAmount,
   });
 
   final String    id;
@@ -48,7 +51,11 @@ class ActiveTrip {
   final double?   driverRating;
   final String?   vehiclePlate;
   final String?   vehicleModel;
+  final String?   paymentMethodSlug;
+  final String?   paymentStatus;
+  final double?   fareAmount;
 
+  bool get isCard => paymentMethodSlug == 'card';
   bool get isNegotiated => fareMode == 'negotiated';
 
   bool get isActive => const {
@@ -79,6 +86,9 @@ class ActiveTrip {
     driverPhoto:         (j['driver']  as Map?)?['profile_photo_url']  as String?,
     driverRating:        _d((j['driver'] as Map?)?['rating']),
     vehiclePlate:        (j['vehicle'] as Map?)?['plate']              as String?,
+    paymentMethodSlug:   (j['payment_method'] as Map?)?['slug']        as String?,
+    paymentStatus:       j['payment_status']                           as String?,
+    fareAmount:          _d(j['fare_amount']),
     vehicleModel:        () {
       final v = j['vehicle'] as Map?;
       if (v == null) return null;

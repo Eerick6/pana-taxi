@@ -68,5 +68,11 @@
 	</array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Pana Taxista usa Face ID / Touch ID para que puedas iniciar sesión más rápido.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Pana Taxista usa tu ubicación para navegar durante el viaje.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Pana Taxista usa tu ubicación en segundo plano para continuar la navegación.</string>
+	<key>GMSApiKey</key>
+	<string>AIzaSyARdXsYNXD9dd5Q57rA9Mv0essqk6243kU</string>
 </dict>
 </plist>

@@ -1,6 +1,7 @@
 import { IsString, IsNumber, IsOptional, IsEnum, MinLength, Min, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 import { FareMode } from '../entities/trip.entity';
+import { PaymentMethodSlug } from '../../payment-methods/entities/payment-method.entity';
 
 export class CreateTripDto {
   // Opcional cuando se provee stand_id (el origen viene de la parada)
@@ -51,6 +52,10 @@ export class CreateTripDto {
   @IsOptional()
   @IsString()
   cooperative_id?: string;
+
+  @IsOptional()
+  @IsEnum(PaymentMethodSlug)
+  payment_method_slug?: PaymentMethodSlug;
 
   // Solo viajes cooperativos: parada como punto de partida.
   // Si se provee, el origen se toma de la parada y se despacha al primero de la cola.

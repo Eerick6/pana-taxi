@@ -119,16 +119,18 @@ class TripsApi {
     double?  originLng,
     String   fareMode = 'meter',
     double?  clientOffer,
+    String?  paymentMethodSlug,
   }) async {
     final res = await _dio.post('/trips', data: {
       'destination_address': destinationAddress,
       'destination_lat':     destinationLat,
       'destination_lng':     destinationLng,
-      if (originAddress != null) 'origin_address': originAddress,
-      if (originLat     != null) 'origin_lat':     originLat,
-      if (originLng     != null) 'origin_lng':     originLng,
+      if (originAddress      != null) 'origin_address':      originAddress,
+      if (originLat          != null) 'origin_lat':          originLat,
+      if (originLng          != null) 'origin_lng':          originLng,
       'fare_mode':           fareMode,
-      if (clientOffer   != null) 'client_offer':   clientOffer,
+      if (clientOffer        != null) 'client_offer':        clientOffer,
+      if (paymentMethodSlug  != null) 'payment_method_slug': paymentMethodSlug,
     });
     return ActiveTrip.fromJson(res.data as Map<String, dynamic>);
   }

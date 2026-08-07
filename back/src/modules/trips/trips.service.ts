@@ -23,6 +23,7 @@ import { EventsGateway } from '../gateway/events.gateway';
 import { FareService } from '../fare/fare.service';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { CompleteTripDto } from './dto/complete-trip.dto';
+import { PaymentMethod } from '../payment-methods/entities/payment-method.entity';
 import { CancelTripDto } from './dto/cancel-trip.dto';
 import { MakeOfferDto } from './dto/make-offer.dto';
 import { StartTripDto } from './dto/start-trip.dto';
@@ -74,6 +75,8 @@ export class TripsService {
     private standAssignmentsRepo: Repository<StandAssignment>,
     @InjectRepository(Client)
     private clientsRepo: Repository<Client>,
+    @InjectRepository(PaymentMethod)
+    private paymentMethodRepo: Repository<PaymentMethod>,
     private notificationsService: NotificationsService,
     private accountingService: AccountingService,
   ) {}
@@ -113,11 +116,16 @@ export class TripsService {
         }
       }
 
+      const paymentMethod = dto.payment_method_slug
+        ? await this.paymentMethodRepo.findOne({ where: { slug: dto.payment_method_slug } })
+        : null;
+
       const trip = await this.tripsRepo.save(
         this.tripsRepo.create({
           source: TripSource.CLIENT,
           client: user,
           fare_mode: fareMode,
+          payment_method: paymentMethod ?? undefined,
           origin_address: dto.origin_address,
           origin_lat: dto.origin_lat,
           origin_lng: dto.origin_lng,
@@ -1177,6 +1185,7 @@ export class TripsService {
       trip_id: tripId,
       status: TripStatus.COMPLETED,
       location_update_interval_sec: fareConfig.location_interval_fleet_sec,
+      payment_method_slug: trip.payment_method?.slug ?? null,
       ...result,
     });
 
@@ -1304,7 +1313,7 @@ export class TripsService {
           TripStatus.IN_PROGRESS,
         ]),
       },
-      relations: ['driver', 'vehicle', 'offers'],
+      relations: ['driver', 'vehicle', 'offers', 'payment_method'],
     });
     if (!trip) return null;
 

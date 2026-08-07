@@ -197,11 +197,20 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
       if (_mapReady) _drawRoute();
     });
 
-    socket.on('trip.completed', (_) async {
+    socket.on('trip.completed', (data) async {
       if (!mounted) return;
-      final tripId = _trip?.id ?? widget.tripId;
+      final tripId   = _trip?.id ?? widget.tripId;
+      final isCard   = _trip?.isCard ?? false;
+      final fareAmt  = data is Map ? (data['fare_amount'] as num?)?.toDouble() : null;
+
       await showTripRatingSheet(context, ref, tripId);
-      if (mounted) context.go('/home');
+      if (!mounted) return;
+
+      if (isCard && fareAmt != null && fareAmt > 0) {
+        context.go('/payphone/$tripId/${fareAmt.toStringAsFixed(2)}');
+      } else {
+        context.go('/home');
+      }
     });
 
     socket.on('trip.cancelled', (data) async {

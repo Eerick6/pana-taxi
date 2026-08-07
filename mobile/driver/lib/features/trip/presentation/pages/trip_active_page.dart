@@ -1,16 +1,11 @@
 import 'dart:async';
-import 'dart:ui' as ui;
 
-import 'package:flutter/services.dart';
-
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:go_router/go_router.dart';
-import 'package:maplibre_gl/maplibre_gl.dart';
+import 'package:google_navigation_flutter/google_navigation_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../../../core/config/app_config.dart';
 import '../../../../core/network/socket_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -44,7 +39,7 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
     final socket = ref.read(socketClientProvider);
     socket.on('trip.offer_accepted', (data) async {
       if (!_socketActive || !mounted) return;
-      final repo = ref.read(tripRepositoryProvider);
+      final repo    = ref.read(tripRepositoryProvider);
       final updated = await repo.getActiveTrip();
       if (_socketActive && mounted && updated != null) {
         ref.read(activeTripProvider.notifier).setTrip(updated);
@@ -60,8 +55,6 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
       final reason      = map['reason']       as String?;
       final cancelledBy = map['cancelled_by'] as String?;
 
-      // Limpiar viaje del provider antes del dialog para que al volver al home
-      // no intente redirigir de nuevo a esta página
       ref.read(activeTripProvider.notifier).clear();
 
       if (cancelledBy != 'driver' && reason != null && reason.isNotEmpty && mounted) {
@@ -93,7 +86,6 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
     _socketActive = false;
     final socket = ref.read(socketClientProvider);
     socket.off('trip.cancelled');
-    // NO llamar socket.off('trip.offer_accepted') — home_page también tiene ese listener
     super.dispose();
   }
 
@@ -122,8 +114,6 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
       error: (e, _) => Scaffold(body: Center(child: Text('Error: $e'))),
       data: (trip) {
         if (trip == null) {
-          // El listener _listenCancelled maneja el dialog y la navegación.
-          // Si llegamos aquí sin cancelación (ej: viaje completado), ir al home.
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) context.go('/home');
           });
@@ -172,29 +162,22 @@ class _TripView extends ConsumerStatefulWidget {
 }
 
 class _TripViewState extends ConsumerState<_TripView> {
-  bool    _disposed = false; // guardián para setState tras dispose
-  MapLibreMapController? _mapController;
-  bool    _mapImageReady = false;
-  Symbol? _mySymbol;
-  Symbol? _originSymbol;
-  double? _etaMinutes;
-  Timer?  _waitTimer;
-  int     _waitSecondsLeft = 0;
-  final   _externalDio = Dio();
-  StreamSubscription<geo.Position>? _locationSub;
-  bool    _followDriver = false;
-  bool    _suppressCameraIdle = false; // true mientras animamos nosotros
-  geo.Position? _lastKnownPos;         // para re-centrar desde el botón
+  bool _disposed = false;
+
+  // Google Navigation
+  GoogleNavigationViewController? _navCtrl;
 
   // Taxímetro en vivo
   double _meterDisplay   = 0;
   double _meterIncPerSec = 0;
   Timer? _meterTimer;
 
-  // Navegación paso a paso
-  List<Map<String, dynamic>> _navSteps  = [];
-  int    _currentStepIdx = 0;
-  double _distToNextM    = 0;
+  // Countdown de espera
+  Timer? _waitTimer;
+  int   _waitSecondsLeft = 0;
+
+  // Ubicación
+  StreamSubscription<geo.Position>? _locationSub;
 
   @override
   void initState() {
@@ -205,7 +188,6 @@ class _TripViewState extends ConsumerState<_TripView> {
         (_) => _startWaitCountdown(widget.trip.waitTimerExpiresAt),
       );
     }
-    // Inicializar display con el valor que ya tiene el viaje (base_fare o último meter_amount)
     if (widget.trip.isMeterMode) {
       _meterDisplay = widget.trip.fare ?? 0;
     }
@@ -217,155 +199,94 @@ class _TripViewState extends ConsumerState<_TripView> {
     _locationSub?.cancel();
     _waitTimer?.cancel();
     _meterTimer?.cancel();
-    _externalDio.close(force: true);
+    GoogleMapsNavigator.cleanup();
     super.dispose();
   }
 
-  Future<Uint8List> _buildNavArrow() async {
-    const w = 44.0, h = 56.0;
-    final rec    = ui.PictureRecorder();
-    final canvas = Canvas(rec, Rect.fromLTWH(0, 0, w, h));
-    final cx     = w / 2;
-
-    // Sombra difusa
-    canvas.drawOval(
-      Rect.fromCenter(center: Offset(cx, h - 6), width: 22, height: 8),
-      Paint()..color = Colors.black.withValues(alpha: 0.25),
-    );
-
-    // Flecha apuntando al norte (hacia arriba) — rota vía iconRotate en el mapa
-    final path = Path()
-      ..moveTo(cx, 4)              // punta superior
-      ..lineTo(w - 6, h - 12)     // base derecha
-      ..lineTo(cx, h - 20)        // muesca central (da forma de carro/flecha)
-      ..lineTo(6, h - 12)         // base izquierda
-      ..close();
-
-    // Relleno azul navegación
-    canvas.drawPath(path, Paint()..color = const Color(0xFF1A73E8));
-
-    // Borde blanco
-    canvas.drawPath(path, Paint()
-      ..color      = Colors.white
-      ..style      = PaintingStyle.stroke
-      ..strokeWidth = 2.5
-      ..strokeJoin  = StrokeJoin.round);
-
-    // Punto blanco central
-    canvas.drawCircle(Offset(cx, h / 2 + 4), 4, Paint()..color = Colors.white);
-
-    final img  = await rec.endRecording().toImage(w.toInt(), h.toInt());
-    final data = await img.toByteData(format: ui.ImageByteFormat.png);
-    return data!.buffer.asUint8List();
-  }
-
-  Future<Uint8List> _buildPersonPin() async {
-    const w = 48.0, h = 60.0;
-    final rec    = ui.PictureRecorder();
-    final canvas = Canvas(rec, Rect.fromLTWH(0, 0, w, h));
-    final cx     = w / 2;
-
-    // Sombra
-    canvas.drawOval(
-      Rect.fromCenter(center: Offset(cx, h - 4), width: 18, height: 6),
-      Paint()..color = Colors.black.withValues(alpha: 0.22),
-    );
-
-    // Pin (teardrop): círculo arriba + triángulo abajo
-    final pinRadius = 18.0;
-    final pinCenter = Offset(cx, pinRadius + 4);
-    final pinPath = Path()
-      ..addOval(Rect.fromCircle(center: pinCenter, radius: pinRadius))
-      ..moveTo(cx - 10, pinCenter.dy + pinRadius - 4)
-      ..lineTo(cx, h - 8)
-      ..lineTo(cx + 10, pinCenter.dy + pinRadius - 4)
-      ..close();
-
-    // Fondo verde
-    canvas.drawPath(pinPath, Paint()..color = const Color(0xFF1DB954));
-    // Borde blanco
-    canvas.drawPath(pinPath, Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5);
-
-    // Persona: cabeza
-    canvas.drawCircle(pinCenter.translate(0, -6), 6, Paint()..color = Colors.white);
-    // Persona: cuerpo (semicírculo)
-    canvas.drawArc(
-      Rect.fromCenter(center: pinCenter.translate(0, 3), width: 18, height: 14),
-      3.14, 3.14, false,
-      Paint()..color = Colors.white..style = PaintingStyle.fill,
-    );
-
-    final img  = await rec.endRecording().toImage(w.toInt(), h.toInt());
-    final data = await img.toByteData(format: ui.ImageByteFormat.png);
-    return data!.buffer.asUint8List();
-  }
-
-  void _updateNavStep(geo.Position pos) {
-    if (_navSteps.length < 2 || _disposed) return;
-    final nextIdx = _currentStepIdx + 1;
-    if (nextIdx >= _navSteps.length) return;
-
-    final nextLoc = (_navSteps[nextIdx]['maneuver'] as Map)['location'] as List;
-    final dist = geo.Geolocator.distanceBetween(
-      pos.latitude, pos.longitude,
-      (nextLoc[1] as num).toDouble(),
-      (nextLoc[0] as num).toDouble(),
-    );
-    if (!mounted) return;
-    setState(() => _distToNextM = dist);
-    if (dist < 35 && _currentStepIdx < _navSteps.length - 2) {
-      setState(() => _currentStepIdx++);
+  @override
+  void didUpdateWidget(_TripView old) {
+    super.didUpdateWidget(old);
+    if (old.trip.status != widget.trip.status) {
+      _updateNavigation(widget.trip);
+      if (widget.trip.status == 'driver_arrived') {
+        _startWaitCountdown(widget.trip.waitTimerExpiresAt);
+      }
+      if (widget.trip.status == 'accepted') {
+        _emitCurrentLocation();
+      }
     }
   }
 
-  void _moveCamera(CameraUpdate update) {
-    _suppressCameraIdle = true;
-    _mapController?.animateCamera(update);
-    Future.delayed(const Duration(milliseconds: 700), () {
-      if (mounted) _suppressCameraIdle = false;
-    });
+  Future<void> _onNavViewCreated(GoogleNavigationViewController ctrl) async {
+    _navCtrl = ctrl;
+    await ctrl.setMyLocationEnabled(true);
+    await _initNavSession(widget.trip);
   }
 
-  Future<void> _updateMySymbol(LatLng pos, {double heading = 0}) async {
-    final ctrl = _mapController;
-    if (ctrl == null || !_mapImageReady) return;
-    if (_mySymbol == null) {
-      _mySymbol = await ctrl.addSymbol(SymbolOptions(
-        geometry: pos,
-        iconImage: 'driver-dot',
-        iconSize: 1.0,
-        iconAnchor: 'center',
-        iconRotate: heading,
-      ));
-    } else {
-      await ctrl.updateSymbol(_mySymbol!, SymbolOptions(
-        geometry: pos,
-        iconRotate: heading,
-      ));
-    }
-  }
-
-  Future<void> _startLocationTracking() async {
-    final socket = ref.read(socketClientProvider);
-
-    // Emitir posición actual inmediatamente (para que el cliente vea el taxi enseguida)
+  // Un solo setDestinations con pickup + destino = 1 evento de facturación
+  Future<void> _initNavSession(TripModel trip) async {
     try {
-      final pos = await geo.Geolocator.getCurrentPosition(
-        locationSettings: const geo.LocationSettings(accuracy: geo.LocationAccuracy.high),
-      );
-      if (mounted) {
-        socket.emit('location.update', {
-          'lat': pos.latitude,
-          'lng': pos.longitude,
-          'speed_kmh': 0.0,
-        });
+      await GoogleMapsNavigator.initializeNavigationSession();
+      await GoogleMapsNavigator.setDestinations(Destinations(
+        waypoints: [
+          NavigationWaypoint.withLatLngTarget(
+            title: 'Punto de recogida',
+            target: LatLng(latitude: trip.originLat, longitude: trip.originLng),
+          ),
+          NavigationWaypoint.withLatLngTarget(
+            title: trip.destinationAddress,
+            target: LatLng(latitude: trip.destinationLat, longitude: trip.destinationLng),
+          ),
+        ],
+        displayOptions: NavigationDisplayOptions(
+          showStopSigns: true,
+          showTrafficLights: true,
+        ),
+        routingOptions: RoutingOptions(travelMode: NavigationTravelMode.driving),
+      ));
+
+      // Si ya pasamos el pickup, avanzar al segundo waypoint
+      if (trip.status == 'in_progress') {
+        await GoogleMapsNavigator.continueToNextDestination();
+      }
+
+      if (trip.status == 'driver_arrived') {
+        // Esperando al pasajero — sin guía de voz/banner
+        await _navCtrl?.moveCamera(CameraUpdate.newCameraPosition(CameraPosition(
+          target: LatLng(latitude: trip.originLat, longitude: trip.originLng),
+          zoom: 16,
+        )));
+      } else {
+        await GoogleMapsNavigator.startGuidance();
+        await _navCtrl?.setNavigationUIEnabled(true);
+        await _navCtrl?.followMyLocation(CameraPerspective.tilted, zoomLevel: 17);
       }
     } catch (_) {}
+  }
 
-    // Streaming continuo mientras dure el viaje
+  Future<void> _updateNavigation(TripModel trip) async {
+    if (_navCtrl == null) return;
+
+    switch (trip.status) {
+      case 'driver_arrived':
+        // Llegó al pickup — pausa guía mientras espera OTP
+        await GoogleMapsNavigator.stopGuidance();
+        await _navCtrl?.moveCamera(CameraUpdate.newCameraPosition(CameraPosition(
+          target: LatLng(latitude: trip.originLat, longitude: trip.originLng),
+          zoom: 16,
+        )));
+      case 'in_progress':
+        // Pasajero a bordo — avanza al segundo waypoint (destino)
+        await GoogleMapsNavigator.continueToNextDestination();
+        await GoogleMapsNavigator.startGuidance();
+        await _navCtrl?.setNavigationUIEnabled(true);
+        await _navCtrl?.followMyLocation(CameraPerspective.tilted, zoomLevel: 17);
+    }
+  }
+
+  void _startLocationTracking() {
+    final socket = ref.read(socketClientProvider);
+
     _locationSub = geo.Geolocator.getPositionStream(
       locationSettings: const geo.LocationSettings(
         accuracy: geo.LocationAccuracy.high,
@@ -373,41 +294,12 @@ class _TripViewState extends ConsumerState<_TripView> {
       ),
     ).listen((pos) {
       if (!mounted) return;
-      final driverPos = LatLng(pos.latitude, pos.longitude);
       socket.emit('location.update', {
         'lat': pos.latitude,
         'lng': pos.longitude,
         'speed_kmh': pos.speed > 0 ? pos.speed * 3.6 : 0.0,
       });
-      _lastKnownPos = pos;
-      _updateMySymbol(driverPos, heading: pos.heading >= 0 ? pos.heading : 0);
-      _updateNavStep(pos);
-      if (_followDriver) {
-        _moveCamera(CameraUpdate.newCameraPosition(
-          CameraPosition(
-            target: driverPos,
-            bearing: pos.heading >= 0 ? pos.heading : 0,
-            zoom: 17,
-            tilt: 45,
-          ),
-        ));
-      }
     });
-  }
-
-  @override
-  void didUpdateWidget(_TripView old) {
-    super.didUpdateWidget(old);
-    if (old.trip.status != widget.trip.status) {
-      _fetchAndDrawRoute(widget.trip);
-      if (widget.trip.status == 'driver_arrived') {
-        _startWaitCountdown(widget.trip.waitTimerExpiresAt);
-      }
-      // Cuando el cliente acepta → emitir posición fresca para que vea el taxi de inmediato
-      if (widget.trip.status == 'accepted') {
-        _emitCurrentLocation();
-      }
-    }
   }
 
   Future<void> _emitCurrentLocation() async {
@@ -436,142 +328,6 @@ class _TripViewState extends ConsumerState<_TripView> {
       setState(() => _waitSecondsLeft = left < 0 ? 0 : left);
       if (left <= 0) _waitTimer?.cancel();
     });
-  }
-
-  Future<void> _fetchAndDrawRoute(TripModel trip) async {
-    final ctrl = _mapController;
-    if (ctrl == null) return;
-
-    if (!_disposed) setState(() => _followDriver = false);
-    await ctrl.clearLines();
-    if (_originSymbol != null) {
-      await ctrl.removeSymbol(_originSymbol!);
-      _originSymbol = null;
-    }
-
-    double startLat, startLng, endLat, endLng;
-    String lineColor;
-
-    switch (trip.status) {
-      case 'accepted':
-        try {
-          final pos = await geo.Geolocator.getCurrentPosition(
-            locationSettings: const geo.LocationSettings(accuracy: geo.LocationAccuracy.high),
-          );
-          startLat = pos.latitude;
-          startLng = pos.longitude;
-        } catch (_) {
-          return;
-        }
-        endLat = trip.originLat;
-        endLng = trip.originLng;
-        lineColor = '#FF6B35'; // orange: driver → pickup
-
-      case 'in_progress':
-        startLat = trip.originLat;
-        startLng = trip.originLng;
-        endLat = trip.destinationLat;
-        endLng = trip.destinationLng;
-        lineColor = '#16a34a'; // green: pickup → destination
-
-      default:
-        // driver_arrived: no route needed, just center on pickup
-        _moveCamera(CameraUpdate.newLatLngZoom(LatLng(trip.originLat, trip.originLng), 16));
-        await Future.delayed(const Duration(seconds: 2));
-        if (mounted) setState(() => _followDriver = true);
-        return;
-    }
-
-    try {
-      final dio = _externalDio;
-      final url = 'https://api.mapbox.com/directions/v5/mapbox/driving-traffic/'
-          '$startLng,$startLat;$endLng,$endLat'
-          '?geometries=geojson&overview=full&steps=true&language=es&access_token=${AppConfig.mapboxToken}';
-
-      final response = await dio.get<Map<String, dynamic>>(url);
-      final routes = response.data?['routes'] as List?;
-      if (routes == null || routes.isEmpty) return;
-
-      if (trip.status == 'accepted') {
-        final secs = (routes[0]['duration'] as num?)?.toDouble();
-        if (secs != null && !_disposed) setState(() => _etaMinutes = secs / 60);
-      }
-
-      // Pasos de navegación
-      final legs = routes[0]['legs'] as List?;
-      if (legs != null && legs.isNotEmpty) {
-        final rawSteps = (legs[0]['steps'] as List?)
-            ?.map((s) => Map<String, dynamic>.from(s as Map))
-            .toList() ?? [];
-        if (!_disposed && mounted) {
-          setState(() {
-            _navSteps       = rawSteps;
-            _currentStepIdx = 0;
-            _distToNextM    = rawSteps.length > 1
-                ? (rawSteps[0]['distance'] as num).toDouble()
-                : 0;
-          });
-        }
-      }
-
-      final coords = routes[0]['geometry']['coordinates'] as List;
-      final latLngs = coords
-          .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
-          .toList();
-
-      if (_disposed || !mounted) return;
-
-      // White border first, colored line on top — Uber/InDrive style
-      await ctrl.addLine(LineOptions(
-        geometry: latLngs,
-        lineColor: '#ffffff',
-        lineWidth: 10.0,
-        lineOpacity: 1.0,
-        lineJoin: 'round',
-      ));
-      await ctrl.addLine(LineOptions(
-        geometry: latLngs,
-        lineColor: lineColor,
-        lineWidth: 6.0,
-        lineOpacity: 1.0,
-        lineJoin: 'round',
-      ));
-
-      // Pin de recogida (persona) en el punto de origen
-      if (_mapImageReady) {
-        _originSymbol = await ctrl.addSymbol(SymbolOptions(
-          geometry: LatLng(trip.originLat, trip.originLng),
-          iconImage: 'pickup-pin',
-          iconSize: 1.0,
-          iconAnchor: 'bottom',
-        ));
-      }
-
-      // Show full route for 3 seconds, then switch to navigation follow mode
-      final lats = latLngs.map((p) => p.latitude);
-      final lngs = latLngs.map((p) => p.longitude);
-      _moveCamera(CameraUpdate.newLatLngBounds(
-        LatLngBounds(
-          southwest: LatLng(
-            lats.reduce((a, b) => a < b ? a : b),
-            lngs.reduce((a, b) => a < b ? a : b),
-          ),
-          northeast: LatLng(
-            lats.reduce((a, b) => a > b ? a : b),
-            lngs.reduce((a, b) => a > b ? a : b),
-          ),
-        ),
-        left: 50,
-        top: 80,
-        right: 50,
-        bottom: 340,
-      ));
-
-      await Future.delayed(const Duration(seconds: 3));
-      if (!_disposed) setState(() => _followDriver = true);
-    } catch (_) {
-      if (!_disposed) setState(() => _followDriver = true);
-    }
   }
 
   Future<void> _showCancelSheet(BuildContext ctx, TripModel trip) async {
@@ -663,7 +419,7 @@ class _TripViewState extends ConsumerState<_TripView> {
   Widget build(BuildContext context) {
     final trip = widget.trip;
 
-    // Taxímetro en vivo — solo registra el listener cuando el viaje está en progreso
+    // Taxímetro en vivo
     if (trip.status == 'in_progress' && trip.isMeterMode) {
       ref.listen<({double amount, double incPerSec})>(liveMeterProvider, (_, next) {
         if (_disposed || !mounted) return;
@@ -718,111 +474,17 @@ class _TripViewState extends ConsumerState<_TripView> {
     return Scaffold(
       body: Stack(
         children: [
-          MapLibreMap(
-            styleString: 'https://tiles.openfreemap.org/styles/liberty',
+          // Mapa de navegación Google — ocupa toda la pantalla
+          GoogleMapsNavigationView(
+            onViewCreated: _onNavViewCreated,
+            initialNavigationUIEnabledPreference: NavigationUIEnabledPreference.automatic,
             initialCameraPosition: CameraPosition(
-              target: LatLng(trip.originLat, trip.originLng),
-              zoom: 14,
+              target: LatLng(latitude: trip.originLat, longitude: trip.originLng),
+              zoom: 15,
             ),
-            onMapCreated: (controller) {
-              _mapController = controller;
-            },
-            onStyleLoadedCallback: () async {
-              final ctrl = _mapController;
-              if (ctrl == null) return;
-              final bytes = await _buildNavArrow();
-              await ctrl.addImage('driver-dot', bytes);
-              final pinBytes = await _buildPersonPin();
-              await ctrl.addImage('pickup-pin', pinBytes);
-              _mapImageReady = true;
-              _fetchAndDrawRoute(trip);
-              // Icono inicial en posición actual
-              try {
-                final pos = await geo.Geolocator.getCurrentPosition(
-                  locationSettings: const geo.LocationSettings(accuracy: geo.LocationAccuracy.high),
-                );
-                if (mounted) await _updateMySymbol(
-                  LatLng(pos.latitude, pos.longitude),
-                  heading: pos.heading >= 0 ? pos.heading : 0,
-                );
-              } catch (_) {}
-            },
-            myLocationEnabled: false,
-            trackCameraPosition: true,
-            onCameraIdle: () {
-              if (!_suppressCameraIdle && _followDriver && !_disposed && mounted) {
-                setState(() => _followDriver = false);
-              }
-            },
           ),
 
-          // Banner de navegación
-          if (_navSteps.length > 1 &&
-              (trip.status == 'accepted' || trip.status == 'in_progress'))
-            Positioned(
-              top: 0, left: 0, right: 0,
-              child: _NavBanner(
-                steps:          _navSteps,
-                currentIdx:     _currentStepIdx,
-                distToNextM:    _distToNextM,
-                tripStatus:     trip.status,
-              ),
-            ),
-
-          // Botón re-centrar (aparece cuando el usuario scrolleó)
-          if (!_followDriver)
-            Positioned(
-              right: 16,
-              top: 120,
-              child: GestureDetector(
-                onTap: () {
-                  setState(() => _followDriver = true);
-                  final p = _lastKnownPos;
-                  if (p != null) {
-                    _moveCamera(CameraUpdate.newCameraPosition(CameraPosition(
-                      target: LatLng(p.latitude, p.longitude),
-                      bearing: p.heading >= 0 ? p.heading : 0,
-                      zoom: 17,
-                      tilt: 45,
-                    )));
-                  }
-                },
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 10)],
-                  ),
-                  child: const Icon(Icons.navigation_rounded, color: Color(0xFF1A73E8), size: 24),
-                ),
-              ),
-            ),
-
-          // Back button — solo cuando NO hay banner de navegación activo
-          if (_navSteps.length <= 1 ||
-              (trip.status != 'accepted' && trip.status != 'in_progress'))
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: GestureDetector(
-                  onTap: () => context.go('/home'),
-                  child: Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 8)],
-                    ),
-                    child: const Icon(Icons.arrow_back_ios_new, size: 18),
-                  ),
-                ),
-              ),
-            ),
-
-          // Bottom sheet
+          // Panel inferior con info del cliente y acciones
           Positioned(
             bottom: 0,
             left: 0,
@@ -839,25 +501,15 @@ class _TripViewState extends ConsumerState<_TripView> {
                 children: [
                   Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 16), decoration: BoxDecoration(color: AppColors.gray200, borderRadius: BorderRadius.circular(2))),
 
-                  // Status badge
                   _StatusBadge(status: trip.status),
                   const SizedBox(height: 10),
 
-                  // ETA cuando va al cliente
-                  if (trip.status == 'accepted' && _etaMinutes != null)
-                    _InfoChip(
-                      icon: Icons.access_time_rounded,
-                      color: Colors.blue,
-                      label: 'Llegas en ~${_etaMinutes!.round()} min',
-                    ),
-
-                  // Countdown de espera cuando llegó
                   if (trip.status == 'driver_arrived')
                     _WaitTimer(secondsLeft: _waitSecondsLeft),
 
                   const SizedBox(height: 12),
 
-                  // Client info
+                  // Info del cliente
                   Row(
                     children: [
                       const CircleAvatar(
@@ -890,11 +542,9 @@ class _TripViewState extends ConsumerState<_TripView> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Addresses
                   _RouteCard(origin: trip.originAddress, destination: trip.destinationAddress),
                   const SizedBox(height: 16),
 
-                  // Cancelar — pequeño link encima del botón principal
                   if (trip.status == 'accepted' || trip.status == 'driver_arrived') ...[
                     const SizedBox(height: 4),
                     SizedBox(
@@ -937,100 +587,6 @@ class _TripViewState extends ConsumerState<_TripView> {
 
 // ── Reusable widgets ──────────────────────────────────────────────────────────
 
-class _NavBanner extends StatelessWidget {
-  const _NavBanner({
-    required this.steps,
-    required this.currentIdx,
-    required this.distToNextM,
-    required this.tripStatus,
-  });
-  final List<Map<String, dynamic>> steps;
-  final int    currentIdx;
-  final double distToNextM;
-  final String tripStatus;
-
-  static String _fmtDist(double m) {
-    if (m >= 1000) return '${(m / 1000).toStringAsFixed(1)} km';
-    return '${m.round()} m';
-  }
-
-  static IconData _maneuverIcon(Map maneuver) {
-    final type     = maneuver['type']     as String? ?? '';
-    final modifier = maneuver['modifier'] as String? ?? '';
-    if (type == 'arrive') return Icons.location_on_rounded;
-    if (type == 'roundabout' || type == 'rotary') return Icons.roundabout_left_rounded;
-    switch (modifier) {
-      case 'left':        return Icons.turn_left_rounded;
-      case 'right':       return Icons.turn_right_rounded;
-      case 'slight left': return Icons.turn_slight_left_rounded;
-      case 'slight right':return Icons.turn_slight_right_rounded;
-      case 'sharp left':  return Icons.turn_sharp_left_rounded;
-      case 'sharp right': return Icons.turn_sharp_right_rounded;
-      case 'uturn':       return Icons.u_turn_left_rounded;
-      default:            return Icons.straight_rounded;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final nextIdx   = (currentIdx + 1).clamp(0, steps.length - 1);
-    final nextStep  = steps[nextIdx];
-    final maneuver  = Map<String, dynamic>.from(nextStep['maneuver'] as Map);
-    final street    = (nextStep['name'] as String? ?? '').trim();
-    final icon      = _maneuverIcon(maneuver);
-    final bannerClr = tripStatus == 'accepted'
-        ? const Color(0xFF1565C0)   // azul oscuro
-        : const Color(0xFF1B5E20);  // verde oscuro
-
-    return Container(
-      color: bannerClr,
-      padding: EdgeInsets.fromLTRB(
-        16,
-        MediaQuery.of(context).padding.top + 12,
-        16,
-        14,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(icon, color: Colors.white, size: 52),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _fmtDist(distToNextM),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                    height: 1,
-                  ),
-                ),
-                if (street.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    street,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.85),
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _LiveMeterDisplay extends StatelessWidget {
   const _LiveMeterDisplay({required this.amount});
   final double amount;
@@ -1063,10 +619,10 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (status) {
-      'accepted' => ('Yendo al cliente', Colors.blue),
+      'accepted'       => ('Yendo al cliente', Colors.blue),
       'driver_arrived' => ('Esperando al cliente', AppColors.warningText),
-      'in_progress' => ('Viaje en progreso', Colors.green),
-      _ => ('Completado', AppColors.gray400),
+      'in_progress'    => ('Viaje en progreso', Colors.green),
+      _                => ('Completado', AppColors.gray400),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -1080,33 +636,16 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
-class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.icon, required this.color, required this.label});
-  final IconData icon;
-  final Color    color;
-  final String   label;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisAlignment: MainAxisAlignment.center,
-    children: [
-      Icon(icon, size: 15, color: color),
-      const SizedBox(width: 5),
-      Text(label, style: AppTextStyles.label.copyWith(color: color)),
-    ],
-  );
-}
-
 class _WaitTimer extends StatelessWidget {
   const _WaitTimer({required this.secondsLeft});
   final int secondsLeft;
 
   @override
   Widget build(BuildContext context) {
-    final mins = secondsLeft ~/ 60;
-    final secs = secondsLeft % 60;
+    final mins    = secondsLeft ~/ 60;
+    final secs    = secondsLeft % 60;
     final expired = secondsLeft <= 0;
-    final color = expired ? AppColors.errorText : AppColors.warningText;
+    final color   = expired ? AppColors.errorText : AppColors.warningText;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(

@@ -16,6 +16,7 @@ import '../../features/trips/domain/entities/active_trip.dart';
 import '../../features/trips/presentation/pages/confirm_trip_page.dart';
 import '../../features/trips/presentation/pages/searching_page.dart';
 import '../../features/trips/presentation/pages/active_trip_page.dart';
+import '../../features/trips/presentation/pages/payphone_webview_page.dart';
 import '../../features/auth/presentation/pages/forgot_password_page.dart';
 import '../../features/auth/presentation/pages/reset_password_page.dart';
 import '../../features/notifications/presentation/pages/notifications_page.dart';
@@ -111,6 +112,13 @@ final appRouter = GoRouter(
       path: '/trip/:id',
       builder: (context, state) =>
           ActiveTripPage(tripId: state.pathParameters['id']!),
+    ),
+    GoRoute(
+      path: '/payphone/:tripId/:amount',
+      builder: (context, state) => PayphoneWebViewPage(
+        tripId: state.pathParameters['tripId']!,
+        amount: double.tryParse(state.pathParameters['amount']!) ?? 0,
+      ),
     ),
     GoRoute(
       path: '/notifications',

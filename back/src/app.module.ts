@@ -36,6 +36,7 @@ import { AccountingModule } from './modules/accounting/accounting.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { PlansModule } from './modules/plans/plans.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { PayphoneModule } from './modules/payphone/payphone.module';
 
 @Module({
   imports: [
@@ -101,6 +102,7 @@ import { BillingModule } from './modules/billing/billing.module';
     ChatModule,
     PlansModule,
     BillingModule,
+    PayphoneModule,
   ],
   controllers: [AppController],
   providers: [

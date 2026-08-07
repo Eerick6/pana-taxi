@@ -19,10 +19,11 @@ class ConfirmTripPage extends ConsumerStatefulWidget {
 }
 
 class _ConfirmTripPageState extends ConsumerState<ConfirmTripPage> {
-  String _fareMode    = 'meter';
-  double _clientOffer = 2.0;
-  double _minOffer    = 1.50;
-  bool   _loading     = false;
+  String _fareMode          = 'meter';
+  String _paymentMethodSlug = 'cash';
+  double _clientOffer       = 2.0;
+  double _minOffer          = 1.50;
+  bool   _loading           = false;
 
   @override
   void initState() {
@@ -62,6 +63,7 @@ class _ConfirmTripPageState extends ConsumerState<ConfirmTripPage> {
         destinationLng:     lastStop.lng,
         fareMode:           _fareMode,
         clientOffer:        _fareMode == 'negotiated' ? _clientOffer : null,
+        paymentMethodSlug:  _paymentMethodSlug,
       );
       ref.read(tripRouteProvider.notifier).clear();
       ref.read(fareEstimateProvider.notifier).state = null;
@@ -128,6 +130,11 @@ class _ConfirmTripPageState extends ConsumerState<ConfirmTripPage> {
                 _FareModeCard(
                   selected:  _fareMode,
                   onChanged: (v) => setState(() => _fareMode = v),
+                ),
+                const SizedBox(height: 16),
+                _PaymentMethodCard(
+                  selected:  _paymentMethodSlug,
+                  onChanged: (v) => setState(() => _paymentMethodSlug = v),
                 ),
                 if (_fareMode == 'negotiated') ...[
                   const SizedBox(height: 16),
@@ -511,6 +518,47 @@ class _OfferCardState extends State<_OfferCard> {
                     style: AppTextStyles.caption.copyWith(color: AppColors.error),
                   ),
               ],
+            ),
+          ],
+        ),
+      );
+}
+
+// ── Método de pago ────────────────────────────────────────────────────────────
+
+class _PaymentMethodCard extends StatelessWidget {
+  const _PaymentMethodCard({required this.selected, required this.onChanged});
+  final String               selected;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Método de pago', style: AppTextStyles.label),
+            const SizedBox(height: 12),
+            _ModeOption(
+              value:    'cash',
+              selected: selected,
+              icon:     Icons.payments_outlined,
+              title:    'Efectivo',
+              subtitle: 'Pagas en efectivo al conductor',
+              onTap:    () => onChanged('cash'),
+            ),
+            const SizedBox(height: 10),
+            _ModeOption(
+              value:    'card',
+              selected: selected,
+              icon:     Icons.credit_card_outlined,
+              title:    'Tarjeta',
+              subtitle: 'Visa, Mastercard, Diners, Discover',
+              onTap:    () => onChanged('card'),
             ),
           ],
         ),

@@ -19,6 +19,7 @@ import { DriversModule } from '../drivers/drivers.module';
 import { Stand } from '../stands/entities/stand.entity';
 import { StandAssignment } from '../stands/entities/stand-assignment.entity';
 import { Client } from '../clients/entities/client.entity';
+import { PaymentMethod } from '../payment-methods/entities/payment-method.entity';
 import { AccountingModule } from '../accounting/accounting.module';
 
 @Module({
@@ -36,6 +37,7 @@ import { AccountingModule } from '../accounting/accounting.module';
       Stand,
       StandAssignment,
       Client,
+      PaymentMethod,
     ]),
     WalletModule,
     GatewayModule,
