@@ -106,7 +106,7 @@ export class FareService {
         `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}`,
         {
           params: { access_token: token, overview: 'full', geometries: 'geojson' },
-          timeout: 1500,
+          timeout: 3000,
         },
       );
 
