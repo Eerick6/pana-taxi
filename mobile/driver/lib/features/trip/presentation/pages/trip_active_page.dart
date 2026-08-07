@@ -55,8 +55,7 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
       final reason      = map['reason']       as String?;
       final cancelledBy = map['cancelled_by'] as String?;
 
-      ref.read(activeTripProvider.notifier).clear();
-
+      // Mostrar dialog ANTES de clear() para que build() no navegue mientras el dialog está abierto
       if (cancelledBy != 'driver' && reason != null && reason.isNotEmpty && mounted) {
         final who = cancelledBy == 'client'
             ? 'El cliente canceló el viaje'
@@ -76,14 +75,22 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
           ),
         );
       }
-      if (mounted) context.go('/home');
+
+      if (!_socketActive || !mounted) return;
+      ref.read(activeTripProvider.notifier).clear();
+      context.go('/home');
     };
     socket.on('trip.cancelled', _onCancelled!);
   }
 
   @override
-  void dispose() {
+  void deactivate() {
     _socketActive = false;
+    super.deactivate();
+  }
+
+  @override
+  void dispose() {
     final socket = ref.read(socketClientProvider);
     socket.off('trip.cancelled');
     super.dispose();
@@ -194,8 +201,13 @@ class _TripViewState extends ConsumerState<_TripView> {
   }
 
   @override
-  void dispose() {
+  void deactivate() {
     _disposed = true;
+    super.deactivate();
+  }
+
+  @override
+  void dispose() {
     _locationSub?.cancel();
     _waitTimer?.cancel();
     _meterTimer?.cancel();
