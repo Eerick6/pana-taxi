@@ -16,7 +16,7 @@ class PanaDriverApp extends ConsumerWidget {
     PushNotificationService.instance.onTripNotificationTap =
         (tripId, {String? action}) {
       PushNotificationService.pendingTripId = tripId;
-      router.go('/trip/$tripId');
+      router.go('/home');
     };
 
     return MaterialApp.router(
