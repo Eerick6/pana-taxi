@@ -1,5 +1,5 @@
 import { Controller, Post, Body, Req, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/guards/jwt.guard';
+import { JwtGuard } from '../auth/guards/jwt.guard';
 import { PayphoneService } from './payphone.service';
 
 class CreateLinkDto {
@@ -13,7 +13,7 @@ class ConfirmPaymentDto {
 }
 
 @Controller('payphone')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtGuard)
 export class PayphoneController {
   constructor(private readonly service: PayphoneService) {}
 
