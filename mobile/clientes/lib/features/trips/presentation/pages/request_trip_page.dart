@@ -387,8 +387,16 @@ class _RequestTripPageState extends ConsumerState<RequestTripPage>
   Future<void> _selectSuggestion(SearchSuggestion s) async {
     final target = _target;
     _searchFocus.unfocus();
-    setState(() { _target = _SearchTarget.none; _suggestions = []; });
-    await _applyPlace(s.resolvedPlace!, target);
+    setState(() { _target = _SearchTarget.none; _suggestions = []; _suggesting = true; });
+
+    PlaceResult? place = s.resolvedPlace;
+    if (place == null && s.placeId != null) {
+      place = await ref.read(geocodingServiceProvider).getPlaceDetails(s.placeId!);
+    }
+
+    if (!mounted) return;
+    setState(() => _suggesting = false);
+    if (place != null) await _applyPlace(place, target);
   }
 
   void _selectSaved(SavedLocation loc) {
