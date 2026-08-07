@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,12 +7,19 @@ import '../../features/trips/domain/entities/search_suggestion.dart';
 
 const _kGoogleApiKey = 'AIzaSyARdXsYNXD9dd5Q57rA9Mv0essqk6243kU';
 
+// Genera token aleatorio para agrupar autocomplete + details en una sesión ($0.017 flat)
+String _newSessionToken() {
+  final r = Random.secure();
+  return List.generate(32, (_) => r.nextInt(16).toRadixString(16)).join();
+}
+
 class GeocodingService {
   GeocodingService()
-      : _google = Dio(BaseOptions(
-          baseUrl: 'https://maps.googleapis.com',
+      : _places = Dio(BaseOptions(
+          baseUrl: 'https://places.googleapis.com',
           connectTimeout: const Duration(seconds: 5),
           receiveTimeout: const Duration(seconds: 5),
+          headers: {'X-Goog-Api-Key': _kGoogleApiKey},
         )),
         _nominatim = Dio(BaseOptions(
           baseUrl: 'https://nominatim.openstreetmap.org',
@@ -20,15 +28,18 @@ class GeocodingService {
           headers: {'User-Agent': 'PanaTaxi/1.0'},
         ));
 
-  final Dio _google;
+  final Dio _places;
   final Dio _nominatim;
+
+  // Un token por sesión de búsqueda — se renueva después de cada selección
+  String _sessionToken = _newSessionToken();
 
   double? _cachedLat;
   double? _cachedLng;
   String? _cachedAddr;
   static const _cacheThresholdM = 30.0;
 
-  // Google Places Autocomplete
+  // Places API (New) — Autocomplete
   Future<List<SearchSuggestion>> suggest(
     String query, {
     double? lat,
@@ -36,26 +47,34 @@ class GeocodingService {
   }) async {
     if (query.trim().length < 2) return [];
     try {
-      final params = <String, dynamic>{
-        'input':      query.trim(),
-        'key':        _kGoogleApiKey,
-        'language':   'es',
-        'components': 'country:ec',
-        'types':      'geocode|establishment',
+      final body = <String, dynamic>{
+        'input':               query.trim(),
+        'sessionToken':        _sessionToken,
+        'includedRegionCodes': ['ec'],
+        'languageCode':        'es',
       };
       if (lat != null && lng != null) {
-        params['location'] = '$lat,$lng';
-        params['radius']   = 50000;
+        body['locationBias'] = {
+          'circle': {
+            'center': {'latitude': lat, 'longitude': lng},
+            'radius': 50000.0,
+          },
+        };
       }
 
-      final res = await _google.get<Map<String, dynamic>>(
-        '/maps/api/place/autocomplete/json',
-        queryParameters: params,
+      final res = await _places.post<Map<String, dynamic>>(
+        '/v1/places:autocomplete',
+        data: body,
       );
 
-      final predictions = res.data?['predictions'] as List? ?? [];
-      return predictions
-          .map((p) => SearchSuggestion.fromGooglePlaces(p as Map<String, dynamic>))
+      final suggestions = res.data?['suggestions'] as List? ?? [];
+      return suggestions
+          .map((s) {
+            final p = (s as Map<String, dynamic>)['placePrediction'] as Map<String, dynamic>?;
+            if (p == null) return null;
+            return SearchSuggestion.fromGooglePlaces(p);
+          })
+          .whereType<SearchSuggestion>()
           .toList();
     } catch (e) {
       if (kDebugMode) debugPrint('[Geocoding] suggest error: $e');
@@ -63,28 +82,28 @@ class GeocodingService {
     }
   }
 
-  // Google Place Details — obtiene lat/lng a partir de un place_id
+  // Places API (New) — Details (cierra la sesión de facturación)
   Future<PlaceResult?> getPlaceDetails(String placeId) async {
     try {
-      final res = await _google.get<Map<String, dynamic>>(
-        '/maps/api/place/details/json',
-        queryParameters: {
-          'place_id': placeId,
-          'key':      _kGoogleApiKey,
-          'language': 'es',
-          'fields':   'geometry,name,formatted_address',
-        },
+      final res = await _places.get<Map<String, dynamic>>(
+        '/v1/places/$placeId',
+        queryParameters: {'sessionToken': _sessionToken},
+        options: Options(headers: {
+          'X-Goog-FieldMask': 'id,displayName,formattedAddress,location',
+        }),
       );
-      final result = res.data?['result'] as Map<String, dynamic>?;
-      if (result == null) return null;
 
-      final loc    = (result['geometry'] as Map?)?['location'] as Map?;
-      final lat    = (loc?['lat'] as num?)?.toDouble();
-      final lng    = (loc?['lng'] as num?)?.toDouble();
+      // Renovar token — la sesión terminó
+      _sessionToken = _newSessionToken();
+
+      final data    = res.data ?? {};
+      final loc     = data['location'] as Map?;
+      final lat     = (loc?['latitude']  as num?)?.toDouble();
+      final lng     = (loc?['longitude'] as num?)?.toDouble();
       if (lat == null || lng == null) return null;
 
-      final name    = result['name']              as String? ?? '';
-      final address = result['formatted_address'] as String? ?? name;
+      final name    = (data['displayName']     as Map?)?['text'] as String? ?? '';
+      final address =  data['formattedAddress'] as String? ?? name;
 
       return PlaceResult(
         displayName: address,

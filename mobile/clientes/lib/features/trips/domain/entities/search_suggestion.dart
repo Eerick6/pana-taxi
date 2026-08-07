@@ -9,17 +9,18 @@ class SearchSuggestion {
     this.resolvedPlace,
   });
 
-  // From Google Places Autocomplete — needs a Details call to get coords
+  // From Google Places API (New) placePrediction object
   factory SearchSuggestion.fromGooglePlaces(Map<String, dynamic> p) {
-    final main      = p['structured_formatting'] as Map<String, dynamic>? ?? {};
-    final name      = main['main_text']      as String? ?? p['description'] as String? ?? '';
-    final secondary = main['secondary_text'] as String? ?? '';
+    final fmt       = p['structuredFormat'] as Map<String, dynamic>? ?? {};
+    final name      = (fmt['mainText']      as Map?)?['text'] as String?
+                   ?? (p['text']            as Map?)?['text'] as String? ?? '';
+    final secondary = (fmt['secondaryText'] as Map?)?['text'] as String? ?? '';
     final address   = secondary.isNotEmpty ? '$name, $secondary' : name;
     return SearchSuggestion._(
       name:        name,
       address:     address,
       featureType: _googleType(p['types'] as List? ?? []),
-      placeId:     p['place_id'] as String?,
+      placeId:     p['placeId'] as String?,
     );
   }
 
