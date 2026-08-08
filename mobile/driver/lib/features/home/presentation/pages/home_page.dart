@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:audioplayers/audioplayers.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:go_router/go_router.dart';
+import 'package:flutter/foundation.dart';
+import 'package:google_navigation_flutter/google_navigation_flutter.dart' show GoogleMapsNavigator;
 import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/network/dio_client.dart';
@@ -15,8 +19,10 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../profile/data/providers/profile_provider.dart';
 import '../../../trip/data/providers/trip_provider.dart';
 import '../../../trip/presentation/widgets/trip_alert_overlay.dart';
+import '../../../auth/data/providers/auth_provider.dart';
 import '../../../documents/data/providers/document_provider.dart';
 import '../../../vehicles/data/providers/vehicle_provider.dart';
+import '../widgets/available_trips_panel.dart';
 import '../widgets/home_bottom_panel.dart';
 import '../widgets/home_pending_screen.dart';
 import '../widgets/home_top_bar.dart';
@@ -53,13 +59,44 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
   geo.Position? _pendingPosition;
   bool _resumeChecked = false;
 
+  // Lista de viajes disponibles (modelo InDriver)
+  final Map<String, TripAlertData> _availableTrips = {};
+  final Set<String> _pendingOffers = {}; // tripIds donde ya enviamos oferta
+  bool _navigatedToTrip = false; // evita setState tras context.go al viaje activo
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _requestLocationAndTrack();
     _initSocketAndListen();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkPendingTrip());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadInitialTrips();
+      _checkPendingTrip();
+      _preAcceptNavigationTerms();
+    });
+  }
+
+  // Carga viajes activos en búsqueda al abrir la app (por si ya habían)
+  Future<void> _loadInitialTrips() async {
+    try {
+      final dio = ref.read(dioProvider);
+      final res = await dio.get('/trips/available');
+      final list = res.data as List? ?? [];
+      if (!mounted) return;
+      final trips = <String, TripAlertData>{};
+      for (final item in list) {
+        if (item is! Map) continue;
+        final data = Map<String, dynamic>.from(item as Map);
+        final tripId = data['id'] as String?;
+        if (tripId == null) continue;
+        final trip = TripAlertData.fromTripDetail(tripId, data);
+        if (trip != null) trips[tripId] = trip;
+      }
+      if (trips.isNotEmpty) setState(() => _availableTrips.addAll(trips));
+    } catch (e) {
+      debugPrint('[HomePage] _loadInitialTrips error: $e');
+    }
   }
 
   Future<void> _checkPendingTrip() async {
@@ -72,15 +109,10 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       final res = await dio.get('/trips/$tripId');
       final data = Map<String, dynamic>.from(res.data as Map);
       if (data['status'] != 'requested') return;
-      final alert = TripAlertData.fromTripDetail(tripId, data);
-      if (alert == null || !mounted || TripAlertManager.isShowing) return;
-      TripAlertManager.show(
-        context: context,
-        alert: alert,
-        dio: dio,
-        onAccepted: (_) => context.go('/trip/$tripId'),
-        playSound: false,
-      );
+      final trip = TripAlertData.fromTripDetail(tripId, data);
+      if (trip == null || !mounted) return;
+      setState(() => _availableTrips[tripId] = trip);
+      _playTripSound();
     } catch (e) {
       debugPrint('[HomePage] pending trip fetch error: $e');
     }
@@ -88,25 +120,47 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
 
   Future<void> _initSocketAndListen() async {
     final socket = ref.read(socketClientProvider);
+    socket.onAuthFailed = () {
+      ref.read(authStateProvider.notifier).logout().then((_) {
+        if (mounted) context.go('/auth/login');
+      });
+    };
     await socket.connect();
     _listenForTrips();
+  }
+
+  // Muestra el dialog de términos de Google Navigation en home (antes de cualquier viaje)
+  // para que cuando el taxista acepte un trip los términos ya estén persistidos en disco.
+  Future<void> _preAcceptNavigationTerms() async {
+    if (!mounted) return;
+    if (await GoogleMapsNavigator.areTermsAccepted()) return;
+    final accepted = await GoogleMapsNavigator.showTermsAndConditionsDialog(
+      'Pana Taxista',
+      'Pana Taxista',
+    );
+    if (!accepted) return;
+    // Android persiste la aceptación en un hilo secundario — esperar hasta que sea visible
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      for (var i = 0; i < 20 && !await GoogleMapsNavigator.areTermsAccepted(); i++) {
+        await Future.delayed(const Duration(milliseconds: 250));
+      }
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _locationSub?.cancel();
-    TripAlertManager.dismiss();
     final socket = ref.read(socketClientProvider);
     socket.off('driver.approved');
     socket.off('vehicle.approved');
     socket.off('document.approved');
     socket.off('trip.new');
     socket.off('trip.taken');
+    socket.off('trip.cancelled');
     socket.off('trip.radius_expanded');
+    socket.off('trip.offer_accepted');
     socket.off('trip.offer_rejected');
-    socket.off('trip.offer_ignored');
-    socket.off('trip.price_updated');
     super.dispose();
   }
 
@@ -128,95 +182,234 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       ref.invalidate(documentsProvider);
     });
 
+    // Nuevo viaje disponible → agregar a la lista
+    // trip.new también llega en radius expansion sin client_name → preservar info existente
     socket.on('trip.new', (data) {
-      debugPrint('[trip.new] received: $data');
-      if (!mounted) { debugPrint('[trip.new] skip: not mounted'); return; }
-      if (data is! Map) { debugPrint('[trip.new] skip: data is not Map'); return; }
+      if (_navigatedToTrip || !mounted || data is! Map) return;
       final map = Map<String, dynamic>.from(data);
-      final alert = TripAlertData.fromEvent(map);
-      if (alert == null) { debugPrint('[trip.new] skip: fromEvent returned null'); return; }
-      if (TripAlertManager.isShowing) { debugPrint('[trip.new] skip: overlay already showing'); return; }
+      final trip = TripAlertData.fromEvent(map);
+      if (trip == null) return;
+
       final pos = _pendingPosition;
-      if (pos != null && !driverWithinRadius(pos.latitude, pos.longitude, alert)) {
-        debugPrint('[trip.new] skip: outside radius. driver=(${pos.latitude},${pos.longitude}) origin=(${alert.originLat},${alert.originLng}) radius=${alert.searchRadiusKm}km');
-        return;
+      if (pos != null && !driverWithinRadius(pos.latitude, pos.longitude, trip)) return;
+
+      final existing = _availableTrips[trip.tripId];
+      final isNew = existing == null;
+
+      // Si ya teníamos este viaje, preservar client info que el evento expansion omite
+      final updated = (existing != null && trip.clientName == null)
+          ? TripAlertData(
+              tripId:            trip.tripId,
+              originAddress:     trip.originAddress,
+              destinationAddress: trip.destinationAddress,
+              originLat:         trip.originLat,
+              originLng:         trip.originLng,
+              searchRadiusKm:    trip.searchRadiusKm,
+              fareMode:          trip.fareMode,
+              suggestedFare:     trip.suggestedFare,
+              clientOffer:       trip.clientOffer,
+              distanceKm:        trip.distanceKm,
+              clientName:        existing.clientName,
+              clientPhoto:       existing.clientPhoto,
+              clientRating:      existing.clientRating,
+              clientTotalTrips:  existing.clientTotalTrips,
+            )
+          : trip;
+
+      setState(() => _availableTrips[updated.tripId] = updated);
+      if (isNew) _playTripSound(); // sonido solo para viajes realmente nuevos
+    });
+
+    // Viaje tomado (otro driver fue seleccionado o fue cancelado) → quitar de lista
+    socket.on('trip.taken', (data) {
+      if (_navigatedToTrip || data is! Map) return;
+      final tripId = data['trip_id'] as String?;
+      if (tripId != null && mounted) {
+        setState(() {
+          _availableTrips.remove(tripId);
+          _pendingOffers.remove(tripId);
+        });
       }
-      debugPrint('[trip.new] showing alert for trip ${alert.tripId}');
-      TripAlertManager.show(
-        context: context,
-        alert: alert,
-        dio: ref.read(dioProvider),
-        onAccepted: (_) => context.go('/trip/${alert.tripId}'),
-      );
     });
 
-    socket.on('trip.taken', (_) {
-      if (TripAlertManager.isShowing) TripAlertManager.dismiss();
+    // Viaje cancelado por el cliente → quitar de lista
+    socket.on('trip.cancelled', (data) {
+      if (_navigatedToTrip || data is! Map) return;
+      final tripId = data['trip_id'] as String?;
+      if (tripId != null && mounted) {
+        setState(() {
+          _availableTrips.remove(tripId);
+          _pendingOffers.remove(tripId);
+        });
+      }
     });
 
+    // Cliente eligió a este conductor → navegar al viaje
     socket.on('trip.offer_accepted', (data) {
       if (!mounted) return;
-      TripAlertManager.dismiss();
       final tripId = (data is Map ? data['trip_id'] : null) as String?;
       if (tripId != null) {
+        _navigatedToTrip = true; // bloquea setState en handlers posteriores
         ref.invalidate(activeTripProvider);
         context.go('/trip/$tripId');
       }
     });
 
-    socket.on('trip.offer_rejected', (_) {
-      if (TripAlertManager.isShowing) TripAlertManager.dismiss();
+    // Cliente eligió a otro conductor → quitar de pendientes, mostrar toast
+    socket.on('trip.offer_rejected', (data) {
+      if (_navigatedToTrip || !mounted || data is! Map) return;
+      final tripId = data['trip_id'] as String?;
+      if (tripId != null) setState(() => _pendingOffers.remove(tripId));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('El cliente eligió a otro conductor'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 3),
+        ),
+      );
     });
 
-    socket.on('trip.offer_ignored', (data) {
-      if (!mounted || data is! Map) return;
-      final canReOffer = (data['can_re_offer'] as bool?) ?? true;
-      TripAlertManager.notifyOfferIgnored(canReOffer: canReOffer);
-    });
+    // Expansión de radio → actualizar radio o agregar si el driver ahora está dentro
+    socket.on('trip.radius_expanded', (data) {
+      if (_navigatedToTrip || !mounted || data is! Map) return;
+      final map = Map<String, dynamic>.from(data);
+      final tripId = map['trip_id'] as String?;
+      if (tripId == null) return;
 
-    socket.on('trip.price_updated', (data) {
-      debugPrint('[price_updated] received: $data');
-      if (!mounted || data is! Map) return;
-      final map   = Map<String, dynamic>.from(data);
-      final alert = TripAlertData.fromEvent(map);
-      if (alert == null) { debugPrint('[price_updated] fromEvent returned null'); return; }
-
-      if (TripAlertManager.isShowing && TripAlertManager.currentTripId != alert.tripId) return;
-
-      if (!TripAlertManager.isShowing) {
-        final pos = _pendingPosition;
-        if (pos != null && !driverWithinRadius(pos.latitude, pos.longitude, alert)) {
-          debugPrint('[price_updated] skip: outside radius');
-          return;
+      if (_availableTrips.containsKey(tripId)) {
+        // Actualizar radio del viaje ya en la lista
+        final newRadius = (map['search_radius_km'] as num?)?.toDouble();
+        if (newRadius != null) {
+          final old = _availableTrips[tripId]!;
+          setState(() => _availableTrips[tripId] = TripAlertData(
+            tripId: old.tripId,
+            originAddress: old.originAddress,
+            destinationAddress: old.destinationAddress,
+            originLat: old.originLat,
+            originLng: old.originLng,
+            searchRadiusKm: newRadius,
+            fareMode: old.fareMode,
+            suggestedFare: old.suggestedFare,
+            clientOffer: old.clientOffer,
+            distanceKm: old.distanceKm,
+            clientName: old.clientName,
+            clientPhoto: old.clientPhoto,
+            clientRating: old.clientRating,
+            clientTotalTrips: old.clientTotalTrips,
+          ));
         }
+        return;
       }
 
-      debugPrint('[price_updated] showing overlay for trip ${alert.tripId} price=${alert.clientOffer}');
-      TripAlertManager.show(
-        context: context,
-        alert: alert,
-        dio: ref.read(dioProvider),
-        onAccepted: (_) => context.go('/trip/${alert.tripId}'),
-      );
-    });
-
-    socket.on('trip.radius_expanded', (data) {
-      if (!mounted) return;
-      if (data is! Map) return;
-      final map = Map<String, dynamic>.from(data);
-      final alert = TripAlertData.fromEvent(map);
-      if (alert == null) return;
-      if (TripAlertManager.isShowing) return;
+      // Viaje que no estaba en lista — ver si el driver ahora entra al radio
+      final trip = TripAlertData.fromEvent(map);
+      if (trip == null) return;
       final pos = _pendingPosition;
-      if (pos == null) return;
-      if (!driverWithinRadius(pos.latitude, pos.longitude, alert)) return;
-      TripAlertManager.show(
-        context: context,
-        alert: alert,
-        dio: ref.read(dioProvider),
-        onAccepted: (_) => context.go('/trip/${alert.tripId}'),
-      );
+      if (pos != null && !driverWithinRadius(pos.latitude, pos.longitude, trip)) return;
+      setState(() => _availableTrips[trip.tripId] = trip);
+      _playTripSound();
     });
+  }
+
+  // Apuntarse a un viaje en modo taxímetro
+  Future<void> _applyMeter(String tripId) async {
+    if (_pendingOffers.contains(tripId)) return;
+    setState(() => _pendingOffers.add(tripId));
+    try {
+      final dio = ref.read(dioProvider);
+      await dio.post('/trips/$tripId/offers', data: {});
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _pendingOffers.remove(tripId));
+      String msg = 'Error al enviar oferta';
+      if (e is DioException && e.response?.data is Map) {
+        msg = (e.response!.data as Map)['message']?.toString() ?? msg;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // Aceptar oferta del cliente directamente (sin contraoferta)
+  Future<void> _acceptNegotiated(TripAlertData trip) async {
+    if (_pendingOffers.contains(trip.tripId)) return;
+    final amount = trip.clientOffer ?? trip.suggestedFare;
+    if (amount == null) return;
+    setState(() => _pendingOffers.add(trip.tripId));
+    try {
+      final dio = ref.read(dioProvider);
+      await dio.post('/trips/${trip.tripId}/offers', data: {'amount': amount});
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _pendingOffers.remove(trip.tripId));
+      String msg = 'Error al enviar oferta';
+      if (e is DioException && e.response?.data is Map) {
+        msg = (e.response!.data as Map)['message']?.toString() ?? msg;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // Abrir sheet para viaje negociado
+  Future<void> _showNegotiatedOfferSheet(TripAlertData trip) async {
+    if (_pendingOffers.contains(trip.tripId)) return;
+    final amount = await showModalBottomSheet<double>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => NegotiatedOfferSheet(
+        trip: trip,
+        onSubmit: (val) => Navigator.pop(ctx, val),
+      ),
+    );
+    if (amount == null || !mounted) return;
+
+    setState(() => _pendingOffers.add(trip.tripId));
+    try {
+      final dio = ref.read(dioProvider);
+      await dio.post('/trips/${trip.tripId}/offers', data: {'amount': amount});
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _pendingOffers.remove(trip.tripId));
+      String msg = 'Error al enviar oferta';
+      if (e is DioException && e.response?.data is Map) {
+        msg = (e.response!.data as Map)['message']?.toString() ?? msg;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _playTripSound() {
+    AudioPlayer()
+      ..setAudioContext(AudioContext(
+        android: const AudioContextAndroid(
+          usageType: AndroidUsageType.alarm,
+          contentType: AndroidContentType.music,
+          audioFocus: AndroidAudioFocus.gain,
+          stayAwake: true,
+        ),
+      ))
+      ..play(AssetSource('sounds/trip_alert.wav')).then((_) async {
+        await Future.delayed(const Duration(milliseconds: 900));
+        AudioPlayer().play(AssetSource('sounds/trip_alert.wav')).ignore();
+      }).ignore();
   }
 
   @override
@@ -224,9 +417,6 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     if (state == AppLifecycleState.resumed) {
       ref.read(driverProfileProvider.notifier).refresh();
       ref.read(myVehiclesGuardProvider.notifier).refresh();
-      // User may have tapped a trip notification while the app was in background.
-      // router.go('/home') from the tap handler may not rebuild this page if the
-      // route is already /home, so we also check here on every resume.
       _checkPendingTrip();
     }
   }
@@ -264,29 +454,35 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
   }
 
   Future<void> _onStyleLoaded() async {
-    final bytes = await _getLocationDotBytes();
-    await _mapController?.addImage('location-dot', bytes);
-    _imageReady = true;
-    if (_pendingPosition != null) {
-      await _updateSymbol(_pendingPosition!);
-      _mapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(
-          LatLng(_pendingPosition!.latitude, _pendingPosition!.longitude), 15),
-      );
-    }
+    if (_mapController == null || !mounted) return;
+    try {
+      final bytes = await _getLocationDotBytes();
+      await _mapController?.addImage('location-dot', bytes);
+      _imageReady = true;
+      if (_pendingPosition != null) {
+        await _updateSymbol(_pendingPosition!);
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(
+            LatLng(_pendingPosition!.latitude, _pendingPosition!.longitude), 15),
+        );
+      }
+    } catch (_) {}
   }
 
   Future<void> _updateSymbol(geo.Position pos) async {
+    if (_mapController == null || !mounted) return;
     final latlng = LatLng(pos.latitude, pos.longitude);
-    if (_locationSymbol == null) {
-      _locationSymbol = await _mapController?.addSymbol(
-        SymbolOptions(geometry: latlng, iconImage: 'location-dot', iconSize: 1.0),
-      );
-    } else {
-      await _mapController?.updateSymbol(
-        _locationSymbol!, SymbolOptions(geometry: latlng),
-      );
-    }
+    try {
+      if (_locationSymbol == null) {
+        _locationSymbol = await _mapController?.addSymbol(
+          SymbolOptions(geometry: latlng, iconImage: 'location-dot', iconSize: 1.0),
+        );
+      } else {
+        await _mapController?.updateSymbol(
+          _locationSymbol!, SymbolOptions(geometry: latlng),
+        );
+      }
+    } catch (_) {}
   }
 
   void _flyTo(geo.Position pos) {
@@ -369,6 +565,8 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       }
     });
 
+    final trips = _availableTrips.values.toList();
+
     return Scaffold(
       body: Stack(
         children: [
@@ -398,9 +596,22 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
 
           HomeTripBanner(onNavigate: (id) => context.go('/trip/$id')),
 
+          // Panel de viajes disponibles (modelo InDriver)
           Positioned(
             bottom: 0, left: 0, right: 0,
-            child: HomeBottomPanel(onToggle: _toggleStatus),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AvailableTripsPanel(
+                  trips: trips,
+                  pendingOffers: _pendingOffers,
+                  onApplyMeter: _applyMeter,
+                  onAcceptNegotiated: _acceptNegotiated,
+                  onOpenNegotiatedSheet: _showNegotiatedOfferSheet,
+                ),
+                HomeBottomPanel(onToggle: _toggleStatus),
+              ],
+            ),
           ),
 
           const HomeProfileGuard(),

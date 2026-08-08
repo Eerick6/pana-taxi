@@ -823,6 +823,9 @@ export class TripsService {
       this.gateway.notifyDriver(driverId, 'trip.offer_rejected', { trip_id: tripId });
     }
 
+    // Notificar a todos los conductores disponibles que el viaje ya fue tomado
+    this.gateway.notifyAvailableDrivers('trip.taken', { trip_id: tripId });
+
     // Notificar al cliente con OTP (solo él lo ve)
     this.gateway.notifyUser(userId, 'trip.accepted', {
       trip_id: tripId,
@@ -1231,14 +1234,12 @@ export class TripsService {
         await em.update(Driver, trip.driver.id, { online_status: DriverOnlineStatus.ONLINE });
       }
 
-      // Expirar ofertas pendientes si el viaje era negociado
-      if (trip.fare_mode === FareMode.NEGOTIATED) {
-        await em.createQueryBuilder()
-          .update(TripOffer)
-          .set({ status: OfferStatus.EXPIRED })
-          .where('trip_id = :tripId AND status = :status', { tripId, status: OfferStatus.PENDING })
-          .execute();
-      }
+      // Expirar todas las ofertas pendientes (meter y negotiated)
+      await em.createQueryBuilder()
+        .update(TripOffer)
+        .set({ status: OfferStatus.EXPIRED })
+        .where('trip_id = :tripId AND status = :status', { tripId, status: OfferStatus.PENDING })
+        .execute();
     });
 
     const cancelPayload = {
@@ -1258,6 +1259,11 @@ export class TripsService {
     // Taxista — siempre en ROOM.driver, no en ROOM.trip durante búsqueda
     if (trip.driver?.id) {
       this.gateway.notifyDriver(trip.driver.id, 'trip.cancelled', cancelPayload);
+    }
+
+    // Si el viaje estaba en búsqueda, notificar a todos los conductores disponibles para quitar de la lista
+    if ([TripStatus.REQUESTED, TripStatus.NEGOTIATING].includes(trip.status)) {
+      this.gateway.notifyAvailableDrivers('trip.taken', { trip_id: tripId });
     }
 
     return { message: 'Viaje cancelado' };

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart' as geo;
@@ -31,20 +32,25 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
   void initState() {
     super.initState();
     _socketActive = true;
-    _listenOfferAccepted();
+    _listenStatusChanges();
     _listenCancelled();
   }
 
-  void _listenOfferAccepted() {
+  void _listenStatusChanges() {
     final socket = ref.read(socketClientProvider);
-    socket.on('trip.offer_accepted', (data) async {
+
+    // Cualquier evento que cambia el estado del viaje → refetch
+    Future<void> refetch([dynamic _]) async {
       if (!_socketActive || !mounted) return;
-      final repo    = ref.read(tripRepositoryProvider);
-      final updated = await repo.getActiveTrip();
+      final updated = await ref.read(tripRepositoryProvider).getActiveTrip();
       if (_socketActive && mounted && updated != null) {
         ref.read(activeTripProvider.notifier).setTrip(updated);
       }
-    });
+    }
+
+    for (final event in ['trip.offer_accepted', 'trip.started', 'trip.arrived', 'trip.status_changed']) {
+      socket.on(event, refetch);
+    }
   }
 
   void _listenCancelled() {
@@ -55,8 +61,11 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
       final reason      = map['reason']       as String?;
       final cancelledBy = map['cancelled_by'] as String?;
 
+      // Si el driver canceló él mismo, _showCancelSheet ya manejó la navegación — ignorar
+      if (cancelledBy == 'driver') return;
+
       // Mostrar dialog ANTES de clear() para que build() no navegue mientras el dialog está abierto
-      if (cancelledBy != 'driver' && reason != null && reason.isNotEmpty && mounted) {
+      if (reason != null && reason.isNotEmpty && mounted) {
         final who = cancelledBy == 'client'
             ? 'El cliente canceló el viaje'
             : 'El viaje fue cancelado';
@@ -77,8 +86,8 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
       }
 
       if (!_socketActive || !mounted) return;
-      ref.read(activeTripProvider.notifier).clear();
       context.go('/home');
+      ref.read(activeTripProvider.notifier).clear();
     };
     socket.on('trip.cancelled', _onCancelled!);
   }
@@ -92,7 +101,9 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
   @override
   void dispose() {
     final socket = ref.read(socketClientProvider);
-    socket.off('trip.cancelled');
+    for (final event in ['trip.offer_accepted', 'trip.started', 'trip.arrived', 'trip.status_changed', 'trip.cancelled']) {
+      socket.off(event);
+    }
     super.dispose();
   }
 
@@ -121,9 +132,6 @@ class _TripActivePageState extends ConsumerState<TripActivePage> {
       error: (e, _) => Scaffold(body: Center(child: Text('Error: $e'))),
       data: (trip) {
         if (trip == null) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) context.go('/home');
-          });
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         return _TripView(trip: trip, loading: _loading, onAction: _performAction);
@@ -171,7 +179,8 @@ class _TripView extends ConsumerStatefulWidget {
 class _TripViewState extends ConsumerState<_TripView> {
   bool _disposed = false;
 
-  // Google Navigation
+  // Google Navigation — true cuando sesión lista para mostrar el widget
+  bool _navReady = false;
   GoogleNavigationViewController? _navCtrl;
 
   // Taxímetro en vivo
@@ -190,6 +199,7 @@ class _TripViewState extends ConsumerState<_TripView> {
   void initState() {
     super.initState();
     _startLocationTracking();
+    _initNavigation(widget.trip);
     if (widget.trip.status == 'driver_arrived') {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _startWaitCountdown(widget.trip.waitTimerExpiresAt),
@@ -211,7 +221,7 @@ class _TripViewState extends ConsumerState<_TripView> {
     _locationSub?.cancel();
     _waitTimer?.cancel();
     _meterTimer?.cancel();
-    GoogleMapsNavigator.cleanup();
+    GoogleMapsNavigator.cleanup().catchError((_) {});
     super.dispose();
   }
 
@@ -229,26 +239,64 @@ class _TripViewState extends ConsumerState<_TripView> {
     }
   }
 
-  Future<void> _onNavViewCreated(GoogleNavigationViewController ctrl) async {
-    _navCtrl = ctrl;
-    await ctrl.setMyLocationEnabled(true);
-
-    final accepted = await GoogleMapsNavigator.areTermsAccepted();
-    if (!accepted) {
-      final userAccepted = await GoogleMapsNavigator.showTermsAndConditionsDialog(
-        'Términos de navegación',
-        'Pana Taxista',
-      );
-      if (!userAccepted) return;
-    }
-
-    await _initNavSession(widget.trip);
-  }
-
-  // Un solo setDestinations con pickup + destino = 1 evento de facturación
-  Future<void> _initNavSession(TripModel trip) async {
+  // Inicializa sesión de navegación ANTES de mostrar el widget (según doc oficial)
+  Future<void> _initNavigation(TripModel trip) async {
     try {
-      await GoogleMapsNavigator.initializeNavigationSession();
+      // 1. Términos Google Navigation.
+      //    El dialog se muestra preferentemente en HomePage (_preAcceptNavigationTerms)
+      //    para que al llegar aquí ya estén persistidos. Si por alguna razón no lo están,
+      //    los mostramos aquí y esperamos hasta que el SDK los escriba en disco.
+      if (!await GoogleMapsNavigator.areTermsAccepted()) {
+        final accepted = await GoogleMapsNavigator.showTermsAndConditionsDialog(
+          'Pana Taxista',
+          'Pana Taxista',
+        );
+        if (!accepted) {
+          if (!_disposed && mounted) setState(() => _navReady = true);
+          return;
+        }
+        // Android persiste en hilo secundario: polling hasta confirmar la escritura
+        if (defaultTargetPlatform == TargetPlatform.android) {
+          for (var i = 0; i < 20 && !await GoogleMapsNavigator.areTermsAccepted(); i++) {
+            await Future.delayed(const Duration(milliseconds: 250));
+          }
+        }
+      }
+
+      // 2. Permiso de ubicación requerido antes de initializeNavigationSession
+      final perm = await geo.Geolocator.checkPermission();
+      if (perm != geo.LocationPermission.always && perm != geo.LocationPermission.whileInUse) {
+        if (!_disposed && mounted) setState(() => _navReady = true);
+        return;
+      }
+
+      // 3. Inicializar sesión con reintentos — la aceptación reciente puede tardar
+      //    un poco más en propagarse internamente dentro del SDK.
+      for (var attempt = 0; attempt < 3; attempt++) {
+        try {
+          await GoogleMapsNavigator.initializeNavigationSession(
+            taskRemovedBehavior: TaskRemovedBehavior.continueService,
+          );
+          break;
+        } on SessionInitializationException catch (e) {
+          if (e.code == SessionInitializationError.termsNotAccepted && attempt < 2) {
+            await Future.delayed(Duration(seconds: attempt + 1));
+            continue;
+          }
+          rethrow;
+        }
+      }
+
+      // 4. En emulador (debug), proveer ubicación simulada para que el SDK calcule ruta
+      if (kDebugMode) {
+        try {
+          await GoogleMapsNavigator.simulator.setUserLocation(
+            LatLng(latitude: trip.originLat - 0.003, longitude: trip.originLng),
+          );
+        } catch (_) {}
+      }
+
+      // 5. Establecer destinos
       await GoogleMapsNavigator.setDestinations(Destinations(
         waypoints: [
           NavigationWaypoint.withLatLngTarget(
@@ -260,10 +308,7 @@ class _TripViewState extends ConsumerState<_TripView> {
             target: LatLng(latitude: trip.destinationLat, longitude: trip.destinationLng),
           ),
         ],
-        displayOptions: NavigationDisplayOptions(
-          showStopSigns: true,
-          showTrafficLights: true,
-        ),
+        displayOptions: NavigationDisplayOptions(showStopSigns: true, showTrafficLights: true),
         routingOptions: RoutingOptions(travelMode: NavigationTravelMode.driving),
       ));
 
@@ -272,19 +317,44 @@ class _TripViewState extends ConsumerState<_TripView> {
         await GoogleMapsNavigator.continueToNextDestination();
       }
 
-      if (trip.status == 'driver_arrived') {
-        // Esperando al pasajero — sin guía de voz/banner
-        await _navCtrl?.moveCamera(CameraUpdate.newCameraPosition(CameraPosition(
-          target: LatLng(latitude: trip.originLat, longitude: trip.originLng),
-          zoom: 16,
-        )));
-      } else {
-        await GoogleMapsNavigator.startGuidance();
-        await _navCtrl?.setNavigationUIEnabled(true);
-        await _navCtrl?.followMyLocation(CameraPerspective.tilted, zoomLevel: 17);
+      // 6. Solo cuando todo esté listo, mostrar el widget
+      if (!_disposed && mounted) {
+        setState(() => _navReady = true);
       }
     } catch (e) {
       debugPrint('[Navigation] Error: $e');
+      if (!_disposed && mounted) {
+        setState(() => _navReady = true);
+      }
+    }
+  }
+
+  Future<void> _onNavViewCreated(GoogleNavigationViewController ctrl) async {
+    _navCtrl = ctrl;
+
+    final perm = await geo.Geolocator.checkPermission();
+    if (perm == geo.LocationPermission.always || perm == geo.LocationPermission.whileInUse) {
+      await ctrl.setMyLocationEnabled(true);
+    }
+
+    if (widget.trip.status == 'driver_arrived') {
+      await ctrl.moveCamera(CameraUpdate.newCameraPosition(CameraPosition(
+        target: LatLng(latitude: widget.trip.originLat, longitude: widget.trip.originLng),
+        zoom: 16,
+      )));
+    } else {
+      try {
+        await GoogleMapsNavigator.startGuidance();
+        await ctrl.setNavigationUIEnabled(true);
+        await ctrl.followMyLocation(CameraPerspective.tilted, zoomLevel: 17);
+      } catch (e) {
+        debugPrint('[Navigation] startGuidance error: $e');
+        // Sesión no inicializada (emulador) — centrar en origen del viaje
+        await ctrl.moveCamera(CameraUpdate.newCameraPosition(CameraPosition(
+          target: LatLng(latitude: widget.trip.originLat, longitude: widget.trip.originLng),
+          zoom: 15,
+        )));
+      }
     }
   }
 
@@ -430,6 +500,7 @@ class _TripViewState extends ConsumerState<_TripView> {
     try {
       await ref.read(tripRepositoryProvider).cancelTrip(trip.id, reason);
       if (!mounted) return;
+      context.go('/home');
       ref.read(activeTripProvider.notifier).clear();
     } catch (e) {
       if (mounted) {
@@ -498,15 +569,18 @@ class _TripViewState extends ConsumerState<_TripView> {
     return Scaffold(
       body: Stack(
         children: [
-          // Mapa de navegación Google — ocupa toda la pantalla
-          GoogleMapsNavigationView(
-            onViewCreated: _onNavViewCreated,
-            initialNavigationUIEnabledPreference: NavigationUIEnabledPreference.automatic,
-            initialCameraPosition: CameraPosition(
-              target: LatLng(latitude: trip.originLat, longitude: trip.originLng),
-              zoom: 15,
-            ),
-          ),
+          // Mapa de navegación Google — solo se muestra cuando la sesión está lista
+          if (_navReady)
+            GoogleMapsNavigationView(
+              onViewCreated: _onNavViewCreated,
+              initialNavigationUIEnabledPreference: NavigationUIEnabledPreference.disabled,
+              initialCameraPosition: CameraPosition(
+                target: LatLng(latitude: trip.originLat, longitude: trip.originLng),
+                zoom: 15,
+              ),
+            )
+          else
+            const Center(child: CircularProgressIndicator()),
 
           // Panel inferior con info del cliente y acciones
           Positioned(

@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -39,6 +40,13 @@ void main() async {
     systemNavigationBarColor: Colors.transparent,
     systemNavigationBarContrastEnforced: false,
   ));
+
+  // Suppress WebSocketConnectionClosed that socket_io_client doesn't catch
+  // internally when the server force-closes an unauthenticated connection.
+  PlatformDispatcher.instance.onError = (error, stack) {
+    if (error.toString().contains('WebSocketConnectionClosed')) return true;
+    return false;
+  };
 
   runApp(const ProviderScope(child: PanaDriverApp()));
 }

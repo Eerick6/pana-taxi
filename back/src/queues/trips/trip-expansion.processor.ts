@@ -15,7 +15,7 @@ export interface TripExpansionJobData {
   tripId: string;
 }
 
-@Processor(TRIP_EXPANSION_QUEUE)
+@Processor(TRIP_EXPANSION_QUEUE, { drainDelay: 300 })
 export class TripExpansionProcessor extends WorkerHost {
   private readonly logger = new Logger(TripExpansionProcessor.name);
 
@@ -50,6 +50,11 @@ export class TripExpansionProcessor extends WorkerHost {
     if (currentRadius >= maxKm) return;
 
     const newRadius = Math.min(+(currentRadius + expandKm).toFixed(2), maxKm);
+
+    // Re-verificar status antes de emitir — el cliente pudo cancelar durante el job
+    const check = await this.tripsRepo.findOne({ where: { id: tripId } });
+    if (!check || check.status !== TripStatus.REQUESTED) return;
+
     await this.tripsRepo.update(tripId, {
       current_search_radius_km: newRadius as any,
       radius_last_expanded_at: new Date(),

@@ -6,7 +6,7 @@ import { Trip, TripStatus } from './entities/trip.entity';
 import { FareService } from '../fare/fare.service';
 import { EventsGateway } from '../gateway/events.gateway';
 
-// Corre cada 15 s
+// Corre cada 5 s
 @Injectable()
 export class TripsScheduler {
   constructor(
@@ -17,7 +17,7 @@ export class TripsScheduler {
   ) {}
 
   // Expande el radio de búsqueda para viajes sin conductor
-  @Interval(15_000)
+  @Interval(5_000)
   async expandSearchRadii(): Promise<void> {
     const pendingTrips = await this.tripsRepo.find({
       where: { status: TripStatus.REQUESTED },
@@ -43,6 +43,9 @@ export class TripsScheduler {
       if (elapsed < intervalMs) continue;
 
       const newRadius = Math.min(+(currentRadius + expandKm).toFixed(2), maxKm);
+
+      const updated = await this.tripsRepo.findOne({ where: { id: trip.id } });
+      if (!updated || updated.status !== TripStatus.REQUESTED) continue;
 
       await this.tripsRepo.update(trip.id, {
         current_search_radius_km: newRadius as any,

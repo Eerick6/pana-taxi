@@ -16,6 +16,7 @@ class TripModel {
     this.distance,
     this.durationMinutes,
     this.waitTimerExpiresAt,
+    this.routeGeometry,
   });
 
   final String    id;
@@ -34,6 +35,7 @@ class TripModel {
   final double?   distance;
   final int?      durationMinutes;
   final DateTime? waitTimerExpiresAt;
+  final String?   routeGeometry;
 
   bool get isMeterMode => fareMode == 'meter';
 
@@ -90,6 +92,7 @@ class TripModel {
       waitTimerExpiresAt: json['wait_timer_expires_at'] != null
           ? DateTime.tryParse(json['wait_timer_expires_at'].toString())?.toLocal()
           : null,
+      routeGeometry: json['route_geometry'] as String?,
     );
   }
 }

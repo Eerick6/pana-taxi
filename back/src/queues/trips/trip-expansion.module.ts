@@ -9,7 +9,10 @@ import { GatewayModule } from '../../modules/gateway/gateway.module';
 
 @Module({
   imports: [
-    BullModule.registerQueue({ name: TRIP_EXPANSION_QUEUE }),
+    BullModule.registerQueue({
+      name: TRIP_EXPANSION_QUEUE,
+      defaultJobOptions: { removeOnComplete: true, removeOnFail: 50 },
+    }),
     TypeOrmModule.forFeature([Trip]),
     FareModule,
     GatewayModule,
