@@ -8,7 +8,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not, In } from 'typeorm';
+import { Repository, Not, In, LessThanOrEqual, IsNull } from 'typeorm';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../../redis/redis.module';
@@ -173,6 +174,8 @@ export class DriversService {
 
     await this.walletRepo.save(this.walletRepo.create({ driver }));
 
+    this.gateway.notifyPlatform('driver.registered', { driver_id: driver.id });
+
     const next = dto.driver_type === DriverType.OWNER_DRIVER
       ? 'Sube tus documentos y luego solicita unirte a tu cooperativa.'
       : 'Sube tus documentos para que la plataforma los revise.';
@@ -221,6 +224,18 @@ export class DriversService {
     return { message: 'Ubicación actualizada', lat, lng };
   }
 
+  // ── Confirmar actividad tras el push "¿sigues activo?" ───────────────────────
+
+  async confirmActive(userId: string) {
+    const driver = await this.driversRepo.findOne({ where: { user: { id: userId } } });
+    if (!driver) throw new NotFoundException('Perfil de conductor no encontrado');
+    await this.driversRepo.update(driver.id, {
+      last_seen_at: new Date(),
+      inactivity_prompt_sent_at: null,
+    });
+    return { message: 'Listo, sigues en línea.', online_status: driver.online_status };
+  }
+
   async requestReview(userId: string) {
     const driver = await this.driversRepo.findOne({
       where: { user: { id: userId } },
@@ -251,6 +266,68 @@ export class DriversService {
     await this.driversRepo.update(driver.id, { online_status: status, last_seen_at: new Date() });
     await this.gateway.syncAvailableRoom(userId, status !== DriverOnlineStatus.OFFLINE);
     return { online_status: status };
+  }
+
+  // ── Inactividad: prompt a los 2h sin señal de ubicación, desconexión a los 20min sin respuesta ──
+  //
+  // Ataca el "ruido" de conductores que cierran la app y quedan EN LÍNEA para
+  // siempre: last_seen_at solo avanza mientras la app manda pings de ubicación
+  // (updateLocation/setOnlineStatus/startDay/endDay), así que si la app está
+  // cerrada, deja de actualizarse solo. BUSY se excluye a propósito — un
+  // conductor en viaje nunca debe auto-desconectarse.
+  private static readonly INACTIVITY_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2h sin actividad → prompt
+  private static readonly INACTIVITY_GRACE_MS = 20 * 60 * 1000; // 20min sin responder al prompt → desconecta
+
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async checkInactiveDrivers() {
+    const inactivitySince = new Date(Date.now() - DriversService.INACTIVITY_THRESHOLD_MS);
+    const graceSince = new Date(Date.now() - DriversService.INACTIVITY_GRACE_MS);
+    const activeStatuses = [DriverOnlineStatus.ONLINE, DriverOnlineStatus.LOOKING_FOR_WORK];
+
+    // 1) Sin actividad hace 2h y sin prompt pendiente → preguntar si sigue en línea
+    const toPrompt = await this.driversRepo.find({
+      where: {
+        online_status: In(activeStatuses),
+        last_seen_at: LessThanOrEqual(inactivitySince),
+        inactivity_prompt_sent_at: IsNull(),
+      },
+      relations: ['user'],
+    });
+    for (const driver of toPrompt) {
+      await this.driversRepo.update(driver.id, { inactivity_prompt_sent_at: new Date() });
+      this.notifications.sendToUser(driver.user.id, {
+        title: '¿Sigues en línea?',
+        body: 'No detectamos actividad en las últimas 2 horas. Confirma para seguir recibiendo viajes — si no respondes, te desconectaremos.',
+        data: { type: 'inactivity_check' },
+      }).catch(() => {});
+    }
+    if (toPrompt.length > 0) {
+      this.logger.log(`[inactivity] prompt enviado a ${toPrompt.length} conductor(es)`);
+    }
+
+    // 2) Prompt enviado hace 20min+ sin confirmación → desconectar automáticamente
+    const toDisconnect = await this.driversRepo.find({
+      where: {
+        online_status: In(activeStatuses),
+        inactivity_prompt_sent_at: LessThanOrEqual(graceSince),
+      },
+      relations: ['user'],
+    });
+    for (const driver of toDisconnect) {
+      await this.driversRepo.update(driver.id, {
+        online_status: DriverOnlineStatus.OFFLINE,
+        inactivity_prompt_sent_at: null,
+      });
+      await this.gateway.syncAvailableRoom(driver.user.id, false);
+      this.notifications.sendToUser(driver.user.id, {
+        title: 'Te desconectamos por inactividad',
+        body: 'No respondiste a tiempo, así que te pusimos fuera de línea. Conéctate de nuevo cuando quieras recibir viajes.',
+        data: { type: 'inactivity_disconnected' },
+      }).catch(() => {});
+    }
+    if (toDisconnect.length > 0) {
+      this.logger.log(`[inactivity] desconectados ${toDisconnect.length} conductor(es) por no responder`);
+    }
   }
 
   // ── Iniciar / finalizar jornada ──────────────────────────────────────────────
@@ -516,6 +593,7 @@ export class DriversService {
 
     // Notificar al conductor en tiempo real para que la app actualice sin recargar
     this.gateway.notifyDriver(id, 'driver.approved', { driver_id: id });
+    this.gateway.notifyPlatform('driver.approved', { driver_id: id });
 
     const msg = driver.driver_type === DriverType.OWNER_DRIVER
       ? 'Conductor-dueño aprobado. Ahora puede solicitar unirse a cooperativas.'
@@ -531,6 +609,7 @@ export class DriversService {
     }
 
     await this.driversRepo.update(id, { approval_status: DriverApprovalStatus.REJECTED, rejection_reason: dto.reason });
+    this.gateway.notifyPlatform('driver.rejected', { driver_id: id });
     return { message: 'Conductor rechazado' };
   }
 
@@ -578,6 +657,7 @@ export class DriversService {
       approval_status: OwnerApprovalStatus.APPROVED,
       rejection_reason: null,
     });
+    this.gateway.notifyCoop(cooperativeId, 'driver.approved', { driver_id: driverId });
 
     return { message: 'Conductor-dueño aprobado en la cooperativa' };
   }
@@ -595,6 +675,7 @@ export class DriversService {
       approval_status: OwnerApprovalStatus.REJECTED,
       rejection_reason: dto.reason,
     });
+    this.gateway.notifyCoop(cooperativeId, 'driver.rejected', { driver_id: driverId });
 
     return { message: 'Solicitud de membresía rechazada' };
   }

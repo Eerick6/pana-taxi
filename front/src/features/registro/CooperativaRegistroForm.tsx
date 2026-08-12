@@ -489,8 +489,8 @@ function StepAdmin({ data, onChange, onNext, onBack, loading, error }: {
 
       {/* Terms modal */}
       {showTerms && (
-        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="relative w-full max-w-lg bg-gray-900 border border-white/10 rounded-3xl shadow-2xl flex flex-col max-h-[80vh]">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setShowTerms(false)}>
+          <div className="relative w-full max-w-lg bg-gray-900 border border-white/10 rounded-3xl shadow-2xl flex flex-col max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-6 pb-4 border-b border-white/8 flex-shrink-0">
               <h3 className="font-black text-white">Términos y Condiciones</h3>
               <button onClick={() => setShowTerms(false)} className="p-1.5 rounded-lg hover:bg-white/5 text-gray-400 transition-colors">

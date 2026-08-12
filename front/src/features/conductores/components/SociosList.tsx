@@ -10,6 +10,7 @@ import {
   rejectDriverCoop,
 } from '../api';
 import DriverDocumentsModal from './DriverDocumentsModal';
+import { useRealtimeRefresh } from '@/hooks/useRealtimeRefresh';
 
 // Shape returned by GET /drivers/cooperative/pending
 interface CoopMembership {
@@ -88,6 +89,10 @@ export default function SociosList({ cooperativeId }: Props) {
 
   useEffect(() => { loadPending(); }, [loadPending]);
   useEffect(() => { if (activeTab === 'all') loadAll(); }, [loadAll, activeTab]);
+  useRealtimeRefresh(['driver.registered', 'driver.approved', 'driver.rejected'], () => {
+    loadPending();
+    if (activeTab === 'all') loadAll();
+  });
 
   const act = async (fn: () => Promise<void>, id: string) => {
     setActionLoading(id);
@@ -386,8 +391,8 @@ export default function SociosList({ cooperativeId }: Props) {
 
       {/* Reject reason dialog */}
       {rejectId && (
-        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setRejectId(null)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Rechazar solicitud</h3>
             <p className="text-sm text-gray-400 mb-4">Indica el motivo del rechazo. El socio podrá solicitar nuevamente.</p>
             <textarea

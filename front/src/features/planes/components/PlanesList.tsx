@@ -300,8 +300,8 @@ export default function PlanesList() {
 
       {/* Create / Edit Modal */}
       {modalOpen && (
-        <div className="fixed inset-0 z-999999 flex items-start justify-center bg-black/50 backdrop-blur-sm overflow-y-auto py-8 px-4">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg">
+        <div className="fixed inset-0 z-999999 flex items-start justify-center bg-black/50 backdrop-blur-sm overflow-y-auto py-8 px-4" onClick={() => setModalOpen(false)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 dark:border-gray-800">
               <h3 className="text-base font-bold text-gray-800 dark:text-white">
                 {editing ? 'Editar plan' : 'Nuevo plan SaaS'}
@@ -441,8 +441,8 @@ export default function PlanesList() {
 
       {/* Delete confirm */}
       {deleteConfirm && (
-        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4" onClick={() => setDeleteConfirm(null)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
             <div className="text-3xl mb-3">⚠️</div>
             <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Eliminar plan</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">

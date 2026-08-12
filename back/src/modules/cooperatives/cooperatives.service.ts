@@ -18,6 +18,7 @@ import { In } from 'typeorm';
 import { StorageService } from '../storage/storage.service';
 import { TermsService } from '../terms/terms.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { EventsGateway } from '../gateway/events.gateway';
 import { TermsType } from '../terms/entities/terms-version.entity';
 import { CreateCooperativeDto } from './dto/create-cooperative.dto';
 import { UpdateCooperativeDto } from './dto/update-cooperative.dto';
@@ -65,6 +66,7 @@ export class CooperativesService {
     private storage: StorageService,
     private termsService: TermsService,
     private notifications: NotificationsService,
+    private gateway: EventsGateway,
   ) {
   }
 
@@ -244,6 +246,7 @@ export class CooperativesService {
       title: '🏢 Nueva cooperativa registrada',
       body: `${dto.name} se registró y está pendiente de verificación.`,
     });
+    this.gateway.notifyPlatform('cooperative.registered', { cooperative_id: coop.id });
 
     await this.sendCoopReviewEmail(dto.admin_email, dto.name, inviteCode).catch((e) =>
       this.logger.error(`sendCoopReviewEmail failed for ${dto.admin_email}: ${e.message}`),
@@ -277,6 +280,8 @@ export class CooperativesService {
         terms_accepted_at: new Date(),
       }),
     );
+
+    this.gateway.notifyPlatform('cooperative.registered', { cooperative_id: coop.id });
 
     return {
       message: 'Cooperativa registrada. Sube los documentos requeridos para que la plataforma pueda aprobarla.',
@@ -473,6 +478,7 @@ export class CooperativesService {
         this.logger.error(`sendCoopApprovedEmail failed: ${e.message}`),
       );
     }
+    this.gateway.notifyPlatform('cooperative.approved', { cooperative_id: id });
 
     return { message: 'Cooperativa aprobada y activada. Ya puede registrar owners.' };
   }
@@ -488,6 +494,7 @@ export class CooperativesService {
       approval_status: CooperativeApprovalStatus.REJECTED,
       rejection_reason: dto.reason,
     });
+    this.gateway.notifyPlatform('cooperative.rejected', { cooperative_id: id });
 
     return { message: 'Cooperativa rechazada' };
   }

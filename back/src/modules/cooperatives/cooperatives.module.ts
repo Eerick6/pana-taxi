@@ -12,12 +12,14 @@ import { Driver } from '../drivers/entities/driver.entity';
 import { Trip } from '../trips/entities/trip.entity';
 import { StorageModule } from '../storage/storage.module';
 import { TermsModule } from '../terms/terms.module';
+import { GatewayModule } from '../gateway/gateway.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Cooperative, CooperativeMember, CooperativeDocument, CooperativeOwner, User, Driver, Trip]),
     StorageModule,
     TermsModule,
+    GatewayModule,
   ],
   providers: [CooperativesService],
   controllers: [CooperativesController, CooperativesPublicController],

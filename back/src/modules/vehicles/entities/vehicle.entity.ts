@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
 import { Cooperative } from '../../cooperatives/entities/cooperative.entity';
 import { Driver } from '../../drivers/entities/driver.entity';
 
@@ -17,6 +17,10 @@ export enum VehicleApprovalStatus {
 }
 
 @Entity('vehicles')
+@Index('IDX_vehicles_coop_approval', ['cooperative', 'approval_status'])
+@Index('IDX_vehicles_owner', ['owner'])
+@Index('IDX_vehicles_assigned_driver', ['assigned_driver'])
+@Index('IDX_vehicles_status', ['status'])
 export class Vehicle {
   @PrimaryGeneratedColumn('uuid')
   id: string;

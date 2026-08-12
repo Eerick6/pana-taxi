@@ -532,9 +532,15 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     });
   }
 
-  notifyTripUpdate(tripId: string, event: string, payload: object) {
+  // cooperativeId es opcional — pasarlo cuando el call site ya lo tiene a mano
+  // (evita una query extra en eventos frecuentes como trip.meter_update).
+  // Sin él, el panel de la cooperativa no se entera de este cambio en vivo.
+  notifyTripUpdate(tripId: string, event: string, payload: object, cooperativeId?: string | null) {
     this.server.to(ROOM.trip(tripId)).emit(event, payload);
     this.server.to(ROOM.platform).emit(event, { trip_id: tripId, ...payload });
+    if (cooperativeId) {
+      this.server.to(ROOM.coop(cooperativeId)).emit(event, { trip_id: tripId, ...payload });
+    }
   }
 
   // Re-notifica a conductores cuando el radio crece. Solo envía FCM al anillo nuevo

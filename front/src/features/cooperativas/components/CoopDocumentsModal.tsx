@@ -183,8 +183,8 @@ export default function CoopDocumentsModal({ cooperative, onClose, onUpdate }: P
   return (
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8 px-4" style={{ zIndex: 100000 }}>
-        <div className="relative w-full max-w-2xl bg-gray-900 border border-gray-700 rounded-3xl shadow-2xl">
+      <div className="fixed inset-0 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8 px-4" style={{ zIndex: 100000 }} onClick={onClose}>
+        <div className="relative w-full max-w-2xl bg-gray-900 border border-gray-700 rounded-3xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
           {/* Header */}
           <div className="flex items-start justify-between p-6 pb-4 border-b border-gray-800">
             <div>
@@ -253,58 +253,62 @@ export default function CoopDocumentsModal({ cooperative, onClose, onUpdate }: P
               ) : (
                 <div className="space-y-3">
                   {docs.map((doc) => (
-                    <div key={doc.id} className="flex items-center gap-3 p-4 rounded-xl border border-gray-800 bg-gray-800/40 hover:bg-gray-800/60 transition-colors">
-                      {/* Icon */}
-                      <div className="w-9 h-9 rounded-lg bg-gray-700 flex items-center justify-center flex-shrink-0">
-                        <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                      </div>
+                    <div key={doc.id} className="flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 p-4 rounded-xl border border-gray-800 bg-gray-800/40 hover:bg-gray-800/60 transition-colors">
+                      <div className="flex items-center gap-3 min-w-0">
+                        {/* Icon */}
+                        <div className="w-9 h-9 rounded-lg bg-gray-700 flex items-center justify-center flex-shrink-0">
+                          <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                        </div>
 
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-white truncate">
-                          {TYPE_LABEL[doc.type] ?? doc.type}
-                          {REQUIRED_TYPES.includes(doc.type) && (
-                            <span className="ml-1.5 text-[10px] font-bold text-yellow-500/70 uppercase tracking-wide">requerido</span>
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-white truncate">
+                            {TYPE_LABEL[doc.type] ?? doc.type}
+                            {REQUIRED_TYPES.includes(doc.type) && (
+                              <span className="ml-1.5 text-[10px] font-bold text-yellow-500/70 uppercase tracking-wide">requerido</span>
+                            )}
+                          </p>
+                          {doc.rejection_reason && (
+                            <p className="text-xs text-red-400 mt-0.5 truncate">Motivo: {doc.rejection_reason}</p>
                           )}
-                        </p>
-                        {doc.rejection_reason && (
-                          <p className="text-xs text-red-400 mt-0.5 truncate">Motivo: {doc.rejection_reason}</p>
-                        )}
+                        </div>
                       </div>
 
-                      {/* Status badge */}
-                      <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${STATUS_BADGE[doc.status]}`}>
-                        {STATUS_LABEL[doc.status]}
-                      </span>
+                      <div className="flex items-center justify-between sm:justify-end gap-2 sm:ml-auto sm:flex-shrink-0">
+                        {/* Status badge */}
+                        <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${STATUS_BADGE[doc.status]}`}>
+                          {STATUS_LABEL[doc.status]}
+                        </span>
 
-                      {/* Actions */}
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <button
-                          onClick={() => openUrl(doc.id)}
-                          disabled={viewLoading === doc.id}
-                          className="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-700 transition-colors disabled:opacity-50"
-                        >
-                          {viewLoading === doc.id ? '...' : 'Ver'}
-                        </button>
-                        {doc.status !== 'approved' && (
+                        {/* Actions */}
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
                           <button
-                            onClick={() => approveDoc(doc.id)}
-                            disabled={actionLoading === doc.id}
-                            className="px-2.5 py-1 text-xs font-medium rounded-lg bg-green-500/15 text-green-400 border border-green-500/20 hover:bg-green-500/25 transition-colors disabled:opacity-50"
+                            onClick={() => openUrl(doc.id)}
+                            disabled={viewLoading === doc.id}
+                            className="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-700 transition-colors disabled:opacity-50"
                           >
-                            Aprobar
+                            {viewLoading === doc.id ? '...' : 'Ver'}
                           </button>
-                        )}
-                        {doc.status !== 'rejected' && (
-                          <button
-                            onClick={() => { setRejectDocId(doc.id); setRejectDocReason(''); }}
-                            className="px-2.5 py-1 text-xs font-medium rounded-lg bg-red-500/15 text-red-400 border border-red-500/20 hover:bg-red-500/25 transition-colors"
-                          >
-                            Rechazar
-                          </button>
-                        )}
+                          {doc.status !== 'approved' && (
+                            <button
+                              onClick={() => approveDoc(doc.id)}
+                              disabled={actionLoading === doc.id}
+                              className="px-2.5 py-1 text-xs font-medium rounded-lg bg-green-500/15 text-green-400 border border-green-500/20 hover:bg-green-500/25 transition-colors disabled:opacity-50"
+                            >
+                              Aprobar
+                            </button>
+                          )}
+                          {doc.status !== 'rejected' && (
+                            <button
+                              onClick={() => { setRejectDocId(doc.id); setRejectDocReason(''); }}
+                              className="px-2.5 py-1 text-xs font-medium rounded-lg bg-red-500/15 text-red-400 border border-red-500/20 hover:bg-red-500/25 transition-colors"
+                            >
+                              Rechazar
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -400,8 +404,8 @@ export default function CoopDocumentsModal({ cooperative, onClose, onUpdate }: P
 
       {/* Reject document sub-modal */}
       {rejectDocId && (
-        <div className="fixed inset-0 z-[100001] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-gray-900 border border-gray-700 rounded-2xl p-6 space-y-4">
+        <div className="fixed inset-0 z-[100001] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setRejectDocId(null)}>
+          <div className="w-full max-w-md bg-gray-900 border border-gray-700 rounded-2xl p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-bold text-white">Rechazar documento</h3>
             <div>
               <label className="block text-xs font-semibold text-gray-400 mb-1.5">Motivo de rechazo</label>
@@ -432,8 +436,8 @@ export default function CoopDocumentsModal({ cooperative, onClose, onUpdate }: P
 
       {/* Reject cooperative sub-modal */}
       {rejectCoopOpen && (
-        <div className="fixed inset-0 z-[100001] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-gray-900 border border-gray-700 rounded-2xl p-6 space-y-4">
+        <div className="fixed inset-0 z-[100001] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setRejectCoopOpen(false)}>
+          <div className="w-full max-w-md bg-gray-900 border border-gray-700 rounded-2xl p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-bold text-white">Rechazar cooperativa</h3>
             <p className="text-xs text-gray-400">Indica el motivo del rechazo para notificar al administrador de la cooperativa.</p>
             <div>

@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, Index } from 'typeorm';
 import { DriverWallet } from './driver-wallet.entity';
 
 export enum TransactionType {
@@ -9,6 +9,7 @@ export enum TransactionType {
 }
 
 @Entity('wallet_transactions')
+@Index('IDX_wallet_transactions_wallet_created', ['wallet', 'created_at'])
 export class WalletTransaction {
   @PrimaryGeneratedColumn('uuid')
   id: string;

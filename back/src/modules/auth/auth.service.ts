@@ -21,6 +21,7 @@ import { OtpVerifyDto } from './dto/otp-verify.dto';
 import { EmailOtpRequestDto } from './dto/email-otp-request.dto';
 import { EmailOtpVerifyDto } from './dto/email-otp-verify.dto';
 import { RegisterClientDto } from './dto/register-client.dto';
+import { EventsGateway } from '../gateway/events.gateway';
 
 const STAFF_ROLES = [
   UserRole.OWNER,
@@ -52,6 +53,7 @@ export class AuthService {
     private termsService: TermsService,
     @Optional() @InjectQueue(NOTIFICATION_QUEUE) private notificationQueue: Queue | null,
     @Inject(REDIS_CLIENT) private redis: Redis,
+    private gateway: EventsGateway,
   ) {
   }
 
@@ -364,6 +366,7 @@ export class AuthService {
       cedula_hash: cedulaHash,  // for unique lookups
     });
     await this.clientsRepository.save(client);
+    this.gateway.notifyPlatform('client.registered', { client_id: client.id });
 
     const { code, expires } = this.generateOtp();
     await this.usersRepository.update(user.id, { otp_code: code, otp_expires_at: expires });

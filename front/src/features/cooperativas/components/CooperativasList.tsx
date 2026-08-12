@@ -9,6 +9,7 @@ import {
   getCooperativaTermsVersion, createCooperativa,
 } from '../api';
 import CoopDocumentsModal from './CoopDocumentsModal';
+import { useRealtimeRefresh } from '@/hooks/useRealtimeRefresh';
 
 const APPROVAL_BADGE: Record<string, string> = {
   approved: 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400',
@@ -55,6 +56,7 @@ export default function CooperativasList() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useRealtimeRefresh(['cooperative.registered', 'cooperative.approved', 'cooperative.rejected'], load);
   useEffect(() => { setPage(1); }, [search, filterApproval, filterStatus]);
 
   const filtered = allItems.filter((c) => {
@@ -309,8 +311,8 @@ export default function CooperativasList() {
 
       {/* Modal: costo mensual */}
       {feeId && (
-        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setFeeId(null)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Cuota mensual</h3>
             <p className="text-sm text-gray-400 mb-4">Ingresa el monto mensual en dólares</p>
             <div className="relative">
@@ -343,8 +345,8 @@ export default function CooperativasList() {
 
       {/* Modal: confirmar eliminación */}
       {deleteId && (
-        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setDeleteId(null)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">¿Eliminar cooperativa?</h3>
             <p className="text-sm text-gray-400 mb-6">Esta acción es permanente y no se puede deshacer. Solo puedes eliminar cooperativas que no estén activas.</p>
             <div className="flex gap-3">
@@ -365,8 +367,8 @@ export default function CooperativasList() {
 
       {/* Modal: crear cooperativa */}
       {showCreate && (
-        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowCreate(false)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-4">Nueva cooperativa</h3>
             <div className="space-y-3">
               {[

@@ -69,6 +69,11 @@ export class Driver {
   @Column({ nullable: true })
   last_seen_at: Date;
 
+  // Momento en que se envió el push "¿sigues activo?" por inactividad.
+  // null = no hay prompt pendiente. Se limpia al confirmar o al desconectar.
+  @Column({ nullable: true })
+  inactivity_prompt_sent_at: Date | null;
+
   @Column({ nullable: true })
   review_requested_at: Date;
 

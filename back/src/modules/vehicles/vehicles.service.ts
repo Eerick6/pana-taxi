@@ -91,6 +91,8 @@ export class VehiclesService {
       title: 'Nuevo taxi registrado',
       body: `${driver.full_name} registró un nuevo vehículo (${dto.plate}) y requiere revisión.`,
     }).catch(() => {});
+    this.gateway.notifyPlatform('vehicle.registered', { vehicle_id: vehicle.id });
+    this.gateway.notifyCoop(cooperative.id, 'vehicle.registered', { vehicle_id: vehicle.id });
 
     return {
       message: `Vehículo registrado bajo ${cooperative.name}. Sube los documentos para revisión.`,
@@ -299,12 +301,16 @@ export class VehiclesService {
     if (vehicle.owner?.id) {
       this.gateway.notifyDriver(vehicle.owner.id, 'vehicle.approved', { vehicle_id: id });
     }
+    this.gateway.notifyPlatform('vehicle.approved', { vehicle_id: id });
+    if (vehicle.cooperative?.id) {
+      this.gateway.notifyCoop(vehicle.cooperative.id, 'vehicle.approved', { vehicle_id: id });
+    }
 
     return { message: 'Vehículo aprobado' };
   }
 
   async rejectVehicle(id: string, dto: RejectVehicleDto) {
-    const vehicle = await this.vehiclesRepo.findOne({ where: { id } });
+    const vehicle = await this.vehiclesRepo.findOne({ where: { id }, relations: ['cooperative'] });
     if (!vehicle) throw new NotFoundException('Vehículo no encontrado');
     if (vehicle.approval_status === VehicleApprovalStatus.APPROVED) {
       throw new ForbiddenException('No se puede rechazar un vehículo ya aprobado');
@@ -314,6 +320,10 @@ export class VehiclesService {
       approval_status: VehicleApprovalStatus.REJECTED,
       rejection_reason: dto.reason,
     });
+    this.gateway.notifyPlatform('vehicle.rejected', { vehicle_id: id });
+    if (vehicle.cooperative?.id) {
+      this.gateway.notifyCoop(vehicle.cooperative.id, 'vehicle.rejected', { vehicle_id: id });
+    }
 
     return { message: 'Vehículo rechazado' };
   }

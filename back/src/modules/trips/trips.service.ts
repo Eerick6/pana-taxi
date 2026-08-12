@@ -33,6 +33,7 @@ import { StandAssignment } from '../stands/entities/stand-assignment.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AccountingService } from '../accounting/accounting.service';
 import { Client } from '../clients/entities/client.entity';
+import { Rating, RatingDirection } from '../ratings/entities/rating.entity';
 
 const DEFAULT_COMMISSION_RATE_PCT = 10;
 
@@ -77,6 +78,8 @@ export class TripsService {
     private clientsRepo: Repository<Client>,
     @InjectRepository(PaymentMethod)
     private paymentMethodRepo: Repository<PaymentMethod>,
+    @InjectRepository(Rating)
+    private ratingsRepo: Repository<Rating>,
     private notificationsService: NotificationsService,
     private accountingService: AccountingService,
   ) {}
@@ -163,6 +166,7 @@ export class TripsService {
         client_rating: clientProfile ? parseFloat(clientProfile.rating as any) : null,
         client_total_trips: clientProfile?.total_trips ?? 0,
       });
+      this.gateway.notifyPlatform('trip.created', { trip_id: trip.id });
 
       return trip;
     }
@@ -245,6 +249,9 @@ export class TripsService {
       cooperative_id: member.cooperative.id,
       stand_id: standId,
     };
+
+    this.gateway.notifyPlatform('trip.created', { trip_id: trip.id });
+    this.gateway.notifyCoop(member.cooperative.id, 'trip.created', { trip_id: trip.id });
 
     if (standId) {
       // Despacho desde parada: notifica PRIMERO al primero de la cola
@@ -567,16 +574,35 @@ export class TripsService {
         where: { user: { id: driver.user.id } },
         relations: ['cooperative'],
       });
+
+      // Rating y viajes completados no viven en Driver (a diferencia de
+      // Client.rating/total_trips, que sí están cacheados) — se calculan
+      // aquí. Antes esto leía `driver.rating`, un campo que nunca existió
+      // en la entidad (siempre null pese al `as any`): la calificación
+      // jamás se mostraba al cliente al elegir conductor.
+      const [ratingAvg, driverTotalTrips] = await Promise.all([
+        this.ratingsRepo
+          .createQueryBuilder('r')
+          .select('AVG(r.score)', 'average')
+          .where('r.driver_id = :driverId', { driverId: driver.id })
+          .andWhere('r.direction = :dir', { dir: RatingDirection.CLIENT_TO_DRIVER })
+          .getRawOne(),
+        this.tripsRepo.count({ where: { driver: { id: driver.id }, status: TripStatus.COMPLETED } }),
+      ]);
+      const driverRating = ratingAvg?.average != null ? parseFloat(ratingAvg.average) : null;
+
       const offerPayload = {
         trip_id:        tripId,
         offer_id:       offerId,
         driver_id:      driver.id,
         driver_name:    driver.full_name ?? null,
         driver_photo:   driver.profile_photo_url ?? null,
-        driver_rating:  (driver as any).rating ? parseFloat((driver as any).rating) : null,
+        driver_rating:  driverRating,
+        driver_total_trips: driverTotalTrips,
         coop_name:      driverMember?.cooperative?.name ?? null,
         vehicle_plate:  vehicle ? (vehicle as any).plate : null,
         vehicle_model:  vehicle ? `${(vehicle as any).brand ?? ''} ${(vehicle as any).model ?? ''}`.trim() : null,
+        vehicle_color:  vehicle ? (vehicle as any).color ?? null : null,
         amount:         offerAmount,
         fare_mode:      trip.fare_mode,
         is_counter:     !isMeter && dto.amount != null,
@@ -656,6 +682,35 @@ export class TripsService {
     const originLat = parseFloat(trip.origin_lat as any);
     const originLng = parseFloat(trip.origin_lng as any);
 
+    // Rating y viajes completados no viven en Driver — se calculan en batch
+    // para todos los conductores de la lista (misma razón que en makeOffer:
+    // `driver.rating` nunca existió como columna, así que esto antes era
+    // siempre null pese al `as any`).
+    const driverIds = offers.map((o) => o.driver.id);
+    const ratingByDriver = new Map<string, number>();
+    const tripsByDriver = new Map<string, number>();
+    if (driverIds.length > 0) {
+      const ratingRows = await this.ratingsRepo
+        .createQueryBuilder('r')
+        .select('r.driver_id', 'driver_id')
+        .addSelect('AVG(r.score)', 'average')
+        .where('r.driver_id IN (:...driverIds)', { driverIds })
+        .andWhere('r.direction = :dir', { dir: RatingDirection.CLIENT_TO_DRIVER })
+        .groupBy('r.driver_id')
+        .getRawMany();
+      for (const row of ratingRows) ratingByDriver.set(row.driver_id, parseFloat(row.average));
+
+      const tripRows = await this.tripsRepo
+        .createQueryBuilder('t')
+        .select('t.driver_id', 'driver_id')
+        .addSelect('COUNT(*)', 'total')
+        .where('t.driver_id IN (:...driverIds)', { driverIds })
+        .andWhere('t.status = :status', { status: TripStatus.COMPLETED })
+        .groupBy('t.driver_id')
+        .getRawMany();
+      for (const row of tripRows) tripsByDriver.set(row.driver_id, parseInt(row.total, 10));
+    }
+
     return offers.map((o) => {
       const driverLat = (o.driver as any).current_lat;
       const driverLng = (o.driver as any).current_lng;
@@ -667,13 +722,14 @@ export class TripsService {
       return {
         offer_id: o.id,
         driver: {
-          id:     o.driver.id,
-          name:   (o.driver as any).full_name         ?? null,
-          photo:  (o.driver as any).profile_photo_url ?? null,
-          rating: (o.driver as any).rating ? parseFloat((o.driver as any).rating) : null,
+          id:          o.driver.id,
+          name:        (o.driver as any).full_name         ?? null,
+          photo:       (o.driver as any).profile_photo_url ?? null,
+          rating:      ratingByDriver.get(o.driver.id) ?? null,
+          total_trips: tripsByDriver.get(o.driver.id) ?? 0,
         },
         vehicle: o.vehicle
-          ? { plate: (o.vehicle as any).plate, model: (o.vehicle as any).model }
+          ? { plate: (o.vehicle as any).plate, model: (o.vehicle as any).model, color: (o.vehicle as any).color ?? null }
           : null,
         amount:              o.amount != null ? parseFloat(o.amount as any) : clientPrice,
         is_counter:          o.amount != null && parseFloat(o.amount as any) !== clientPrice,
@@ -1031,7 +1087,7 @@ export class TripsService {
 
     const trip = await this.tripsRepo.findOne({
       where: { id: tripId, driver: { id: driver.id } },
-      relations: ['client'],
+      relations: ['client', 'cooperative'],
     });
     if (!trip) throw new NotFoundException('Viaje no encontrado o no te pertenece');
     if (trip.status !== TripStatus.ACCEPTED) {
@@ -1067,7 +1123,7 @@ export class TripsService {
       driver_id: driver.id,
       driver_arrived_at: new Date().toISOString(),
       wait_expires_at: waitExpires.toISOString(),
-    });
+    }, trip.cooperative?.id);
 
     return {
       message: 'Llegada marcada. Esperando al pasajero (5 min).',
@@ -1103,32 +1159,49 @@ export class TripsService {
 
   async startTrip(tripId: string, userId: string, dto: StartTripDto) {
     const driver = await this.findDriverByUser(userId);
-    const trip = await this.findTripForDriver(tripId, driver.id);
-
-    if (![TripStatus.ACCEPTED, TripStatus.DRIVER_ARRIVED].includes(trip.status)) {
-      throw new BadRequestException('El viaje debe estar aceptado para iniciarse');
-    }
-
-    const otpBypass = process.env.NODE_ENV !== 'production' && dto.otp_code === '000000';
-    if (trip.otp_code && !otpBypass && trip.otp_code !== dto.otp_code) {
-      throw new BadRequestException('Código OTP incorrecto. Pide al pasajero su código.');
-    }
 
     const fareConfig = await this.fareService.getConfig();
     const baseFare = parseFloat(fareConfig.base_fare as any);
 
-    await this.tripsRepo.update(tripId, {
-      status: TripStatus.IN_PROGRESS,
-      started_at: new Date(),
-      meter_amount: baseFare as any,
-      otp_code: null, // limpiar OTP tras verificación exitosa
+    // Transacción + lock pesimista (igual que acceptTrip/selectOffer): evita que
+    // dos PATCH /start casi simultáneos (doble tap, retry) lean el viaje antes
+    // de que cualquiera de los dos confirme el cambio de estado.
+    let tripCooperativeId: string | undefined;
+    await this.dataSource.transaction(async (em) => {
+      const trip = await em.findOne(Trip, {
+        where: { id: tripId, driver: { id: driver.id } },
+        relations: ['cooperative'],
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!trip) throw new NotFoundException('Viaje no encontrado o no te pertenece');
+      tripCooperativeId = trip.cooperative?.id;
+
+      if (![TripStatus.ACCEPTED, TripStatus.DRIVER_ARRIVED].includes(trip.status)) {
+        throw new BadRequestException('El viaje debe estar aceptado para iniciarse');
+      }
+
+      // Denegar por defecto: el código debe existir y coincidir (o el bypass
+      // explícito de desarrollo). Antes, si otp_code llegaba null/vacío la
+      // condición completa se saltaba y CUALQUIER texto se aceptaba como
+      // válido, en producción también.
+      const otpBypass = process.env.NODE_ENV !== 'production' && dto.otp_code === '000000';
+      if (!otpBypass && (!trip.otp_code || trip.otp_code !== dto.otp_code)) {
+        throw new BadRequestException('Código OTP incorrecto. Pide al pasajero su código.');
+      }
+
+      await em.update(Trip, tripId, {
+        status: TripStatus.IN_PROGRESS,
+        started_at: new Date(),
+        meter_amount: baseFare as any,
+        otp_code: null, // limpiar OTP tras verificación exitosa
+      });
     });
 
     this.gateway.notifyTripUpdate(tripId, 'trip.started', {
       trip_id: tripId,
       status: TripStatus.IN_PROGRESS,
       meter_amount: baseFare,
-    });
+    }, tripCooperativeId);
     return { message: 'Viaje iniciado. Buen camino.' };
   }
 
@@ -1190,7 +1263,7 @@ export class TripsService {
       location_update_interval_sec: fareConfig.location_interval_fleet_sec,
       payment_method_slug: trip.payment_method?.slug ?? null,
       ...result,
-    });
+    }, trip.cooperative?.id);
 
     return result;
   }
@@ -1250,7 +1323,7 @@ export class TripsService {
     };
 
     // ROOM.trip + panel
-    this.gateway.notifyTripUpdate(tripId, 'trip.cancelled', cancelPayload);
+    this.gateway.notifyTripUpdate(tripId, 'trip.cancelled', cancelPayload, trip.cooperative?.id);
 
     // Cliente — puede estar en ROOM.user si el viaje aún está en búsqueda
     if (trip.client?.id) {

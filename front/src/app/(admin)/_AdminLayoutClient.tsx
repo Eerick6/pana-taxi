@@ -33,6 +33,7 @@ const ROUTE_ACL: [string, UserRole[]][] = [
   // Monitoreo
   ["/mapa",          [OW, PA, MO, SU]],
   ["/sos",           [OW, PA, MO, SU]],
+  ["/desviaciones",  [OW, PA, MO, SU]],
   ["/paradas",       [OW, PA, MO, SU]],
 
   // Gestión

@@ -169,8 +169,8 @@ export default function CoopStaffPage() {
 
       {/* Invite modal */}
       {showInvite && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-xl">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowInvite(false)}>
+          <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">Agregar miembro</h3>
             <form onSubmit={handleInvite} className="space-y-4">
               <div>
@@ -231,8 +231,8 @@ export default function CoopStaffPage() {
 
       {/* Delete confirm modal */}
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-xl text-center">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setDeleteId(null)}>
+          <div className="w-full max-w-sm bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-xl text-center" onClick={(e) => e.stopPropagation()}>
             <div className="text-4xl mb-3">⚠️</div>
             <h3 className="text-base font-bold text-gray-800 dark:text-white mb-2">¿Eliminar miembro?</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">Esta acción no se puede deshacer.</p>

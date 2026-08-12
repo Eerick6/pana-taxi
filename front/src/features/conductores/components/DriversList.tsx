@@ -4,6 +4,7 @@ import { dateStr } from '@/lib/format';
 import type { Driver } from '@/types';
 import { getDrivers, blockDriver, unblockDriver, deleteDriver, adminOtpLookup, type OtpLookupResult } from '../api';
 import DriverDocumentsModal from './DriverDocumentsModal';
+import { useRealtimeRefresh } from '@/hooks/useRealtimeRefresh';
 
 const APPROVAL_BADGE: Record<string, string> = {
   approved: 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400',
@@ -138,6 +139,7 @@ export default function DriversList({ cooperativeId }: Props) {
   }, [page, search, filterApproval, cooperativeId]);
 
   useEffect(() => { load(); }, [load]);
+  useRealtimeRefresh(['driver.registered', 'driver.approved', 'driver.rejected'], load);
 
   const act = async (fn: () => Promise<void>, id: string) => {
     setActionLoading(id);
@@ -358,8 +360,8 @@ export default function DriversList({ cooperativeId }: Props) {
 
       {/* Delete confirmation */}
       {deleteId && (
-        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setDeleteId(null)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">¿Eliminar conductor?</h3>
             <p className="text-sm text-gray-400 mb-6">Esta acción es permanente. El conductor y su cuenta serán eliminados del sistema.</p>
             <div className="flex gap-3">

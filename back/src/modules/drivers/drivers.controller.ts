@@ -82,6 +82,13 @@ export class DriversController {
     return this.driversService.updateLocation(user.id, lat, lng);
   }
 
+  @Patch('me/confirm-active')
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles(UserRole.DRIVER)
+  confirmActive(@CurrentUser() user: User) {
+    return this.driversService.confirmActive(user.id);
+  }
+
   @Post('documents')
   @UseGuards(JwtGuard, RolesGuard)
   @Roles(UserRole.DRIVER)

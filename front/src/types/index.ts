@@ -147,6 +147,22 @@ export interface SosAlert {
   created_at: string;
 }
 
+// ── Desviación de ruta (seguridad del conductor) ────────────────────────────
+export type DeviationAlertStatus = 'open' | 'resolved';
+
+export interface DeviationAlert {
+  id: string;
+  trip_id: string;
+  driver?: { id: string; full_name?: string } | null;
+  cooperative_id: string | null;
+  lat: number;
+  lng: number;
+  status: DeviationAlertStatus;
+  resolved_at: string | null;
+  resolution_notes: string | null;
+  triggered_at: string;
+}
+
 // ── Stand ──────────────────────────────────────────────────────────────────
 export interface Stand {
   id: string;

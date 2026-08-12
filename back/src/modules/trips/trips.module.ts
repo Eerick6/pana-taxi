@@ -20,6 +20,7 @@ import { Stand } from '../stands/entities/stand.entity';
 import { StandAssignment } from '../stands/entities/stand-assignment.entity';
 import { Client } from '../clients/entities/client.entity';
 import { PaymentMethod } from '../payment-methods/entities/payment-method.entity';
+import { Rating } from '../ratings/entities/rating.entity';
 import { AccountingModule } from '../accounting/accounting.module';
 
 @Module({
@@ -38,6 +39,7 @@ import { AccountingModule } from '../accounting/accounting.module';
       StandAssignment,
       Client,
       PaymentMethod,
+      Rating,
     ]),
     WalletModule,
     GatewayModule,

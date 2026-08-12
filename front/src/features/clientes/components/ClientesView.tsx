@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { getClients, getClient, blockClient, unblockClient, adminOtpLookup, type Client, type OtpLookupResult } from '../api';
 import { dateStr, num } from '@/lib/format';
+import { useRealtimeRefresh } from '@/hooks/useRealtimeRefresh';
 
 /* ── OTP Lookup ── */
 
@@ -277,6 +278,7 @@ export default function ClientesView() {
   }, []);
 
   useEffect(() => { load(page, search); }, [page, search, load]);
+  useRealtimeRefresh(['client.registered'], () => load(page, search));
 
   const handleSearch = (val: string) => {
     setInputVal(val);

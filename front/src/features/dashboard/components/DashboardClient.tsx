@@ -7,6 +7,15 @@ import {
   type DashboardStats,
 } from '../api';
 import { getStandsSummary } from '@/features/cooperativas/api';
+import { useRealtimeRefresh } from '@/hooks/useRealtimeRefresh';
+
+const DASHBOARD_EVENTS = [
+  'trip.created', 'trip.accepted', 'trip.completed', 'trip.cancelled',
+  'driver.registered', 'driver.approved',
+  'vehicle.registered', 'vehicle.approved',
+  'cooperative.registered', 'cooperative.approved',
+  'client.registered',
+];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -221,6 +230,7 @@ export default function DashboardClient() {
     if (authLoading || !user) return;
     load();
   }, [user, authLoading, load]);
+  useRealtimeRefresh(DASHBOARD_EVENTS, load);
 
   const R = range;
 

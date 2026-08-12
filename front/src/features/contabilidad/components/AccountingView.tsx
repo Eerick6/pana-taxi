@@ -84,8 +84,8 @@ function RejectDialog({
 }) {
   const [reason, setReason] = useState('');
   return (
-    <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 px-4">
-      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+    <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 px-4" onClick={onCancel}>
+      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-gray-800 dark:text-white">
           Rechazar recarga
         </h3>
@@ -191,8 +191,8 @@ function BankDialog({
   const bi = getBankInfo(form.bank_name);
 
   return (
-    <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 px-4 overflow-y-auto py-6">
-      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4 my-auto">
+    <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 px-4 overflow-y-auto py-6" onClick={onCancel}>
+      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4 my-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-gray-800 dark:text-white">
           {initial ? 'Editar cuenta bancaria' : 'Nueva cuenta bancaria'}
         </h3>
@@ -352,7 +352,7 @@ function ProofModal({ url, onClose }: { url: string; onClose: () => void }) {
   const content = (
     <div
       className="fixed inset-0 flex items-center justify-center bg-black/85 p-4"
-      style={{ zIndex: 99999 }}
+      style={{ zIndex: 999999 }}
       onClick={onClose}
     >
       <div

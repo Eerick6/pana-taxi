@@ -180,62 +180,66 @@ export default function DriverDocumentsModal({ driverId, onClose, onUpdate, read
               docs.map((doc) => (
                 <div
                   key={doc.id}
-                  className={`flex items-center gap-4 p-4 rounded-xl border transition-colors ${
+                  className={`flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 rounded-xl border transition-colors ${
                     doc.status === 'rejected'  ? 'border-error-200 dark:border-error-500/30 bg-error-50/30 dark:bg-error-500/5' :
                     doc.status === 'approved'  ? 'border-success-200 dark:border-success-500/30 bg-success-50/30 dark:bg-success-500/5' :
                     'border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50'
                   }`}
                 >
-                  <div className="w-10 h-10 rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 flex items-center justify-center flex-shrink-0">
-                    <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                  </div>
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 flex items-center justify-center flex-shrink-0">
+                      <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    </div>
 
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-800 dark:text-white">
-                      {TYPE_LABEL[doc.type] ?? doc.type}
-                      {REQUIRED_TYPES.includes(doc.type) && (
-                        <span className="ml-1.5 text-xs text-gray-400">(requerido)</span>
-                      )}
-                    </p>
-                    {doc.rejection_reason && (
-                      <p className="text-xs text-error-600 dark:text-error-400 mt-0.5 truncate">
-                        Motivo: {doc.rejection_reason}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 dark:text-white">
+                        {TYPE_LABEL[doc.type] ?? doc.type}
+                        {REQUIRED_TYPES.includes(doc.type) && (
+                          <span className="ml-1.5 text-xs text-gray-400">(requerido)</span>
+                        )}
                       </p>
-                    )}
+                      {doc.rejection_reason && (
+                        <p className="text-xs text-error-600 dark:text-error-400 mt-0.5 truncate">
+                          Motivo: {doc.rejection_reason}
+                        </p>
+                      )}
+                    </div>
                   </div>
 
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${STATUS_BADGE[doc.status]}`}>
-                    {STATUS_LABEL[doc.status]}
-                  </span>
+                  <div className="flex items-center justify-between sm:justify-end gap-2 sm:ml-auto sm:flex-shrink-0">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${STATUS_BADGE[doc.status]}`}>
+                      {STATUS_LABEL[doc.status]}
+                    </span>
 
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <button
-                      onClick={() => openPreview(doc)}
-                      disabled={previewLoading === doc.id}
-                      className="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
-                    >
-                      {previewLoading === doc.id ? '...' : 'Ver'}
-                    </button>
-                    {!readOnly && doc.status !== 'approved' && (
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
                       <button
-                        onClick={() => act(() => approveDocument(driverId, doc.id), doc.id)}
-                        disabled={!!actionLoading}
-                        className="px-2.5 py-1 text-xs font-medium rounded-lg bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400 hover:bg-success-100 transition-colors disabled:opacity-50"
+                        onClick={() => openPreview(doc)}
+                        disabled={previewLoading === doc.id}
+                        className="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
                       >
-                        {actionLoading === doc.id ? '...' : 'Aprobar'}
+                        {previewLoading === doc.id ? '...' : 'Ver'}
                       </button>
-                    )}
-                    {!readOnly && doc.status !== 'rejected' && (
-                      <button
-                        onClick={() => { setRejectDocId(doc.id); setRejectReason(''); }}
-                        disabled={!!actionLoading}
-                        className="px-2.5 py-1 text-xs font-medium rounded-lg bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400 hover:bg-error-100 transition-colors disabled:opacity-50"
-                      >
-                        Rechazar
-                      </button>
-                    )}
+                      {!readOnly && doc.status !== 'approved' && (
+                        <button
+                          onClick={() => act(() => approveDocument(driverId, doc.id), doc.id)}
+                          disabled={!!actionLoading}
+                          className="px-2.5 py-1 text-xs font-medium rounded-lg bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400 hover:bg-success-100 transition-colors disabled:opacity-50"
+                        >
+                          {actionLoading === doc.id ? '...' : 'Aprobar'}
+                        </button>
+                      )}
+                      {!readOnly && doc.status !== 'rejected' && (
+                        <button
+                          onClick={() => { setRejectDocId(doc.id); setRejectReason(''); }}
+                          disabled={!!actionLoading}
+                          className="px-2.5 py-1 text-xs font-medium rounded-lg bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400 hover:bg-error-100 transition-colors disabled:opacity-50"
+                        >
+                          Rechazar
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))
@@ -336,8 +340,8 @@ export default function DriverDocumentsModal({ driverId, onClose, onUpdate, read
 
       {/* ── Reject document reason ── */}
       {rejectDocId && (
-        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setRejectDocId(null)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Rechazar documento</h3>
             <p className="text-sm text-gray-400 mb-4">Indica el motivo para que el conductor pueda corregirlo</p>
             <textarea
@@ -357,8 +361,8 @@ export default function DriverDocumentsModal({ driverId, onClose, onUpdate, read
 
       {/* ── Reject driver reason ── */}
       {rejectDriverOpen && (
-        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setRejectDriverOpen(false)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">Rechazar conductor</h3>
             <p className="text-sm text-gray-400 mb-4">El conductor recibirá una notificación con este motivo</p>
             <textarea

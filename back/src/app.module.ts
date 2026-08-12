@@ -37,6 +37,7 @@ import { ChatModule } from './modules/chat/chat.module';
 import { PlansModule } from './modules/plans/plans.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { PayphoneModule } from './modules/payphone/payphone.module';
+import { DriverSafetyModule } from './modules/driver-safety/driver-safety.module';
 
 @Module({
   imports: [
@@ -103,6 +104,7 @@ import { PayphoneModule } from './modules/payphone/payphone.module';
     PlansModule,
     BillingModule,
     PayphoneModule,
+    DriverSafetyModule,
   ],
   controllers: [AppController],
   providers: [

@@ -145,6 +145,14 @@ export class Trip {
   @Column({ type: 'decimal', precision: 9, scale: 6, nullable: true })
   client_current_lng: number;
 
+  // Seguimiento de desvío sostenido (seguridad del conductor) — distinto del
+  // recorte de re-ruteo en vivo de events.gateway.ts. Se limpia al volver a ruta.
+  @Column({ nullable: true })
+  deviation_started_at: Date | null;
+
+  @Column({ nullable: true })
+  deviation_alert_sent_at: Date | null;
+
   // Radio de búsqueda activo para este viaje (crece si no hay conductor)
   @Column({ type: 'decimal', precision: 6, scale: 2, nullable: true })
   current_search_radius_km: number;

@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, Check } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, Check, Index } from 'typeorm';
 import { Driver } from '../../drivers/entities/driver.entity';
 import { Client } from '../../clients/entities/client.entity';
 
@@ -11,6 +11,8 @@ export enum RatingDirection {
 
 @Entity('ratings')
 @Check(`"score" BETWEEN 1 AND 5`)
+@Index('IDX_ratings_driver_direction_created', ['driver', 'direction', 'created_at'])
+@Index('IDX_ratings_owner_created', ['owner', 'created_at'])
 export class Rating {
   @PrimaryGeneratedColumn('uuid')
   id: string;

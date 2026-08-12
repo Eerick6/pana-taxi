@@ -15,6 +15,7 @@ import { CooperativeMember } from '../cooperatives/entities/cooperative-member.e
 import { TermsModule } from '../terms/terms.module';
 import { NOTIFICATION_QUEUE } from '../../queues/notifications/notification-queue.types';
 import { RedisModule } from '../../redis/redis.module';
+import { GatewayModule } from '../gateway/gateway.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { RedisModule } from '../../redis/redis.module';
     TermsModule,
     BullModule.registerQueue({ name: NOTIFICATION_QUEUE }),
     RedisModule,
+    GatewayModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, JwtGuard, RolesGuard],

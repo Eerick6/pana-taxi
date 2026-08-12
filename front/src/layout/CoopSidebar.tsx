@@ -21,6 +21,7 @@ const NAV: NavItem[] = [
   { name: 'Socios', icon: '👤', path: '/coop/conductores' },
   { name: 'Vehículos',   icon: '🚖', path: '/coop/vehiculos' },
   { name: 'Viajes',      icon: '🗺️', path: '/coop/viajes' },
+  { name: 'Desviaciones', icon: '🧭', path: '/coop/desviaciones', roles: ['cooperative_admin', 'cooperative_operator'] },
   { name: 'Staff',       icon: '🧑‍💼', path: '/coop/staff',          roles: ['cooperative_admin'] },
   { name: 'Paradas',    icon: '📍', path: '/coop/paradas',        roles: ['cooperative_admin', 'cooperative_operator'] },
   { name: 'Configuración', icon: '⚙️', path: '/coop/configuracion', roles: ['cooperative_admin'] },

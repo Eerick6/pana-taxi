@@ -4,6 +4,7 @@ import { dateStr } from '@/lib/format';
 import type { Vehicle } from '@/types';
 import { getVehicles, suspendVehicle, activateVehicle, deleteVehicle } from '../api';
 import VehicleDocumentsModal from './VehicleDocumentsModal';
+import { useRealtimeRefresh } from '@/hooks/useRealtimeRefresh';
 
 const APPROVAL_BADGE: Record<string, string> = {
   approved: 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400',
@@ -54,6 +55,7 @@ export default function VehiclesList({ cooperativeId }: Props) {
   }, [page, search, filterApproval, cooperativeId]);
 
   useEffect(() => { load(); }, [load]);
+  useRealtimeRefresh(['vehicle.registered', 'vehicle.approved', 'vehicle.rejected'], load);
 
   const act = async (fn: () => Promise<void>, id: string) => {
     setActionLoading(id);
@@ -260,8 +262,8 @@ export default function VehiclesList({ cooperativeId }: Props) {
 
       {/* Delete confirmation */}
       {deleteId && (
-        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+        <div className="fixed inset-0 z-999999 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setDeleteId(null)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-gray-800 dark:text-white mb-1">¿Eliminar vehículo?</h3>
             <p className="text-sm text-gray-400 mb-6">Esta acción es permanente. Solo se pueden eliminar vehículos que no estén activos.</p>
             <div className="flex gap-3">

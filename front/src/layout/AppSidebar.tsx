@@ -35,6 +35,7 @@ const platformSections: NavSection[] = [
       { name: "Dashboard", icon: <TaxiIcon name="📊" />, path: "/dashboard" },
       { name: "Mapa en vivo", icon: <TaxiIcon name="📡" />, path: "/mapa", roles: ["owner", "platform_admin", "monitoring", "support"] },
       { name: "SOS", icon: <TaxiIcon name="🆘" />, path: "/sos", roles: ["owner", "platform_admin", "monitoring", "support"] },
+      { name: "Desviaciones", icon: <TaxiIcon name="🧭" />, path: "/desviaciones", roles: ["owner", "platform_admin", "monitoring", "support"] },
     ],
   },
   {

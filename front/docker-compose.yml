@@ -14,6 +14,10 @@ services:
     volumes:
       - ./src:/app/src
       - ./public:/app/public
+      - ./tsconfig.json:/app/tsconfig.json
+      - ./next.config.ts:/app/next.config.ts
+      - ./postcss.config.js:/app/postcss.config.js
+      - ./jsvectormap.d.ts:/app/jsvectormap.d.ts
     networks:
       - taxi-net
 

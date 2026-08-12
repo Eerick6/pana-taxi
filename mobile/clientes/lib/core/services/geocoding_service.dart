@@ -2,10 +2,9 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../config/app_env.dart';
 import '../../features/trips/domain/entities/place_result.dart';
 import '../../features/trips/domain/entities/search_suggestion.dart';
-
-const _kGoogleApiKey = 'AIzaSyARdXsYNXD9dd5Q57rA9Mv0essqk6243kU';
 
 // Genera token aleatorio para agrupar autocomplete + details en una sesión ($0.017 flat)
 String _newSessionToken() {
@@ -19,7 +18,7 @@ class GeocodingService {
           baseUrl: 'https://places.googleapis.com',
           connectTimeout: const Duration(seconds: 5),
           receiveTimeout: const Duration(seconds: 5),
-          headers: {'X-Goog-Api-Key': _kGoogleApiKey},
+          headers: {'X-Goog-Api-Key': AppEnv.googleMapsKey},
         )),
         _nominatim = Dio(BaseOptions(
           baseUrl: 'https://nominatim.openstreetmap.org',
