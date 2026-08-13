@@ -56,6 +56,7 @@ class _HomePageState extends ConsumerState<HomePage>
   bool _imageReady = false;
   StreamSubscription<geo.Position>? _locationSub;
   geo.Position? _pendingPosition;
+  DateTime? _lastServerLocationEmit;
   bool _resumeChecked = false;
   SocketClient? _socket; // cached so dispose() can call off() without ref
 
@@ -469,13 +470,27 @@ class _HomePageState extends ConsumerState<HomePage>
           ),
         ).listen((pos) {
           _pendingPosition = pos;
+          // El mapa local del conductor se actualiza siempre — fluido, sin
+          // costo de servidor (es puramente local).
           if (_imageReady) _updateSymbol(pos);
           _flyTo(pos);
-          ref.read(socketClientProvider).emit('location.update', {
-            'lat': pos.latitude,
-            'lng': pos.longitude,
-            'speed_kmh': pos.speed > 0 ? pos.speed * 3.6 : 0.0,
-          });
+
+          // Al servidor solo cada ~60s mientras está disponible sin viaje
+          // activo (coincide con location_interval_fleet_sec del backend,
+          // hoy en 60). No hace falta más que eso: es solo para que el
+          // panel web se vea "vivo", no hay taxímetro corriendo. En viaje
+          // activo, trip_active_page.dart manda ubicación aparte, sin este
+          // throttle, con la frecuencia que sí importa.
+          final now = DateTime.now();
+          if (_lastServerLocationEmit == null ||
+              now.difference(_lastServerLocationEmit!) >= const Duration(seconds: 60)) {
+            _lastServerLocationEmit = now;
+            ref.read(socketClientProvider).emit('location.update', {
+              'lat': pos.latitude,
+              'lng': pos.longitude,
+              'speed_kmh': pos.speed > 0 ? pos.speed * 3.6 : 0.0,
+            });
+          }
         });
   }
 
