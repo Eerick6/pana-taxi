@@ -7,7 +7,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource, In, IsNull } from 'typeorm';
+import { Repository, DataSource, In, IsNull, EntityManager } from 'typeorm';
 import { Trip, TripSource, TripStatus, FareMode, CancelledBy } from './entities/trip.entity';
 import { TripOffer, OfferStatus } from './entities/trip-offer.entity';
 import { Driver, DriverApprovalStatus, DriverOnlineStatus } from '../drivers/entities/driver.entity';
@@ -23,7 +23,7 @@ import { EventsGateway } from '../gateway/events.gateway';
 import { FareService } from '../fare/fare.service';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { CompleteTripDto } from './dto/complete-trip.dto';
-import { PaymentMethod } from '../payment-methods/entities/payment-method.entity';
+import { PaymentMethod, PaymentMethodSlug } from '../payment-methods/entities/payment-method.entity';
 import { CancelTripDto } from './dto/cancel-trip.dto';
 import { MakeOfferDto } from './dto/make-offer.dto';
 import { StartTripDto } from './dto/start-trip.dto';
@@ -762,7 +762,7 @@ export class TripsService {
       rejectedDriverIds,
       agreedFare,
       otpCode,
-    } = await this.dataSource.transaction(async (em) => {
+    } = await this.runTransactionWithDeadlockRetry(async (em) => {
       // Lock pesimista para evitar doble selección simultánea
       const lockedTrip = await em.findOne(Trip, {
         where: { id: tripId },
@@ -1237,14 +1237,23 @@ export class TripsService {
     const wallet = await this.walletRepo.findOne({ where: { driver: { id: driver.id } } });
     if (!wallet) throw new NotFoundException('Wallet del conductor no encontrada');
 
-    await this.dataSource.transaction(async (em) => {
+    // Viajes con tarjeta: la plata la recibe la plataforma vía Payphone, no
+    // el conductor — no tiene sentido descontarle comisión de algo que
+    // nunca cobró. Se le acredita su parte (fare - comisión) a card_balance
+    // recién cuando el pago se confirme exitoso (ver PayphoneService), no
+    // acá, para no adelantarle plata de un cobro que podría fallar.
+    const isCardTrip = trip.payment_method?.slug === PaymentMethodSlug.CARD;
+
+    await this.runTransactionWithDeadlockRetry(async (em) => {
       await em.update(Trip, tripId, {
         status: TripStatus.COMPLETED,
         fare_amount: fare.toFixed(2) as any,
         commission_amount: commissionAmount.toFixed(2) as any,
         completed_at: new Date(),
       });
-      await this.walletService.deductCommission(wallet.id, commissionAmount, tripId, em);
+      if (!isCardTrip) {
+        await this.walletService.deductCommission(wallet.id, commissionAmount, tripId, em);
+      }
       if (trip.cooperative?.id) {
         await this.accountingService.creditCoopCommission(trip.cooperative.id, commissionAmount, tripId, em);
       }
@@ -1509,6 +1518,28 @@ export class TripsService {
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
+  // completeTrip() actualiza la MISMA fila de cooperative_accounts para
+  // todos los viajes de una cooperativa — bajo carga (varios viajes de la
+  // misma coop completando casi al mismo tiempo), InnoDB puede elegir esta
+  // transacción como víctima de un deadlock genuino (lock ordering), algo
+  // esperado y no un bug de lógica. Reintentar la transacción completa
+  // desde cero (nunca solo la sub-operación que falló) es la respuesta
+  // correcta — confirmado con una prueba de carga local.
+  private async runTransactionWithDeadlockRetry<T>(
+    work: (em: EntityManager) => Promise<T>,
+    maxRetries = 6,
+  ): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.dataSource.transaction(work);
+      } catch (err: any) {
+        const isDeadlock = err?.code === 'ER_LOCK_DEADLOCK' || err?.driverError?.code === 'ER_LOCK_DEADLOCK';
+        if (!isDeadlock || attempt >= maxRetries) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1) + Math.random() * 50));
+      }
+    }
+  }
+
   private async resolveCommissionRate(coopOverridePct: number | null): Promise<number> {
     if (coopOverridePct != null) {
       return parseFloat(coopOverridePct as any) / 100;
@@ -1531,7 +1562,7 @@ export class TripsService {
   private async findTripForDriver(tripId: string, driverId: string): Promise<Trip> {
     const trip = await this.tripsRepo.findOne({
       where: { id: tripId, driver: { id: driverId } },
-      relations: ['cooperative'],
+      relations: ['cooperative', 'payment_method'],
     });
     if (!trip) throw new NotFoundException('Viaje no encontrado o no te pertenece');
     return trip;

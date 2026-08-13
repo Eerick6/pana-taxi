@@ -12,6 +12,7 @@ import {
   getBankAccounts, createBankAccount, updateBankAccount, uploadBankLogo,
   type RechargeRow, type BankAccount,
 } from '../api';
+import CardBalancesList from './CardBalancesList';
 
 // ── Bank logo component ───────────────────────────────────────────────────────
 
@@ -402,7 +403,7 @@ function ProofModal({ url, onClose }: { url: string; onClose: () => void }) {
 
 // ── Main view ─────────────────────────────────────────────────────────────────
 
-type Tab = 'settlements' | 'recharges' | 'banks';
+type Tab = 'settlements' | 'recharges' | 'banks' | 'card_balances';
 
 export default function AccountingView({ initialTab = 'settlements' }: { initialTab?: Tab }) {
   const { selectedCoop } = useCoop();
@@ -561,9 +562,10 @@ export default function AccountingView({ initialTab = 'settlements' }: { initial
         {/* Tabs */}
         <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl w-fit">
           {([
-            { v: 'settlements', l: '💸 Liquidaciones' },
-            { v: 'recharges',   l: '💳 Recargas' },
-            { v: 'banks',       l: '🏦 Cuentas bancarias' },
+            { v: 'settlements',    l: '💸 Liquidaciones' },
+            { v: 'recharges',      l: '💳 Recargas' },
+            { v: 'card_balances',  l: '🧾 Saldos tarjeta' },
+            { v: 'banks',          l: '🏦 Cuentas bancarias' },
           ] as { v: Tab; l: string }[]).map(({ v, l }) => (
             <button
               key={v}
@@ -574,6 +576,9 @@ export default function AccountingView({ initialTab = 'settlements' }: { initial
             </button>
           ))}
         </div>
+
+        {/* ── Saldos por tarjeta ─────────────────────────────────────────────── */}
+        {tab === 'card_balances' && <CardBalancesList cooperativeId={coopId} />}
 
         {/* ── Settlements ────────────────────────────────────────────────────── */}
         {tab === 'settlements' && (

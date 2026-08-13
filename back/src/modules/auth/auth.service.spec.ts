@@ -8,6 +8,8 @@ import { Client } from '../clients/entities/client.entity';
 import { PlatformMember } from '../platform/entities/platform-member.entity';
 import { CooperativeMember } from '../cooperatives/entities/cooperative-member.entity';
 import { TermsService } from '../terms/terms.service';
+import { REDIS_CLIENT } from '../../redis/redis.module';
+import { EventsGateway } from '../gateway/events.gateway';
 import * as encryptTransformer from '../../common/transformers/encrypt.transformer';
 
 // Prevent real HMAC calls from failing due to missing env vars
@@ -29,6 +31,11 @@ function makeRepo<T = any>() {
       addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       getOne: jest.fn(),
+      // Cadena de UPDATE atómico usada por verifyPhoneOtp/verifyEmailOtp:
+      // .createQueryBuilder().update(User).set({...}).where(...).execute()
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ affected: 1 }),
     }),
   };
 }
@@ -41,6 +48,7 @@ describe('AuthService', () => {
   let cooperativeMembersRepo: ReturnType<typeof makeRepo<CooperativeMember>>;
   let jwtService: { sign: jest.Mock; verify: jest.Mock };
   let termsService: { validateAcceptance: jest.Mock };
+  let gateway: { notifyUser: jest.Mock; notifyPlatform: jest.Mock };
 
   beforeEach(async () => {
     usersRepo = makeRepo<User>();
@@ -49,6 +57,7 @@ describe('AuthService', () => {
     cooperativeMembersRepo = makeRepo<CooperativeMember>();
     jwtService = { sign: jest.fn().mockReturnValue('mock-token'), verify: jest.fn() };
     termsService = { validateAcceptance: jest.fn().mockResolvedValue({ version: '1.0' }) };
+    gateway = { notifyUser: jest.fn(), notifyPlatform: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -59,6 +68,8 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(CooperativeMember), useValue: cooperativeMembersRepo },
         { provide: JwtService, useValue: jwtService },
         { provide: TermsService, useValue: termsService },
+        { provide: REDIS_CLIENT, useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() } },
+        { provide: EventsGateway, useValue: gateway },
       ],
     }).compile();
 
@@ -80,6 +91,7 @@ describe('AuthService', () => {
       cedula: '1234567890',
       full_name: 'Ana Torres',
       terms_version: '1.0',
+      password: 'Secret123!',
     };
 
     it('should throw ConflictException when phone already exists', async () => {
@@ -160,6 +172,8 @@ describe('AuthService', () => {
 
       // Force production mode so the '000000' bypass is disabled
       process.env.NODE_ENV = 'production';
+      // El UPDATE atómico no encuentra fila (código no coincide) — affected: 0
+      usersRepo.createQueryBuilder().execute.mockResolvedValueOnce({ affected: 0 });
 
       await expect(service.verifyPhoneOtp({ phone: dto.phone, code: '111111' })).rejects.toThrow(
         UnauthorizedException,
@@ -175,8 +189,11 @@ describe('AuthService', () => {
         otp_code: '123456',
         otp_expires_at: new Date(Date.now() - 1000), // already expired
       });
+      // La cláusula WHERE del UPDATE atómico exige otp_expires_at > NOW(),
+      // así que un código vencido tampoco matchea ninguna fila.
+      usersRepo.createQueryBuilder().execute.mockResolvedValueOnce({ affected: 0 });
 
-      await expect(service.verifyPhoneOtp(dto)).rejects.toThrow('Código expirado');
+      await expect(service.verifyPhoneOtp(dto)).rejects.toThrow('Código inválido o expirado');
     });
 
     it('should return tokens when OTP is valid', async () => {
@@ -193,7 +210,13 @@ describe('AuthService', () => {
 
       const result = await service.verifyPhoneOtp(dto);
 
-      expect(usersRepo.update).toHaveBeenCalledWith(user.id, { otp_code: null, otp_expires_at: null });
+      // En producción, limpiar el OTP pasa por el UPDATE atómico
+      // (createQueryBuilder), no por usersRepository.update directo —
+      // eso evita la race condition de reusar un código ya consumido.
+      const qb = usersRepo.createQueryBuilder();
+      expect(qb.set).toHaveBeenCalledWith(
+        expect.objectContaining({ otp_code: null, otp_expires_at: null }),
+      );
       expect(result).toMatchObject({
         access_token: expect.any(String),
         refresh_token: expect.any(String),
@@ -216,6 +239,100 @@ describe('AuthService', () => {
       const result = await service.verifyPhoneOtp({ phone: dto.phone, code: '000000' });
 
       expect(result).toHaveProperty('access_token');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Sesión única por cuenta (session_id + session.revoked)
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe('single session per account', () => {
+    const dto = { phone: '+593999000001', code: '123456' };
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    it('assigns a fresh session_id on login and persists it alongside the refresh token hash', async () => {
+      const user = {
+        id: 'u1',
+        phone: dto.phone,
+        role: UserRole.CLIENT,
+        otp_code: dto.code,
+        otp_expires_at: new Date(Date.now() + 60_000),
+        session_id: null,
+      };
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.update.mockResolvedValue(undefined);
+
+      await service.verifyPhoneOtp(dto);
+
+      expect(usersRepo.update).toHaveBeenCalledWith(
+        'u1',
+        expect.objectContaining({ session_id: expect.stringMatching(uuidPattern) }),
+      );
+      // Payload firmado en el JWT también debe llevar el session_id nuevo
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ session_id: expect.stringMatching(uuidPattern) }),
+      );
+    });
+
+    it('notifies the previous device via session.revoked when a new login replaces an existing session', async () => {
+      const user = {
+        id: 'u1',
+        phone: dto.phone,
+        role: UserRole.CLIENT,
+        otp_code: dto.code,
+        otp_expires_at: new Date(Date.now() + 60_000),
+        session_id: 'previous-session-uuid',
+      };
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.update.mockResolvedValue(undefined);
+
+      await service.verifyPhoneOtp(dto);
+
+      expect(gateway.notifyUser).toHaveBeenCalledWith(
+        'u1',
+        'session.revoked',
+        expect.objectContaining({ message: expect.any(String) }),
+      );
+    });
+
+    it('does NOT notify session.revoked on first-ever login (no previous session_id)', async () => {
+      const user = {
+        id: 'u1',
+        phone: dto.phone,
+        role: UserRole.CLIENT,
+        otp_code: dto.code,
+        otp_expires_at: new Date(Date.now() + 60_000),
+        session_id: null,
+      };
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.update.mockResolvedValue(undefined);
+
+      await service.verifyPhoneOtp(dto);
+
+      expect(gateway.notifyUser).not.toHaveBeenCalled();
+    });
+
+    it('preserves the existing session_id on token refresh (does not revoke itself)', async () => {
+      const user = {
+        id: 'u1',
+        phone: dto.phone,
+        role: UserRole.CLIENT,
+        refresh_token: 'hashed-old-token',
+        session_id: 'existing-session-uuid',
+      };
+      usersRepo.findOne.mockResolvedValue(user);
+      usersRepo.update.mockResolvedValue(undefined);
+      jwtService.verify.mockReturnValue({ sub: 'u1' });
+
+      await service.refresh('some-refresh-token');
+
+      expect(usersRepo.update).toHaveBeenCalledWith(
+        'u1',
+        expect.objectContaining({ session_id: 'existing-session-uuid' }),
+      );
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ session_id: 'existing-session-uuid' }),
+      );
+      expect(gateway.notifyUser).not.toHaveBeenCalled();
     });
   });
 

@@ -17,6 +17,8 @@ class TripModel {
     this.durationMinutes,
     this.waitTimerExpiresAt,
     this.routeGeometry,
+    this.driverLat, // 1. AGREGAR AL CONSTRUCTOR
+    this.driverLng, // 1. AGREGAR AL CONSTRUCTOR
   });
 
   final String    id;
@@ -36,14 +38,14 @@ class TripModel {
   final int?      durationMinutes;
   final DateTime? waitTimerExpiresAt;
   final String?   routeGeometry;
+  final double?   driverLat; // 2. AGREGAR LA PROPIEDAD
+  final double?   driverLng; // 2. AGREGAR LA PROPIEDAD
 
   bool get isMeterMode => fareMode == 'meter';
 
   bool get isActive => ['accepted', 'driver_arrived', 'in_progress'].contains(status);
 
   factory TripModel.fromJson(Map<String, dynamic> json) {
-    // TypeORM decimal columns come back as strings from the pg driver.
-    // This helper handles both num and String safely.
     double toDouble(dynamic v, [double fallback = 0]) {
       if (v == null) return fallback;
       if (v is num) return v.toDouble();
@@ -57,10 +59,8 @@ class TripModel {
       return (parsed != null && parsed > 0) ? parsed : null;
     }
 
-    // client is a User entity — has phone/email but NOT full_name
     final client = json['client'] as Map<String, dynamic>?;
 
-    // fare: check multiple possible fields in priority order
     double? parseFare() {
       for (final key in ['fare_amount', 'meter_amount', 'agreed_fare', 'client_offer']) {
         final result = toDoubleOpt(json[key]);
@@ -79,7 +79,6 @@ class TripModel {
       originLng: toDouble(json['origin_lng']),
       destinationLat: toDouble(json['destination_lat']),
       destinationLng: toDouble(json['destination_lng']),
-      // walk_in_client_name for walk-in trips; otherwise use phone (User has no full_name)
       clientName: json['walk_in_client_name'] as String? ??
           client?['phone'] as String? ??
           client?['email'] as String? ??
@@ -93,6 +92,8 @@ class TripModel {
           ? DateTime.tryParse(json['wait_timer_expires_at'].toString())?.toLocal()
           : null,
       routeGeometry: json['route_geometry'] as String?,
+      driverLat: toDoubleOpt(json['driver_lat']), // 3. AGREGAR AL PARSEO JSON
+      driverLng: toDoubleOpt(json['driver_lng']), // 3. AGREGAR AL PARSEO JSON
     );
   }
 }

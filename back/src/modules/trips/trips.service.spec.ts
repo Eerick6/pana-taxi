@@ -17,6 +17,7 @@ import { Stand } from '../stands/entities/stand.entity';
 import { StandAssignment } from '../stands/entities/stand-assignment.entity';
 import { Client } from '../clients/entities/client.entity';
 import { PaymentMethod } from '../payment-methods/entities/payment-method.entity';
+import { Rating } from '../ratings/entities/rating.entity';
 import { WalletService } from '../wallet/wallet.service';
 import { EventsGateway } from '../gateway/events.gateway';
 import { FareService } from '../fare/fare.service';
@@ -145,8 +146,9 @@ describe('TripsService', () => {
         { provide: getRepositoryToken(StandAssignment), useValue: standAssignmentsRepo },
         { provide: getRepositoryToken(Client), useValue: makeRepo() },
         { provide: getRepositoryToken(PaymentMethod), useValue: makeRepo() },
+        { provide: getRepositoryToken(Rating), useValue: makeRepo() },
         { provide: DataSource, useValue: dataSource },
-        { provide: WalletService, useValue: { deductCommission: jest.fn() } },
+        { provide: WalletService, useValue: { deductCommission: jest.fn(), creditCardEarning: jest.fn() } },
         { provide: EventsGateway, useValue: gateway },
         { provide: FareService, useValue: fareService },
         { provide: DriversService, useValue: driversService },
@@ -397,6 +399,7 @@ describe('TripsService', () => {
         tripId,
         'trip.started',
         expect.objectContaining({ status: TripStatus.IN_PROGRESS }),
+        undefined,
       );
       expect(result.message).toBeDefined();
     });
@@ -486,6 +489,7 @@ describe('TripsService', () => {
         tripId,
         'trip.completed',
         expect.objectContaining({ status: TripStatus.COMPLETED }),
+        undefined,
       );
     });
   });
@@ -566,6 +570,7 @@ describe('TripsService', () => {
         tripId,
         'trip.cancelled',
         expect.objectContaining({ status: TripStatus.CANCELLED, cancelled_by: CancelledBy.COOPERATIVE }),
+        'coop-1',
       );
       expect(gateway.notifyUser).toHaveBeenCalledWith('client-1', 'trip.cancelled', expect.any(Object));
       expect(gateway.notifyAvailableDrivers).toHaveBeenCalledWith('trip.taken', { trip_id: tripId });

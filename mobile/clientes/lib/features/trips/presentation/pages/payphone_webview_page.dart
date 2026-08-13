@@ -20,6 +20,8 @@ class _PayphoneWebViewPageState extends ConsumerState<PayphoneWebViewPage> {
   bool _loadingUrl  = true;
   bool _confirming  = false;
   String? _error;
+  double? _feeAmount;
+  double? _chargedAmount;
 
   @override
   void initState() {
@@ -32,6 +34,8 @@ class _PayphoneWebViewPageState extends ConsumerState<PayphoneWebViewPage> {
       final dio = ref.read(dioProvider);
       final res = await dio.post('/payphone/link', data: {'trip_id': widget.tripId});
       final url = res.data['url'] as String;
+      final feeAmount = double.tryParse(res.data['card_fee_amount']?.toString() ?? '');
+      final chargedAmount = double.tryParse(res.data['card_charged_amount']?.toString() ?? '');
 
       final ctrl = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -44,7 +48,13 @@ class _PayphoneWebViewPageState extends ConsumerState<PayphoneWebViewPage> {
         ))
         ..loadRequest(Uri.parse(url));
 
-      if (mounted) setState(() => _ctrl = ctrl);
+      if (mounted) {
+        setState(() {
+          _ctrl = ctrl;
+          _feeAmount = feeAmount;
+          _chargedAmount = chargedAmount;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = 'No se pudo generar el pago: $e');
     }
@@ -68,6 +78,9 @@ class _PayphoneWebViewPageState extends ConsumerState<PayphoneWebViewPage> {
 
     final idStr    = uri.queryParameters['id'];
     final clientTx = uri.queryParameters['clientTransactionId'];
+    // Solo presente si Payphone tiene tokenización aprobada para la cuenta —
+    // si no, este parámetro simplemente no llega y no pasa nada.
+    final cardToken = uri.queryParameters['ctoken'];
     if (idStr == null || clientTx == null) {
       if (mounted) context.pop();
       return;
@@ -80,6 +93,7 @@ class _PayphoneWebViewPageState extends ConsumerState<PayphoneWebViewPage> {
         'payphone_id':  int.parse(idStr),
         'client_tx_id': clientTx,
         'trip_id':      widget.tripId,
+        if (cardToken != null && cardToken.isNotEmpty) 'card_token': cardToken,
       });
       final success = res.data['success'] as bool? ?? false;
       if (!mounted) return;
@@ -103,7 +117,9 @@ class _PayphoneWebViewPageState extends ConsumerState<PayphoneWebViewPage> {
         title: Text(success ? 'Pago exitoso' : 'Pago fallido'),
         content: Text(
           success
-              ? 'Tu pago de \$${widget.amount.toStringAsFixed(2)} fue procesado correctamente.'
+              ? 'Tu pago de \$${(_chargedAmount ?? widget.amount).toStringAsFixed(2)} '
+                  '(tarifa \$${widget.amount.toStringAsFixed(2)} + recargo tarjeta '
+                  '\$${(_feeAmount ?? 0).toStringAsFixed(2)}) fue procesado correctamente.'
               : 'No se pudo procesar el pago. Puedes intentar de nuevo o pagar en efectivo.',
         ),
         actions: [
@@ -129,7 +145,22 @@ class _PayphoneWebViewPageState extends ConsumerState<PayphoneWebViewPage> {
           onPressed: () => context.pop(),
         ),
       ),
-      body: Stack(
+      body: Column(
+        children: [
+          if (_feeAmount != null && _chargedAmount != null)
+            _FeeBreakdown(
+              fare: widget.amount,
+              fee: _feeAmount!,
+              total: _chargedAmount!,
+            ),
+          Expanded(child: _buildBody()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    return Stack(
         children: [
           if (_error != null)
             Center(
@@ -183,7 +214,43 @@ class _PayphoneWebViewPageState extends ConsumerState<PayphoneWebViewPage> {
               ),
             ),
         ],
-      ),
     );
   }
+}
+
+class _FeeBreakdown extends StatelessWidget {
+  const _FeeBreakdown({required this.fare, required this.fee, required this.total});
+  final double fare;
+  final double fee;
+  final double total;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF8FAFC),
+          border: Border(bottom: BorderSide(color: AppColors.gray100)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _row('Tarifa del viaje', fare, style: AppTextStyles.body),
+            const SizedBox(height: 2),
+            _row('Recargo por tarjeta (uso de pasarela + IVA)', fee,
+                style: AppTextStyles.caption.copyWith(color: AppColors.gray500)),
+            const Divider(height: 14),
+            _row('Total a cobrar', total,
+                style: AppTextStyles.label.copyWith(fontWeight: FontWeight.bold)),
+          ],
+        ),
+      );
+
+  Widget _row(String label, double amount, {required TextStyle style}) => Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(child: Text(label, style: style)),
+          Text('\$${amount.toStringAsFixed(2)}', style: style),
+        ],
+      );
 }

@@ -19,15 +19,6 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// Force all library subprojects to compile against SDK 36
-gradle.afterProject {
-    extensions.findByType<com.android.build.gradle.LibraryExtension>()?.apply {
-        compileSdk = 36
-    }
-}
-
-
-
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }

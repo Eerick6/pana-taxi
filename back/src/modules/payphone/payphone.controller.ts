@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Req, UseGuards } from '@nestjs/common';
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { PayphoneService } from './payphone.service';
 
@@ -10,6 +10,11 @@ class ConfirmPaymentDto {
   payphone_id: number;
   client_tx_id: string;
   trip_id: string;
+  card_token?: string;
+}
+
+class ChargeWithTokenDto {
+  trip_id: string;
 }
 
 @Controller('payphone')
@@ -19,8 +24,12 @@ export class PayphoneController {
 
   @Post('link')
   async createLink(@Req() req, @Body() body: CreateLinkDto) {
-    const url = await this.service.createLink(body.trip_id, req.user.sub);
-    return { url };
+    return this.service.createLink(body.trip_id, req.user.sub);
+  }
+
+  @Get('estimate/:tripId')
+  async estimate(@Req() req, @Param('tripId') tripId: string) {
+    return this.service.estimateCardCharge(tripId, req.user.sub);
   }
 
   @Post('confirm')
@@ -30,7 +39,20 @@ export class PayphoneController {
       body.client_tx_id,
       body.trip_id,
       req.user.sub,
+      body.card_token,
     );
+    return { success };
+  }
+
+  @Get('has-token')
+  async hasToken(@Req() req) {
+    const has_token = await this.service.hasCardToken(req.user.sub);
+    return { has_token };
+  }
+
+  @Post('charge-with-token')
+  async chargeWithToken(@Req() req, @Body() body: ChargeWithTokenDto) {
+    const success = await this.service.chargeWithToken(body.trip_id, req.user.sub);
     return { success };
   }
 }

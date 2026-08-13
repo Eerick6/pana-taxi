@@ -10,11 +10,16 @@ import { User, UserRole, UserStatus } from '../users/entities/user.entity';
 import { Cooperative } from '../cooperatives/entities/cooperative.entity';
 import { CooperativeOwner } from '../cooperatives/entities/cooperative-owner.entity';
 import { Vehicle, VehicleApprovalStatus } from '../vehicles/entities/vehicle.entity';
+import { VehicleDocument } from '../vehicles/entities/vehicle-document.entity';
+import { Trip } from '../trips/entities/trip.entity';
 import { VehicleAssignment, AssignmentStatus } from '../vehicles/entities/vehicle-assignment.entity';
+import { CooperativeMember } from '../cooperatives/entities/cooperative-member.entity';
 import { StorageService } from '../storage/storage.service';
 import { TermsService } from '../terms/terms.service';
 import { FareService } from '../fare/fare.service';
 import { EventsGateway } from '../gateway/events.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
+import { REDIS_CLIENT } from '../../redis/redis.module';
 
 function makeRepo<T = any>() {
   return {
@@ -63,12 +68,17 @@ describe('DriversService', () => {
         { provide: getRepositoryToken(DriverWallet), useValue: makeRepo() },
         { provide: getRepositoryToken(Cooperative), useValue: makeRepo() },
         { provide: getRepositoryToken(CooperativeOwner), useValue: makeRepo() },
+        { provide: getRepositoryToken(CooperativeMember), useValue: makeRepo() },
         { provide: getRepositoryToken(Vehicle), useValue: vehiclesRepo },
+        { provide: getRepositoryToken(VehicleDocument), useValue: makeRepo() },
+        { provide: getRepositoryToken(Trip), useValue: makeRepo() },
         { provide: getRepositoryToken(VehicleAssignment), useValue: assignmentsRepo },
         { provide: StorageService, useValue: { upload: jest.fn(), getPresignedUrl: jest.fn() } },
         { provide: TermsService, useValue: { validateAcceptance: jest.fn() } },
         { provide: FareService, useValue: fareService },
-        { provide: EventsGateway, useValue: { notifyDriver: jest.fn() } },
+        { provide: EventsGateway, useValue: { notifyDriver: jest.fn(), syncAvailableRoom: jest.fn().mockResolvedValue(undefined) } },
+        { provide: NotificationsService, useValue: { sendToUser: jest.fn().mockResolvedValue(undefined) } },
+        { provide: REDIS_CLIENT, useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() } },
       ],
     }).compile();
 

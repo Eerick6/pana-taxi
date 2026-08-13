@@ -70,5 +70,13 @@
 		<true/>
 		<key>UIViewControllerBasedStatusBarAppearance</key>
 		<false/>
+		<key>NSLocationWhenInUseUsageDescription</key>
+		<string>Pana Taxi usa tu ubicación para mostrarte en el mapa y calcular tu viaje.</string>
+		<key>NSCameraUsageDescription</key>
+		<string>Pana Taxi usa la cámara para tomar fotos de tu foto de perfil y comprobantes de pago.</string>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>Pana Taxi accede a tus fotos para tu foto de perfil y comprobantes de pago.</string>
+		<key>NSFaceIDUsageDescription</key>
+		<string>Pana Taxi usa Face ID / Touch ID para que puedas iniciar sesión más rápido.</string>
 	</dict>
 </plist>

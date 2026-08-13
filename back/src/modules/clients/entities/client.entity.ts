@@ -33,6 +33,11 @@ export class Client {
   @Column({ nullable: true })
   profile_photo_url: string;
 
+  // Token de tarjeta guardada (Payphone) para cobros sin reingresar datos —
+  // requiere que Payphone haya aprobado tokenización para esta cuenta.
+  @Column({ nullable: true })
+  payphone_card_token: string | null;
+
   @Column({ type: 'decimal', precision: 3, scale: 2, default: 5.0 })
   rating: number;
 

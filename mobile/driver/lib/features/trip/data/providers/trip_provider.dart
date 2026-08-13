@@ -57,6 +57,25 @@ class ActiveTripNotifier extends AsyncNotifier<TripModel?> {
     );
   }
 
+  // Combina markArrived (si hace falta) + startTrip en una sola asignación de
+  // `state`, en vez de dos seguidas. Cada asignación dispara un rebuild de
+  // TripActivePage/_TripView -que contiene el PlatformView de navegación en
+  // pleno vuelo justo en este flujo-, y dos rebuilds superpuestos ahí fueron
+  // la causa de un assertion "_dependents.isEmpty" intermitente.
+  Future<void> confirmArrivalAndStart(
+    String tripId,
+    String otpCode, {
+    required bool needsMarkArrived,
+  }) async {
+    state = await AsyncValue.guard(() async {
+      final repo = ref.read(tripRepositoryProvider);
+      if (needsMarkArrived) {
+        await repo.markArrived(tripId);
+      }
+      return repo.startTrip(tripId, otpCode);
+    });
+  }
+
   Future<void> completeTrip(String tripId, double fareAmount) async {
     await ref.read(tripRepositoryProvider).completeTrip(tripId, fareAmount);
     state = const AsyncData(null);

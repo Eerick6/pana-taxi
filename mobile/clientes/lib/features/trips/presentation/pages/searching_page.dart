@@ -26,8 +26,8 @@ Uint8List? _taxiIconBytesCache;
 
 Future<Uint8List> _getOriginPin() async =>
     _originPinCache ??= await _buildTearDropPin(const Color(0xFF34A853));
-Future<Uint8List> _getDestPin() async =>
-    _destPinCache ??= await _buildTearDropPin(const Color(0xFFEA4335), w: 64, h: 90);
+Future<Uint8List> _getDestPin() async => _destPinCache ??=
+    await _buildTearDropPin(const Color(0xFFEA4335), w: 64, h: 90);
 Future<Uint8List> _getTaxiIconBytes() async =>
     _taxiIconBytesCache ??= await _buildTaxiIconBytes();
 
@@ -43,11 +43,15 @@ Future<Uint8List> _buildTaxiIconBytes() async {
   return bd!.buffer.asUint8List();
 }
 
-Future<Uint8List> _buildTearDropPin(Color color, {double w = 56, double h = 78}) async {
-  final cx    = w / 2;
+Future<Uint8List> _buildTearDropPin(
+  Color color, {
+  double w = 56,
+  double h = 78,
+}) async {
+  final cx = w / 2;
   final headR = w * 0.36;
   final headCY = headR + 4;
-  final rec    = ui.PictureRecorder();
+  final rec = ui.PictureRecorder();
   final canvas = Canvas(rec, Rect.fromLTWH(0, 0, w, h));
 
   canvas.drawOval(
@@ -63,15 +67,22 @@ Future<Uint8List> _buildTearDropPin(Color color, {double w = 56, double h = 78})
     ..close();
   canvas.drawPath(path, Paint()..color = color);
 
-  canvas.drawCircle(Offset(cx, headCY), headR,
-      Paint()
-        ..color       = Colors.white
-        ..style       = PaintingStyle.stroke
-        ..strokeWidth = 2.5);
+  canvas.drawCircle(
+    Offset(cx, headCY),
+    headR,
+    Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5,
+  );
 
-  canvas.drawCircle(Offset(cx, headCY), headR * 0.34, Paint()..color = Colors.white);
+  canvas.drawCircle(
+    Offset(cx, headCY),
+    headR * 0.34,
+    Paint()..color = Colors.white,
+  );
 
-  final img   = await rec.endRecording().toImage(w.toInt(), h.toInt());
+  final img = await rec.endRecording().toImage(w.toInt(), h.toInt());
   final bytes = await img.toByteData(format: ui.ImageByteFormat.png);
   return bytes!.buffer.asUint8List();
 }
@@ -99,10 +110,10 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
 
   // Estado
   bool _noDrivers = false;
-  bool _retrying  = false;
-  late ActiveTrip    _trip;
+  bool _retrying = false;
+  late ActiveTrip _trip;
   List<NearbyDriver> _drivers = [];
-  List<DriverOffer>           _offers        = [];
+  List<DriverOffer> _offers = [];
   final Map<String, DateTime> _offerArrivals = {};
   Timer? _driverTimer;
   Timer? _offerTimer;
@@ -111,7 +122,7 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
 
   // Círculo pulsante
   late AnimationController _pulseCtrl;
-  late Animation<double>   _pulseAnim;
+  late Animation<double> _pulseAnim;
   double _lastPulseOpacity = 0.08;
 
   bool get _isNegotiated => _trip.isNegotiated;
@@ -124,7 +135,10 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     _tripCreatedAt = widget.initialTrip.createdAt;
 
     // Conductores cercanos cada 5 s (solo mapa, no crítico)
-    _driverTimer = Timer.periodic(const Duration(seconds: 20), (_) => _refreshDrivers());
+    _driverTimer = Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => _refreshDrivers(),
+    );
 
     // Socket en tiempo real para ofertas y cambios de estado
     _initSocket();
@@ -146,7 +160,9 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
 
     socket.on('trip.new_offer', (data) {
       if (!_socketActive || !mounted || data is! Map) return;
-      final offer = DriverOffer.fromSocketEvent(Map<String, dynamic>.from(data));
+      final offer = DriverOffer.fromSocketEvent(
+        Map<String, dynamic>.from(data),
+      );
       setState(() {
         _offerArrivals.putIfAbsent(offer.offerId, () => DateTime.now());
         final idx = _offers.indexWhere((o) => o.offerId == offer.offerId);
@@ -168,8 +184,10 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     // Viaje cancelado desde el backend (expirado, taxista, panel, etc.)
     socket.on('trip.cancelled', (data) async {
       if (!_socketActive || !mounted) return;
-      final map         = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
-      final reason      = map['reason']       as String?;
+      final map = data is Map
+          ? Map<String, dynamic>.from(data)
+          : <String, dynamic>{};
+      final reason = map['reason'] as String?;
       final cancelledBy = map['cancelled_by'] as String?;
 
       if (reason == 'no_drivers') {
@@ -209,33 +227,36 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
       if (newRadius == null) return;
       setState(() {
         _trip = ActiveTrip(
-          id:                 _trip.id,
-          status:             _trip.status,
-          fareMode:           _trip.fareMode,
-          originAddress:      _trip.originAddress,
+          id: _trip.id,
+          status: _trip.status,
+          fareMode: _trip.fareMode,
+          originAddress: _trip.originAddress,
           destinationAddress: _trip.destinationAddress,
-          originLat:          _trip.originLat,
-          originLng:          _trip.originLng,
-          destinationLat:     _trip.destinationLat,
-          destinationLng:     _trip.destinationLng,
-          routeGeometry:      _trip.routeGeometry,
-          searchRadiusKm:     newRadius,
-          createdAt:          _trip.createdAt,
+          originLat: _trip.originLat,
+          originLng: _trip.originLng,
+          destinationLat: _trip.destinationLat,
+          destinationLng: _trip.destinationLng,
+          routeGeometry: _trip.routeGeometry,
+          searchRadiusKm: newRadius,
+          createdAt: _trip.createdAt,
           pendingOfferAmount: _trip.pendingOfferAmount,
-          clientOffer:        _trip.clientOffer,
-          meterAmount:        _trip.meterAmount,
-          otpCode:            _trip.otpCode,
-          driverName:         _trip.driverName,
-          driverPhone:        _trip.driverPhone,
-          driverPhoto:        _trip.driverPhoto,
-          driverRating:       _trip.driverRating,
-          vehiclePlate:       _trip.vehiclePlate,
-          vehicleModel:       _trip.vehicleModel,
+          clientOffer: _trip.clientOffer,
+          meterAmount: _trip.meterAmount,
+          otpCode: _trip.otpCode,
+          driverName: _trip.driverName,
+          driverPhone: _trip.driverPhone,
+          driverPhoto: _trip.driverPhoto,
+          driverRating: _trip.driverRating,
+          vehiclePlate: _trip.vehiclePlate,
+          vehicleModel: _trip.vehicleModel,
         );
       });
       if (_mapReady && _trip.originLat != null && _trip.originLng != null) {
         final r = newRadius.clamp(0.5, 20.0);
-        _ctrl?.setGeoJsonSource('circle-src', _circleGeoJson(_trip.originLat!, _trip.originLng!, r));
+        _ctrl?.setGeoJsonSource(
+          'circle-src',
+          _circleGeoJson(_trip.originLat!, _trip.originLng!, r),
+        );
       }
     });
 
@@ -264,22 +285,22 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     try {
       final api = ref.read(tripsApiProvider);
       final newTrip = await api.createTrip(
-        originAddress:      _trip.originAddress,
-        originLat:          _trip.originLat,
-        originLng:          _trip.originLng,
+        originAddress: _trip.originAddress,
+        originLat: _trip.originLat,
+        originLng: _trip.originLng,
         destinationAddress: _trip.destinationAddress,
-        destinationLat:     _trip.destinationLat!,
-        destinationLng:     _trip.destinationLng!,
-        fareMode:           _trip.isNegotiated ? 'negotiated' : 'meter',
-        clientOffer:        _trip.clientOffer,
+        destinationLat: _trip.destinationLat!,
+        destinationLng: _trip.destinationLng!,
+        fareMode: _trip.isNegotiated ? 'negotiated' : 'meter',
+        clientOffer: _trip.clientOffer,
       );
       if (!mounted) return;
       setState(() {
         _trip = newTrip;
         _tripCreatedAt = newTrip.createdAt;
         _noDrivers = false;
-        _retrying  = false;
-        _offers    = [];
+        _retrying = false;
+        _offers = [];
         _offerArrivals.clear();
       });
     } catch (e) {
@@ -310,13 +331,13 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
       _getTaxiIconBytes(),
     ]);
     await c.addImage('origin-pin', results[0]);
-    await c.addImage('dest-pin',   results[1]);
-    await c.addImage('taxi-icon',  results[2]);
+    await c.addImage('dest-pin', results[1]);
+    await c.addImage('taxi-icon', results[2]);
 
-    final lat    = _trip.originLat;
-    final lng    = _trip.originLng;
-    final dLat   = _trip.destinationLat;
-    final dLng   = _trip.destinationLng;
+    final lat = _trip.originLat;
+    final lng = _trip.originLng;
+    final dLat = _trip.destinationLat;
+    final dLng = _trip.destinationLng;
     final radius = (_trip.searchRadiusKm ?? 0.5).clamp(0.5, 20.0);
 
     // 1. Ruta (capa más baja)
@@ -325,78 +346,131 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
       await c.addGeoJsonSource('route-src', {
         'type': 'FeatureCollection',
         'features': [
-          {'type': 'Feature', 'geometry': geom, 'properties': <String, dynamic>{}}
+          {
+            'type': 'Feature',
+            'geometry': geom,
+            'properties': <String, dynamic>{},
+          },
         ],
       });
-      await c.addLineLayer('route-src', 'route-shadow',
-          const LineLayerProperties(
-            lineColor: '#000000', lineWidth: 18.0, lineOpacity: 0.12, lineBlur: 5.0,
-            lineCap: 'round', lineJoin: 'round'));
-      await c.addLineLayer('route-src', 'route-casing',
-          const LineLayerProperties(
-            lineColor: '#1A52C4', lineWidth: 11.0,
-            lineCap: 'round', lineJoin: 'round'));
-      await c.addLineLayer('route-src', 'route-line',
-          const LineLayerProperties(
-            lineColor: '#5689FB', lineWidth: 7.0,
-            lineCap: 'round', lineJoin: 'round'));
+      await c.addLineLayer(
+        'route-src',
+        'route-shadow',
+        const LineLayerProperties(
+          lineColor: '#000000',
+          lineWidth: 18.0,
+          lineOpacity: 0.12,
+          lineBlur: 5.0,
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+      );
+      await c.addLineLayer(
+        'route-src',
+        'route-casing',
+        const LineLayerProperties(
+          lineColor: '#1A52C4',
+          lineWidth: 11.0,
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+      );
+      await c.addLineLayer(
+        'route-src',
+        'route-line',
+        const LineLayerProperties(
+          lineColor: '#5689FB',
+          lineWidth: 7.0,
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+      );
     }
 
     // 2. Círculo de radio de búsqueda (pulsante)
     if (lat != null && lng != null) {
       await c.addGeoJsonSource('circle-src', _circleGeoJson(lat, lng, radius));
-      await c.addFillLayer('circle-src', 'circle-fill',
-          const FillLayerProperties(fillColor: '#34A853', fillOpacity: 0.15));
-      await c.addLineLayer('circle-src', 'circle-line',
-          const LineLayerProperties(lineColor: '#34A853', lineWidth: 2.5, lineOpacity: 0.85));
+      await c.addFillLayer(
+        'circle-src',
+        'circle-fill',
+        const FillLayerProperties(fillColor: '#34A853', fillOpacity: 0.15),
+      );
+      await c.addLineLayer(
+        'circle-src',
+        'circle-line',
+        const LineLayerProperties(
+          lineColor: '#34A853',
+          lineWidth: 2.5,
+          lineOpacity: 0.85,
+        ),
+      );
     }
 
     // 3. Taxis cercanos (encima del círculo)
     await c.addGeoJsonSource('drivers-src', _driversGeoJson([]));
-    await c.addSymbolLayer('drivers-src', 'drivers-layer',
-        const SymbolLayerProperties(
-          iconImage: 'taxi-icon',
-          iconSize: 0.85,
-          iconAllowOverlap: true,
-          iconAnchor: 'center',
-        ));
+    await c.addSymbolLayer(
+      'drivers-src',
+      'drivers-layer',
+      const SymbolLayerProperties(
+        iconImage: 'taxi-icon',
+        iconSize: 0.85,
+        iconAllowOverlap: true,
+        iconAnchor: 'center',
+      ),
+    );
 
     // 4. Pin origen — capa encima de los taxis
     if (lat != null && lng != null) {
       await c.addGeoJsonSource('origin-src', {
         'type': 'FeatureCollection',
-        'features': [{
-          'type': 'Feature',
-          'geometry': {'type': 'Point', 'coordinates': [lng, lat]},
-          'properties': <String, dynamic>{},
-        }],
+        'features': [
+          {
+            'type': 'Feature',
+            'geometry': {
+              'type': 'Point',
+              'coordinates': [lng, lat],
+            },
+            'properties': <String, dynamic>{},
+          },
+        ],
       });
-      await c.addSymbolLayer('origin-src', 'origin-layer',
-          const SymbolLayerProperties(
-            iconImage: 'origin-pin',
-            iconAnchor: 'bottom',
-            iconSize: 1.0,
-            iconAllowOverlap: true,
-          ));
+      await c.addSymbolLayer(
+        'origin-src',
+        'origin-layer',
+        const SymbolLayerProperties(
+          iconImage: 'origin-pin',
+          iconAnchor: 'bottom',
+          iconSize: 1.0,
+          iconAllowOverlap: true,
+        ),
+      );
     }
 
     // 5. Pin destino — encima de todo
     if (dLat != null && dLng != null) {
       await c.addGeoJsonSource('dest-src', {
         'type': 'FeatureCollection',
-        'features': [{
-          'type': 'Feature',
-          'geometry': {'type': 'Point', 'coordinates': [dLng, dLat]},
-          'properties': <String, dynamic>{},
-        }],
+        'features': [
+          {
+            'type': 'Feature',
+            'geometry': {
+              'type': 'Point',
+              'coordinates': [dLng, dLat],
+            },
+            'properties': <String, dynamic>{},
+          },
+        ],
       });
-      await c.addSymbolLayer('dest-src', 'dest-layer',
-          const SymbolLayerProperties(
-            iconImage: 'dest-pin',
-            iconAnchor: 'bottom',
-            iconSize: 1.0,
-            iconAllowOverlap: true,
-          ));
+      await c.addSymbolLayer(
+        'dest-src',
+        'dest-layer',
+        const SymbolLayerProperties(
+          iconImage: 'dest-pin',
+          iconAnchor: 'bottom',
+          iconSize: 1.0,
+          iconAllowOverlap: true,
+        ),
+      );
     }
 
     _refreshDrivers();
@@ -409,7 +483,10 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     final opacity = 0.08 + _pulseAnim.value * 0.22;
     if ((opacity - _lastPulseOpacity).abs() < 0.015) return;
     _lastPulseOpacity = opacity;
-    _ctrl?.setLayerProperties('circle-fill', FillLayerProperties(fillOpacity: opacity));
+    _ctrl?.setLayerProperties(
+      'circle-fill',
+      FillLayerProperties(fillOpacity: opacity),
+    );
   }
 
   // Refresca el viaje inmediatamente y actualiza el círculo si el radio cambió
@@ -420,10 +497,14 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     final prevRadius = _trip.searchRadiusKm;
     setState(() => _trip = latest);
     if (latest.searchRadiusKm != prevRadius &&
-        latest.originLat != null && latest.originLng != null &&
+        latest.originLat != null &&
+        latest.originLng != null &&
         _mapReady) {
       final r = (latest.searchRadiusKm ?? 0.5).clamp(0.5, 20.0);
-      _ctrl?.setGeoJsonSource('circle-src', _circleGeoJson(latest.originLat!, latest.originLng!, r));
+      _ctrl?.setGeoJsonSource(
+        'circle-src',
+        _circleGeoJson(latest.originLat!, latest.originLng!, r),
+      );
     }
   }
 
@@ -435,8 +516,10 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     final lng = _trip.originLng;
     if (lat == null || lng == null) return;
 
-    final radius  = (_trip.searchRadiusKm ?? 0.5).clamp(0.5, 20.0);
-    final drivers = await ref.read(tripsApiProvider).getNearbyDrivers(lat, lng, radius);
+    final radius = (_trip.searchRadiusKm ?? 0.5).clamp(0.5, 20.0);
+    final drivers = await ref
+        .read(tripsApiProvider)
+        .getNearbyDrivers(lat, lng, radius);
     if (!mounted) return;
     setState(() => _drivers = drivers);
     _ctrl?.setGeoJsonSource('drivers-src', _driversGeoJson(drivers));
@@ -463,10 +546,12 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
       if (mounted) context.go('/trip/${_trip.id}');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No se pudo confirmar la oferta. Intenta de nuevo.'),
-          backgroundColor: Colors.red,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo confirmar la oferta. Intenta de nuevo.'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
@@ -478,26 +563,41 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
     final coords = <List<double>>[];
     for (var i = 0; i <= steps; i++) {
       final angle = (i / steps) * 2 * math.pi;
-      final dLat  = (radiusKm / 111.32) * math.cos(angle);
-      final dLng  = (radiusKm / (111.32 * math.cos(lat * math.pi / 180))) * math.sin(angle);
+      final dLat = (radiusKm / 111.32) * math.cos(angle);
+      final dLng =
+          (radiusKm / (111.32 * math.cos(lat * math.pi / 180))) *
+          math.sin(angle);
       coords.add([lng + dLng, lat + dLat]);
     }
     return {
       'type': 'FeatureCollection',
-      'features': [{'type': 'Feature',
-        'geometry': {'type': 'Polygon', 'coordinates': [coords]},
-        'properties': {},
-      }],
+      'features': [
+        {
+          'type': 'Feature',
+          'geometry': {
+            'type': 'Polygon',
+            'coordinates': [coords],
+          },
+          'properties': {},
+        },
+      ],
     };
   }
 
   Map<String, dynamic> _driversGeoJson(List<NearbyDriver> drivers) => {
     'type': 'FeatureCollection',
-    'features': drivers.map((d) => {
-      'type': 'Feature',
-      'geometry': {'type': 'Point', 'coordinates': [d.lng, d.lat]},
-      'properties': {'id': d.id},
-    }).toList(),
+    'features': drivers
+        .map(
+          (d) => {
+            'type': 'Feature',
+            'geometry': {
+              'type': 'Point',
+              'coordinates': [d.lng, d.lat],
+            },
+            'properties': {'id': d.id},
+          },
+        )
+        .toList(),
   };
 
   // _buildTaxiIconBytes movido a módulo-nivel (ver arriba) para cacheo
@@ -506,108 +606,132 @@ class _SearchingPageState extends ConsumerState<SearchingPage>
 
   @override
   Widget build(BuildContext context) {
-    final trip      = _trip;
-    final lat       = trip.originLat;
-    final lng       = trip.originLng;
+    final trip = _trip;
+    final lat = trip.originLat;
+    final lng = trip.originLng;
     final bottomPad = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       body: Stack(
         children: [
           // ── Mapa ─────────────────────────────────────────────────────────
-          MapLibreMap(
-            onMapCreated:          _onMapCreated,
-            onStyleLoadedCallback: _onStyleLoaded,
-            styleString:           'https://tiles.openfreemap.org/styles/liberty',
-            initialCameraPosition: CameraPosition(
-              target: lat != null && lng != null
-                  ? LatLng(lat, lng)
-                  : const LatLng(-0.2295, -78.5243),
-              zoom: 13.5,
+          Padding(
+            padding: EdgeInsets.only(bottom: bottomPad),
+            child: MapLibreMap(
+              onMapCreated: _onMapCreated,
+              onStyleLoadedCallback: _onStyleLoaded,
+              styleString: 'https://tiles.openfreemap.org/styles/liberty',
+              initialCameraPosition: CameraPosition(
+                target: lat != null && lng != null
+                    ? LatLng(lat, lng)
+                    : const LatLng(-0.2295, -78.5243),
+                zoom: 13.5,
+              ),
+              myLocationEnabled: false,
+              trackCameraPosition: false,
             ),
-            myLocationEnabled:    false,
-            trackCameraPosition:  false,
           ),
 
           // ── Top bar ───────────────────────────────────────────────────────
           Positioned(
-            top:   MediaQuery.of(context).padding.top + 12,
-            left:  16, right: 16,
+            top: MediaQuery.of(context).padding.top + 12,
+            left: 16,
+            right: 16,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(28),
-                boxShadow: [BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.12),
-                  blurRadius: 10, offset: const Offset(0, 3),
-                )],
-              ),
-              child: Row(children: [
-                if (_noDrivers)
-                  const Icon(Icons.search_off_rounded,
-                      size: 20, color: AppColors.error)
-                else
-                  const SizedBox(
-                    width: 18, height: 18,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2.2, color: AppColors.primary),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
                   ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _noDrivers
-                            ? 'No encontramos conductor'
-                            : (_showOffersPanel ? 'Esperando conductores…' : 'Buscando conductor…'),
-                        style: AppTextStyles.label.copyWith(
-                          color: _noDrivers ? AppColors.error : null,
+                ],
+              ),
+              child: Row(
+                children: [
+                  if (_noDrivers)
+                    const Icon(
+                      Icons.search_off_rounded,
+                      size: 20,
+                      color: AppColors.error,
+                    )
+                  else
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _noDrivers
+                              ? 'No encontramos conductor'
+                              : (_showOffersPanel
+                                    ? 'Esperando conductores…'
+                                    : 'Buscando conductor…'),
+                          style: AppTextStyles.label.copyWith(
+                            color: _noDrivers ? AppColors.error : null,
+                          ),
+                        ),
+                        if (!_noDrivers)
+                          _ElapsedLabel(createdAt: _tripCreatedAt),
+                      ],
+                    ),
+                  ),
+                  if (!_noDrivers && _drivers.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${_drivers.length} taxis',
+                        style: AppTextStyles.caption.copyWith(
+                          color: AppColors.secondary,
                         ),
                       ),
-                      if (!_noDrivers) _ElapsedLabel(createdAt: _tripCreatedAt),
-                    ],
-                  ),
-                ),
-                if (!_noDrivers && _drivers.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Text(
-                      '${_drivers.length} taxis',
-                      style: AppTextStyles.caption
-                          .copyWith(color: AppColors.secondary),
-                    ),
-                  ),
-              ]),
+                ],
+              ),
             ),
           ),
 
           // ── Panel inferior ────────────────────────────────────────────────
           Positioned(
-            left: 0, right: 0, bottom: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
             child: _noDrivers
                 ? _NoDriversPanel(
                     bottomPad: bottomPad,
-                    retrying:  _retrying,
-                    onRetry:   _retryTrip,
-                    onCancel:  () => context.go('/home'),
+                    retrying: _retrying,
+                    onRetry: _retryTrip,
+                    onCancel: () => context.go('/home'),
                   )
                 : _showOffersPanel
-                    ? _NegotiatedPanel(
-                        trip:          trip,
-                        offers:        _offers,
-                        offerArrivals: _offerArrivals,
-                        bottomPad:     bottomPad,
-                        onSelect:      _selectOffer,
-                        onExpire:      _removeOffer,
-                      )
-                    : _MeterPanel(trip: trip, bottomPad: bottomPad),
+                ? _NegotiatedPanel(
+                    trip: trip,
+                    offers: _offers,
+                    offerArrivals: _offerArrivals,
+                    bottomPad: bottomPad,
+                    onSelect: _selectOffer,
+                    onExpire: _removeOffer,
+                  )
+                : _MeterPanel(trip: trip, bottomPad: bottomPad),
           ),
         ],
       ),
@@ -624,8 +748,8 @@ class _NoDriversPanel extends StatelessWidget {
     required this.onRetry,
     required this.onCancel,
   });
-  final double       bottomPad;
-  final bool         retrying;
+  final double bottomPad;
+  final bool retrying;
   final VoidCallback onRetry;
   final VoidCallback onCancel;
 
@@ -635,8 +759,11 @@ class _NoDriversPanel extends StatelessWidget {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.directions_car_filled_rounded,
-            size: 48, color: AppColors.error),
+        const Icon(
+          Icons.directions_car_filled_rounded,
+          size: 48,
+          color: AppColors.error,
+        ),
         const SizedBox(height: 12),
         Text(
           'Sin conductores disponibles',
@@ -657,16 +784,23 @@ class _NoDriversPanel extends StatelessWidget {
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.primary,
               padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
             ),
             child: retrying
                 ? const SizedBox(
-                    width: 20, height: 20,
+                    width: 20,
+                    height: 20,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2.2, color: Colors.white),
+                      strokeWidth: 2.2,
+                      color: Colors.white,
+                    ),
                   )
-                : const Text('Buscar de nuevo',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                : const Text(
+                    'Buscar de nuevo',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
           ),
         ),
         const SizedBox(height: 10),
@@ -676,10 +810,14 @@ class _NoDriversPanel extends StatelessWidget {
             onPressed: onCancel,
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
             ),
-            child: const Text('Volver al inicio',
-                style: TextStyle(fontSize: 15)),
+            child: const Text(
+              'Volver al inicio',
+              style: TextStyle(fontSize: 15),
+            ),
           ),
         ),
       ],
@@ -692,7 +830,7 @@ class _NoDriversPanel extends StatelessWidget {
 class _MeterPanel extends ConsumerStatefulWidget {
   const _MeterPanel({required this.trip, required this.bottomPad});
   final ActiveTrip trip;
-  final double     bottomPad;
+  final double bottomPad;
   @override
   ConsumerState<_MeterPanel> createState() => _MeterPanelState();
 }
@@ -714,10 +852,12 @@ class _MeterPanelState extends ConsumerState<_MeterPanel> {
         router.go('/home');
       } else {
         setState(() => _cancelling = false);
-        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-          content: Text('No se pudo cancelar. Intenta de nuevo.'),
-          backgroundColor: Colors.red,
-        ));
+        ScaffoldMessenger.of(ctx).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo cancelar. Intenta de nuevo.'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } catch (_) {
       if (mounted) setState(() => _cancelling = false);
@@ -755,23 +895,23 @@ class _NegotiatedPanel extends ConsumerStatefulWidget {
     required this.onSelect,
     required this.onExpire,
   });
-  final ActiveTrip                 trip;
-  final List<DriverOffer>          offers;
-  final Map<String, DateTime>      offerArrivals;
-  final double                     bottomPad;
+  final ActiveTrip trip;
+  final List<DriverOffer> offers;
+  final Map<String, DateTime> offerArrivals;
+  final double bottomPad;
   final void Function(DriverOffer) onSelect;
-  final void Function(String)      onExpire;
+  final void Function(String) onExpire;
 
   @override
   ConsumerState<_NegotiatedPanel> createState() => _NegotiatedPanelState();
 }
 
 class _NegotiatedPanelState extends ConsumerState<_NegotiatedPanel> {
-  bool _cancelling  = false;
-  bool _submitting  = false;
+  bool _cancelling = false;
+  bool _submitting = false;
   late double _currentOffer;
   Timer? _debounce;
-  int   _pendingDelta = 0;
+  int _pendingDelta = 0;
 
   @override
   void initState() {
@@ -799,10 +939,12 @@ class _NegotiatedPanelState extends ConsumerState<_NegotiatedPanel> {
         router.go('/home');
       } else {
         setState(() => _cancelling = false);
-        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-          content: Text('No se pudo cancelar. Intenta de nuevo.'),
-          backgroundColor: Colors.red,
-        ));
+        ScaffoldMessenger.of(ctx).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo cancelar. Intenta de nuevo.'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } catch (_) {
       if (mounted) setState(() => _cancelling = false);
@@ -812,8 +954,8 @@ class _NegotiatedPanelState extends ConsumerState<_NegotiatedPanel> {
   void _scheduleAdjust(int delta) {
     if (_submitting) return;
     setState(() {
-      _pendingDelta   += delta;
-      _currentOffer    = (_currentOffer + delta * 0.25).clamp(0.0, 999.0);
+      _pendingDelta += delta;
+      _currentOffer = (_currentOffer + delta * 0.25).clamp(0.0, 999.0);
     });
     _debounce?.cancel();
     _debounce = Timer(const Duration(seconds: 1), _flushAdjust);
@@ -822,13 +964,19 @@ class _NegotiatedPanelState extends ConsumerState<_NegotiatedPanel> {
   Future<void> _flushAdjust() async {
     if (_pendingDelta == 0) return;
     final targetPrice = _currentOffer;
-    setState(() { _submitting = true; _pendingDelta = 0; });
+    setState(() {
+      _submitting = true;
+      _pendingDelta = 0;
+    });
     try {
-      final confirmed = await ref.read(tripsApiProvider).setOffer(widget.trip.id, targetPrice);
+      final confirmed = await ref
+          .read(tripsApiProvider)
+          .setOffer(widget.trip.id, targetPrice);
       if (mounted) setState(() => _currentOffer = confirmed);
     } on DioException catch (e) {
       if (mounted) {
-        final msg = (e.response?.data as Map?)?['message'] ?? 'Error al ajustar oferta';
+        final msg =
+            (e.response?.data as Map?)?['message'] ?? 'Error al ajustar oferta';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(msg.toString()), backgroundColor: Colors.red),
         );
@@ -842,101 +990,115 @@ class _NegotiatedPanelState extends ConsumerState<_NegotiatedPanel> {
   Widget build(BuildContext context) {
     final isMeter = widget.trip.fareMode == 'meter';
     return _PanelShell(
-    bottomPad: widget.bottomPad,
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Header: oferta o modo taxímetro
-        Row(children: [
-          Icon(
-            isMeter ? Icons.speed : Icons.local_offer_outlined,
-            size: 16, color: AppColors.gray500,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            isMeter ? 'Modo taxímetro' : 'Tu oferta: \$${_currentOffer.toStringAsFixed(2)}',
-            style: AppTextStyles.label,
-          ),
-          const Spacer(),
-          if (!isMeter && widget.offers.isEmpty) ...[
-            _AdjustButton(
-              icon: Icons.remove,
-              onTap: _submitting ? null : () => _scheduleAdjust(-1),
-            ),
-            const SizedBox(width: 6),
-            _AdjustButton(
-              icon: Icons.add,
-              onTap: _submitting ? null : () => _scheduleAdjust(1),
-            ),
-            const SizedBox(width: 8),
-          ],
-          _RouteChip(trip: widget.trip),
-        ]),
-
-        const SizedBox(height: 12),
-
-        // Lista de ofertas o estado vacío
-        if (widget.offers.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(children: [
-              const SizedBox(
-                width: 16, height: 16,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: AppColors.primary),
+      bottomPad: widget.bottomPad,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header: oferta o modo taxímetro
+          Row(
+            children: [
+              Icon(
+                isMeter ? Icons.speed : Icons.local_offer_outlined,
+                size: 16,
+                color: AppColors.gray500,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Text(
-                'Esperando que los conductores respondan…',
-                style: AppTextStyles.caption.copyWith(color: AppColors.gray500),
+                isMeter
+                    ? 'Modo taxímetro'
+                    : 'Tu oferta: \$${_currentOffer.toStringAsFixed(2)}',
+                style: AppTextStyles.label,
               ),
-            ]),
-          )
-        else ...[
-          Text(
-            '${widget.offers.length} oferta${widget.offers.length > 1 ? 's' : ''} recibida${widget.offers.length > 1 ? 's' : ''}',
-            style: AppTextStyles.caption.copyWith(color: AppColors.gray500),
+              const Spacer(),
+              if (!isMeter && widget.offers.isEmpty) ...[
+                _AdjustButton(
+                  icon: Icons.remove,
+                  onTap: _submitting ? null : () => _scheduleAdjust(-1),
+                ),
+                const SizedBox(width: 6),
+                _AdjustButton(
+                  icon: Icons.add,
+                  onTap: _submitting ? null : () => _scheduleAdjust(1),
+                ),
+                const SizedBox(width: 8),
+              ],
+              _RouteChip(trip: widget.trip),
+            ],
           ),
-          const SizedBox(height: 8),
-          ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.40,
+
+          const SizedBox(height: 12),
+
+          // Lista de ofertas o estado vacío
+          if (widget.offers.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Esperando que los conductores respondan…',
+                    style: AppTextStyles.caption.copyWith(
+                      color: AppColors.gray500,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else ...[
+            Text(
+              '${widget.offers.length} oferta${widget.offers.length > 1 ? 's' : ''} recibida${widget.offers.length > 1 ? 's' : ''}',
+              style: AppTextStyles.caption.copyWith(color: AppColors.gray500),
             ),
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: widget.offers.length,
-              itemBuilder: (_, i) {
-                final offer = widget.offers[i];
-                return _OfferCard(
-                  offer:              offer,
-                  originAddress:      widget.trip.originAddress,
-                  destinationAddress: widget.trip.destinationAddress,
-                  arrivedAt:          widget.offerArrivals[offer.offerId] ?? DateTime.now(),
-                  onAccept:           () => widget.onSelect(offer),
-                  onIgnore:           () {
-                    ref.read(tripsApiProvider).rejectOffer(
-                      widget.trip.id, offer.offerId,
-                    ).catchError((_) {});
-                    widget.onExpire(offer.offerId);
-                  },
-                  onExpire:           () => widget.onExpire(offer.offerId),
-                );
-              },
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.40,
+              ),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: widget.offers.length,
+                itemBuilder: (_, i) {
+                  final offer = widget.offers[i];
+                  return _OfferCard(
+                    offer: offer,
+                    originAddress: widget.trip.originAddress,
+                    destinationAddress: widget.trip.destinationAddress,
+                    arrivedAt:
+                        widget.offerArrivals[offer.offerId] ?? DateTime.now(),
+                    onAccept: () => widget.onSelect(offer),
+                    onIgnore: () {
+                      ref
+                          .read(tripsApiProvider)
+                          .rejectOffer(widget.trip.id, offer.offerId)
+                          .catchError((_) {});
+                      widget.onExpire(offer.offerId);
+                    },
+                    onExpire: () => widget.onExpire(offer.offerId),
+                  );
+                },
+              ),
             ),
+          ],
+
+          const SizedBox(height: 14),
+          const Divider(height: 1, color: AppColors.gray100),
+          const SizedBox(height: 12),
+
+          _CancelButton(
+            cancelling: _cancelling,
+            onCancel: () => _doCancel(context),
           ),
         ],
-
-        const SizedBox(height: 14),
-        const Divider(height: 1, color: AppColors.gray100),
-        const SizedBox(height: 12),
-
-        _CancelButton(
-          cancelling: _cancelling,
-          onCancel: () => _doCancel(context),
-        ),
-      ],
-    ),
-  );
+      ),
+    );
   }
 }
 
@@ -952,10 +1114,10 @@ class _OfferCard extends StatefulWidget {
     required this.onIgnore,
     required this.onExpire,
   });
-  final DriverOffer  offer;
-  final String       originAddress;
-  final String       destinationAddress;
-  final DateTime     arrivedAt;
+  final DriverOffer offer;
+  final String originAddress;
+  final String destinationAddress;
+  final DateTime arrivedAt;
   final VoidCallback onAccept;
   final VoidCallback onIgnore;
   final VoidCallback onExpire;
@@ -969,11 +1131,11 @@ class _OfferCardState extends State<_OfferCard>
   static const _totalSeconds = 20;
 
   late AnimationController _ctrl;
-  late Animation<double>   _fade;
-  late Animation<Offset>   _slide;
-  late int  _seconds;
-  Timer?    _countdown;
-  bool      _loading = false;
+  late Animation<double> _fade;
+  late Animation<Offset> _slide;
+  late int _seconds;
+  Timer? _countdown;
+  bool _loading = false;
 
   @override
   void initState() {
@@ -981,10 +1143,15 @@ class _OfferCardState extends State<_OfferCard>
     final elapsed = DateTime.now().difference(widget.arrivedAt).inSeconds;
     _seconds = (_totalSeconds - elapsed).clamp(0, _totalSeconds);
 
-    _ctrl  = AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
-    _fade  = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-    _slide = Tween<Offset>(begin: const Offset(0, 0.12), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    );
+    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.12),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
     _ctrl.forward();
 
     if (_seconds > 0) {
@@ -994,7 +1161,9 @@ class _OfferCardState extends State<_OfferCard>
         if (_seconds <= 0) _exit(widget.onExpire);
       });
     } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _exit(widget.onExpire));
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _exit(widget.onExpire),
+      );
     }
   }
 
@@ -1013,10 +1182,12 @@ class _OfferCardState extends State<_OfferCard>
 
   @override
   Widget build(BuildContext context) {
-    final offer      = widget.offer;
-    final isMeter    = offer.isMeter;
-    final isCounter  = offer.isCounter;
-    final priceColor = isMeter ? Colors.teal : (isCounter ? const Color(0xFFF57C00) : AppColors.success);
+    final offer = widget.offer;
+    final isMeter = offer.isMeter;
+    final isCounter = offer.isCounter;
+    final priceColor = isMeter
+        ? Colors.teal
+        : (isCounter ? const Color(0xFFF57C00) : AppColors.success);
 
     return FadeTransition(
       opacity: _fade,
@@ -1028,7 +1199,11 @@ class _OfferCardState extends State<_OfferCard>
             color: Colors.white,
             borderRadius: BorderRadius.circular(24),
             boxShadow: const [
-              BoxShadow(color: Colors.black12, blurRadius: 20, offset: Offset(0, -4)),
+              BoxShadow(
+                color: Colors.black12,
+                blurRadius: 20,
+                offset: Offset(0, -4),
+              ),
             ],
           ),
           child: Column(
@@ -1037,7 +1212,8 @@ class _OfferCardState extends State<_OfferCard>
               const SizedBox(height: 12),
               // Handle bar
               Container(
-                width: 40, height: 4,
+                width: 40,
+                height: 4,
                 decoration: BoxDecoration(
                   color: AppColors.gray200,
                   borderRadius: BorderRadius.circular(2),
@@ -1048,100 +1224,178 @@ class _OfferCardState extends State<_OfferCard>
               // ── Info del conductor ─────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Row(children: [
-                  // Avatar
-                  Container(
-                    width: 48, height: 48,
-                    decoration: const BoxDecoration(
-                      color: AppColors.primaryLight,
-                      shape: BoxShape.circle,
-                    ),
-                    child: offer.driverPhoto != null
-                        ? ClipOval(
-                            child: CachedNetworkImage(
-                              imageUrl: offer.driverPhoto!,
-                              width: 48, height: 48, fit: BoxFit.cover,
-                              errorWidget: (_, __, ___) => const Icon(
-                                  Icons.person, color: AppColors.secondary, size: 26),
-                              placeholder: (_, __) => const SizedBox.shrink(),
-                            ),
-                          )
-                        : const Icon(Icons.person, color: AppColors.secondary, size: 26),
-                  ),
-                  const SizedBox(width: 12),
-                  // Nombre + rating + placa
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(offer.driverName, style: AppTextStyles.label),
-                        if (offer.coopName != null)
-                          Text(offer.coopName!,
-                              style: AppTextStyles.caption.copyWith(
-                                  color: AppColors.primary, fontWeight: FontWeight.w600)),
-                        Row(children: [
-                          if (offer.driverRating != null) ...[
-                            const Icon(Icons.star_rounded, size: 14, color: Color(0xFFF59E0B)),
-                            const SizedBox(width: 3),
-                            Text(
-                              offer.driverRating!.toStringAsFixed(1),
-                              style: AppTextStyles.caption.copyWith(color: AppColors.gray500),
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-                          if (offer.vehiclePlate != null) ...[
-                            const Icon(Icons.directions_car_outlined, size: 13, color: AppColors.gray400),
-                            const SizedBox(width: 3),
-                            Text(
-                              offer.vehiclePlate!,
-                              style: AppTextStyles.caption.copyWith(color: AppColors.gray500),
-                            ),
-                          ],
-                        ]),
-                      ],
-                    ),
-                  ),
-                  // Precio + countdown
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: priceColor,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: isMeter
-                            ? const Row(mainAxisSize: MainAxisSize.min, children: [
-                                Icon(Icons.speed, size: 13, color: Colors.white),
-                                SizedBox(width: 4),
-                                Text('Taxímetro', style: TextStyle(
-                                  color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
-                              ])
-                            : Text(
-                                '\$${offer.amount.toStringAsFixed(2)}',
-                                style: AppTextStyles.label.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                  color: isCounter ? Colors.white : AppColors.secondary,
-                                ),
-                              ),
+                child: Row(
+                  children: [
+                    // Avatar
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: const BoxDecoration(
+                        color: AppColors.primaryLight,
+                        shape: BoxShape.circle,
                       ),
-                      if (!isMeter && isCounter)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Text(
-                            'Contraoferta',
-                            style: TextStyle(
-                              fontSize: 10, color: priceColor,
-                              fontWeight: FontWeight.w600,
+                      child: offer.driverPhoto != null
+                          ? ClipOval(
+                              child: CachedNetworkImage(
+                                imageUrl: offer.driverPhoto!,
+                                width: 48,
+                                height: 48,
+                                fit: BoxFit.cover,
+                                errorWidget: (_, __, ___) => const Icon(
+                                  Icons.person,
+                                  color: AppColors.secondary,
+                                  size: 26,
+                                ),
+                                placeholder: (_, __) => const SizedBox.shrink(),
+                              ),
+                            )
+                          : const Icon(
+                              Icons.person,
+                              color: AppColors.secondary,
+                              size: 26,
+                            ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Nombre + rating + placa
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(offer.driverName, style: AppTextStyles.label),
+                          if (offer.coopName != null)
+                            Text(
+                              offer.coopName!,
+                              style: AppTextStyles.caption.copyWith(
+                                color: AppColors.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          Row(
+                            children: [
+                              if (offer.driverRating != null) ...[
+                                const Icon(
+                                  Icons.star_rounded,
+                                  size: 14,
+                                  color: Color(0xFFF59E0B),
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  offer.driverRating!.toStringAsFixed(1),
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: AppColors.gray500,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                              if (offer.vehiclePlate != null) ...[
+                                const Icon(
+                                  Icons.directions_car_outlined,
+                                  size: 13,
+                                  color: AppColors.gray400,
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  offer.vehiclePlate!,
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: AppColors.gray500,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          if (offer.driverTotalTrips != null || offer.vehicleColor != null) ...[
+                            const SizedBox(height: 2),
+                            Row(
+                              children: [
+                                if (offer.driverTotalTrips != null) ...[
+                                  const Icon(
+                                    Icons.route_outlined,
+                                    size: 13,
+                                    color: AppColors.gray400,
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    '${offer.driverTotalTrips} viajes',
+                                    style: AppTextStyles.caption.copyWith(
+                                      color: AppColors.gray500,
+                                    ),
+                                  ),
+                                  if (offer.vehicleColor != null) const SizedBox(width: 8),
+                                ],
+                                if (offer.vehicleColor != null)
+                                  Text(
+                                    offer.vehicleColor!,
+                                    style: AppTextStyles.caption.copyWith(
+                                      color: AppColors.gray500,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    // Precio + countdown
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: priceColor,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: isMeter
+                              ? const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.speed,
+                                      size: 13,
+                                      color: Colors.white,
+                                    ),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'Taxímetro',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : Text(
+                                  '\$${offer.amount.toStringAsFixed(2)}',
+                                  style: AppTextStyles.label.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    color: isCounter
+                                        ? Colors.white
+                                        : AppColors.secondary,
+                                  ),
+                                ),
+                        ),
+                        if (!isMeter && isCounter)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              'Contraoferta',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: priceColor,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
-                        ),
-                      const SizedBox(height: 4),
-                      _CountdownRing(seconds: _seconds, total: _totalSeconds),
-                    ],
-                  ),
-                ]),
+                        const SizedBox(height: 4),
+                        _CountdownRing(seconds: _seconds, total: _totalSeconds),
+                      ],
+                    ),
+                  ],
+                ),
               ),
 
               const SizedBox(height: 14),
@@ -1151,24 +1405,30 @@ class _OfferCardState extends State<_OfferCard>
               // ── Ruta ──────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Column(children: [
-                  _OfferRouteRow(
-                    icon:  Icons.radio_button_checked,
-                    color: AppColors.success,
-                    text:  widget.originAddress.isEmpty
-                               ? 'Tu ubicación'
-                               : widget.originAddress,
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(left: 7),
-                    child: Container(height: 14, width: 2, color: AppColors.gray200),
-                  ),
-                  _OfferRouteRow(
-                    icon:  Icons.location_on,
-                    color: AppColors.error,
-                    text:  widget.destinationAddress,
-                  ),
-                ]),
+                child: Column(
+                  children: [
+                    _OfferRouteRow(
+                      icon: Icons.radio_button_checked,
+                      color: AppColors.success,
+                      text: widget.originAddress.isEmpty
+                          ? 'Tu ubicación'
+                          : widget.originAddress,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 7),
+                      child: Container(
+                        height: 14,
+                        width: 2,
+                        color: AppColors.gray200,
+                      ),
+                    ),
+                    _OfferRouteRow(
+                      icon: Icons.location_on,
+                      color: AppColors.error,
+                      text: widget.destinationAddress,
+                    ),
+                  ],
+                ),
               ),
 
               // Distancia al origen / ETA
@@ -1176,18 +1436,26 @@ class _OfferCardState extends State<_OfferCard>
                 const SizedBox(height: 8),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(children: [
-                    const Icon(Icons.route_outlined, size: 13, color: AppColors.gray400),
-                    const SizedBox(width: 6),
-                    Text(
-                      [
-                        if (offer.distanceToOriginKm != null)
-                          '${offer.distanceToOriginKm!.toStringAsFixed(1)} km al origen',
-                        if (offer.etaMin != null) '~${offer.etaMin} min',
-                      ].join(' · '),
-                      style: AppTextStyles.caption.copyWith(color: AppColors.gray500),
-                    ),
-                  ]),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.route_outlined,
+                        size: 13,
+                        color: AppColors.gray400,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        [
+                          if (offer.distanceToOriginKm != null)
+                            '${offer.distanceToOriginKm!.toStringAsFixed(1)} km al origen',
+                          if (offer.etaMin != null) '~${offer.etaMin} min',
+                        ].join(' · '),
+                        style: AppTextStyles.caption.copyWith(
+                          color: AppColors.gray500,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
 
@@ -1196,44 +1464,67 @@ class _OfferCardState extends State<_OfferCard>
               // ── Botones ────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                child: Row(children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _loading ? null : () => _exit(widget.onIgnore),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: AppColors.gray300),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        padding: const EdgeInsets.symmetric(vertical: 13),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _loading
+                            ? null
+                            : () => _exit(widget.onIgnore),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppColors.gray300),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                        ),
+                        child: Text(
+                          'Ignorar',
+                          style: AppTextStyles.label.copyWith(
+                            color: AppColors.gray500,
+                          ),
+                        ),
                       ),
-                      child: Text('Ignorar',
-                          style: AppTextStyles.label.copyWith(color: AppColors.gray500)),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton(
-                      onPressed: _loading ? null : () {
-                        setState(() => _loading = true);
-                        widget.onAccept();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        elevation: 0,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton(
+                        onPressed: _loading
+                            ? null
+                            : () {
+                                setState(() => _loading = true);
+                                widget.onAccept();
+                              },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          elevation: 0,
+                        ),
+                        child: _loading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.black,
+                                ),
+                              )
+                            : Text(
+                                isMeter
+                                    ? 'Aceptar'
+                                    : 'Aceptar \$${offer.amount.toStringAsFixed(2)}',
+                                style: AppTextStyles.label.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                       ),
-                      child: _loading
-                          ? const SizedBox(width: 18, height: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.black))
-                          : Text(
-                              isMeter ? 'Aceptar' : 'Aceptar \$${offer.amount.toStringAsFixed(2)}',
-                              style: AppTextStyles.label.copyWith(fontWeight: FontWeight.w700),
-                            ),
                     ),
-                  ),
-                ]),
+                  ],
+                ),
               ),
             ],
           ),
@@ -1246,10 +1537,14 @@ class _OfferCardState extends State<_OfferCard>
 // ── Helpers visuales ──────────────────────────────────────────────────────────
 
 class _OfferRouteRow extends StatelessWidget {
-  const _OfferRouteRow({required this.icon, required this.color, required this.text});
+  const _OfferRouteRow({
+    required this.icon,
+    required this.color,
+    required this.text,
+  });
   final IconData icon;
-  final Color    color;
-  final String   text;
+  final Color color;
+  final String text;
 
   @override
   Widget build(BuildContext context) => Row(
@@ -1278,21 +1573,25 @@ class _CountdownRing extends StatelessWidget {
   Widget build(BuildContext context) {
     final progress = (seconds / total).clamp(0.0, 1.0);
     return SizedBox(
-      width: 38, height: 38,
-      child: Stack(alignment: Alignment.center, children: [
-        CircularProgressIndicator(
-          value: progress,
-          strokeWidth: 3,
-          backgroundColor: AppColors.gray100,
-          valueColor: AlwaysStoppedAnimation(
-            progress > 0.4 ? AppColors.primary : AppColors.error,
+      width: 38,
+      height: 38,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          CircularProgressIndicator(
+            value: progress,
+            strokeWidth: 3,
+            backgroundColor: AppColors.gray100,
+            valueColor: AlwaysStoppedAnimation(
+              progress > 0.4 ? AppColors.primary : AppColors.error,
+            ),
           ),
-        ),
-        Text(
-          '$seconds',
-          style: AppTextStyles.caption.copyWith(fontWeight: FontWeight.w700),
-        ),
-      ]),
+          Text(
+            '$seconds',
+            style: AppTextStyles.caption.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1310,7 +1609,7 @@ class _PanelShell extends StatelessWidget {
       color: Colors.white,
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       boxShadow: [
-        BoxShadow(color: Colors.black12, blurRadius: 20, offset: Offset(0, -4))
+        BoxShadow(color: Colors.black12, blurRadius: 20, offset: Offset(0, -4)),
       ],
     ),
     padding: EdgeInsets.fromLTRB(20, 12, 20, bottomPad + 16),
@@ -1319,7 +1618,8 @@ class _PanelShell extends StatelessWidget {
       children: [
         Center(
           child: Container(
-            width: 36, height: 4,
+            width: 36,
+            height: 4,
             decoration: BoxDecoration(
               color: AppColors.gray300,
               borderRadius: BorderRadius.circular(2),
@@ -1341,7 +1641,11 @@ class _RouteChip extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      const Icon(Icons.radio_button_checked, size: 10, color: AppColors.success),
+      const Icon(
+        Icons.radio_button_checked,
+        size: 10,
+        color: AppColors.success,
+      ),
       const SizedBox(width: 4),
       SizedBox(
         width: 80,
@@ -1363,32 +1667,42 @@ class _RouteRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      Row(children: [
-        const Icon(Icons.radio_button_checked, size: 15, color: AppColors.success),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            trip.originAddress.isEmpty ? 'Tu ubicación' : trip.originAddress,
-            style: AppTextStyles.body, maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+      Row(
+        children: [
+          const Icon(
+            Icons.radio_button_checked,
+            size: 15,
+            color: AppColors.success,
           ),
-        ),
-      ]),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              trip.originAddress.isEmpty ? 'Tu ubicación' : trip.originAddress,
+              style: AppTextStyles.body,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
       Padding(
         padding: const EdgeInsets.only(left: 6.5),
         child: Container(width: 1, height: 14, color: AppColors.gray200),
       ),
-      Row(children: [
-        const Icon(Icons.location_on, size: 15, color: AppColors.error),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            trip.destinationAddress,
-            style: AppTextStyles.body, maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+      Row(
+        children: [
+          const Icon(Icons.location_on, size: 15, color: AppColors.error),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              trip.destinationAddress,
+              style: AppTextStyles.body,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-        ),
-      ]),
+        ],
+      ),
     ],
   );
 }
@@ -1436,7 +1750,7 @@ class _ElapsedLabelState extends State<_ElapsedLabel> {
 
 class _AdjustButton extends StatelessWidget {
   const _AdjustButton({required this.icon, this.onTap});
-  final IconData      icon;
+  final IconData icon;
   final VoidCallback? onTap;
 
   @override
@@ -1444,15 +1758,21 @@ class _AdjustButton extends StatelessWidget {
     onTap: onTap,
     behavior: HitTestBehavior.opaque,
     child: SizedBox(
-      width: 48, height: 48,
+      width: 48,
+      height: 48,
       child: Center(
         child: Container(
-          width: 28, height: 28,
+          width: 28,
+          height: 28,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: onTap != null ? AppColors.primary : AppColors.gray100,
           ),
-          child: Icon(icon, size: 16, color: onTap != null ? Colors.black : AppColors.gray500),
+          child: Icon(
+            icon,
+            size: 16,
+            color: onTap != null ? Colors.black : AppColors.gray500,
+          ),
         ),
       ),
     ),
@@ -1461,7 +1781,7 @@ class _AdjustButton extends StatelessWidget {
 
 class _CancelButton extends StatelessWidget {
   const _CancelButton({required this.cancelling, required this.onCancel});
-  final bool         cancelling;
+  final bool cancelling;
   final VoidCallback onCancel;
 
   @override
@@ -1475,10 +1795,18 @@ class _CancelButton extends StatelessWidget {
       ),
       onPressed: cancelling ? null : () => _confirm(context),
       child: cancelling
-          ? const SizedBox(width: 18, height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error))
-          : Text('Cancelar solicitud',
-              style: AppTextStyles.label.copyWith(color: AppColors.error)),
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.error,
+              ),
+            )
+          : Text(
+              'Cancelar solicitud',
+              style: AppTextStyles.label.copyWith(color: AppColors.error),
+            ),
     ),
   );
 

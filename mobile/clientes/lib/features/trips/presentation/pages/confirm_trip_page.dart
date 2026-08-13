@@ -136,6 +136,10 @@ class _ConfirmTripPageState extends ConsumerState<ConfirmTripPage> {
                   selected:  _paymentMethodSlug,
                   onChanged: (v) => setState(() => _paymentMethodSlug = v),
                 ),
+                if (_paymentMethodSlug == 'card') ...[
+                  const SizedBox(height: 10),
+                  const _CardFeeNotice(),
+                ],
                 if (_fareMode == 'negotiated') ...[
                   const SizedBox(height: 16),
                   _OfferCard(
@@ -559,6 +563,37 @@ class _PaymentMethodCard extends StatelessWidget {
               title:    'Tarjeta',
               subtitle: 'Visa, Mastercard, Diners, Discover',
               onTap:    () => onChanged('card'),
+            ),
+          ],
+        ),
+      );
+}
+
+class _CardFeeNotice extends StatelessWidget {
+  const _CardFeeNotice();
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF8E1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFFFE082)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.info_outline, size: 18, color: Color(0xFFF59E0B)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'El pago con tarjeta incluye un recargo del 5.75%, correspondiente '
+                'al uso de la pasarela de pagos segura — no es un cobro de Pana Taxi.',
+                style: AppTextStyles.caption.copyWith(
+                  color: const Color(0xFF92400E),
+                  height: 1.4,
+                ),
+              ),
             ),
           ],
         ),

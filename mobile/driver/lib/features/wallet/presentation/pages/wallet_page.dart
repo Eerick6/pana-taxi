@@ -216,6 +216,33 @@ class _BalanceCard extends StatelessWidget {
               onPressed: onRecharge,
             ),
           ),
+          if (wallet.cardBalance > 0) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.credit_card, color: AppColors.primary, size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Por cobrar (viajes con tarjeta)',
+                            style: AppTextStyles.caption.copyWith(color: AppColors.gray400)),
+                        Text(_fmtCurrency(wallet.cardBalance),
+                            style: AppTextStyles.label.copyWith(color: AppColors.white)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

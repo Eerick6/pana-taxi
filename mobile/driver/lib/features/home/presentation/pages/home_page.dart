@@ -8,8 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:go_router/go_router.dart';
-import 'package:flutter/foundation.dart';
-import 'package:google_navigation_flutter/google_navigation_flutter.dart' show GoogleMapsNavigator;
 import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/network/dio_client.dart';
@@ -51,18 +49,21 @@ class HomePage extends ConsumerStatefulWidget {
   ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver {
+class _HomePageState extends ConsumerState<HomePage>
+    with WidgetsBindingObserver {
   MapLibreMapController? _mapController;
   Symbol? _locationSymbol;
   bool _imageReady = false;
   StreamSubscription<geo.Position>? _locationSub;
   geo.Position? _pendingPosition;
   bool _resumeChecked = false;
+  SocketClient? _socket; // cached so dispose() can call off() without ref
 
   // Lista de viajes disponibles (modelo InDriver)
   final Map<String, TripAlertData> _availableTrips = {};
   final Set<String> _pendingOffers = {}; // tripIds donde ya enviamos oferta
-  bool _navigatedToTrip = false; // evita setState tras context.go al viaje activo
+  bool _navigatedToTrip =
+      false; // evita setState tras context.go al viaje activo
 
   @override
   void initState() {
@@ -73,7 +74,6 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadInitialTrips();
       _checkPendingTrip();
-      _preAcceptNavigationTerms();
     });
   }
 
@@ -119,48 +119,65 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
   }
 
   Future<void> _initSocketAndListen() async {
-    final socket = ref.read(socketClientProvider);
-    socket.onAuthFailed = () {
+    _socket = ref.read(socketClientProvider);
+    _socket!.onAuthFailed = () {
       ref.read(authStateProvider.notifier).logout().then((_) {
         if (mounted) context.go('/auth/login');
       });
     };
-    await socket.connect();
+    // Sesión única por cuenta: el backend avisa por socket cuando alguien
+    // inicia sesión en otro dispositivo, para no esperar a que este
+    // dispositivo falle en su próxima llamada a la API.
+    _socket!.on('session.revoked', (_) {
+      _showSessionEndedDialog(
+        title: 'Sesión cerrada',
+        message: 'Se inició sesión con esta cuenta en otro dispositivo.',
+      );
+    });
+    await _socket!.connect();
     _listenForTrips();
   }
 
-  // Muestra el dialog de términos de Google Navigation en home (antes de cualquier viaje)
-  // para que cuando el taxista acepte un trip los términos ya estén persistidos en disco.
-  Future<void> _preAcceptNavigationTerms() async {
-    if (!mounted) return;
-    if (await GoogleMapsNavigator.areTermsAccepted()) return;
-    final accepted = await GoogleMapsNavigator.showTermsAndConditionsDialog(
-      'Pana Taxista',
-      'Pana Taxista',
+  bool _sessionEndedDialogShown = false;
+
+  void _showSessionEndedDialog({required String title, required String message}) {
+    if (_sessionEndedDialogShown || !mounted) return;
+    _sessionEndedDialogShown = true;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              ref.read(authStateProvider.notifier).logout().then((_) {
+                if (mounted) context.go('/auth/login');
+              });
+            },
+            child: const Text('Entendido'),
+          ),
+        ],
+      ),
     );
-    if (!accepted) return;
-    // Android persiste la aceptación en un hilo secundario — esperar hasta que sea visible
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      for (var i = 0; i < 20 && !await GoogleMapsNavigator.areTermsAccepted(); i++) {
-        await Future.delayed(const Duration(milliseconds: 250));
-      }
-    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _locationSub?.cancel();
-    final socket = ref.read(socketClientProvider);
-    socket.off('driver.approved');
-    socket.off('vehicle.approved');
-    socket.off('document.approved');
-    socket.off('trip.new');
-    socket.off('trip.taken');
-    socket.off('trip.cancelled');
-    socket.off('trip.radius_expanded');
-    socket.off('trip.offer_accepted');
-    socket.off('trip.offer_rejected');
+    _socket?.off('driver.approved');
+    _socket?.off('vehicle.approved');
+    _socket?.off('document.approved');
+    _socket?.off('trip.new');
+    _socket?.off('trip.taken');
+    _socket?.off('trip.cancelled');
+    _socket?.off('trip.radius_expanded');
+    _socket?.off('trip.offer_accepted');
+    _socket?.off('trip.offer_rejected');
+    _socket?.off('session.revoked');
     super.dispose();
   }
 
@@ -191,7 +208,8 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       if (trip == null) return;
 
       final pos = _pendingPosition;
-      if (pos != null && !driverWithinRadius(pos.latitude, pos.longitude, trip)) return;
+      if (pos != null && !driverWithinRadius(pos.latitude, pos.longitude, trip))
+        return;
 
       final existing = _availableTrips[trip.tripId];
       final isNew = existing == null;
@@ -199,20 +217,20 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       // Si ya teníamos este viaje, preservar client info que el evento expansion omite
       final updated = (existing != null && trip.clientName == null)
           ? TripAlertData(
-              tripId:            trip.tripId,
-              originAddress:     trip.originAddress,
+              tripId: trip.tripId,
+              originAddress: trip.originAddress,
               destinationAddress: trip.destinationAddress,
-              originLat:         trip.originLat,
-              originLng:         trip.originLng,
-              searchRadiusKm:    trip.searchRadiusKm,
-              fareMode:          trip.fareMode,
-              suggestedFare:     trip.suggestedFare,
-              clientOffer:       trip.clientOffer,
-              distanceKm:        trip.distanceKm,
-              clientName:        existing.clientName,
-              clientPhoto:       existing.clientPhoto,
-              clientRating:      existing.clientRating,
-              clientTotalTrips:  existing.clientTotalTrips,
+              originLat: trip.originLat,
+              originLng: trip.originLng,
+              searchRadiusKm: trip.searchRadiusKm,
+              fareMode: trip.fareMode,
+              suggestedFare: trip.suggestedFare,
+              clientOffer: trip.clientOffer,
+              distanceKm: trip.distanceKm,
+              clientName: existing.clientName,
+              clientPhoto: existing.clientPhoto,
+              clientRating: existing.clientRating,
+              clientTotalTrips: existing.clientTotalTrips,
             )
           : trip;
 
@@ -281,22 +299,24 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
         final newRadius = (map['search_radius_km'] as num?)?.toDouble();
         if (newRadius != null) {
           final old = _availableTrips[tripId]!;
-          setState(() => _availableTrips[tripId] = TripAlertData(
-            tripId: old.tripId,
-            originAddress: old.originAddress,
-            destinationAddress: old.destinationAddress,
-            originLat: old.originLat,
-            originLng: old.originLng,
-            searchRadiusKm: newRadius,
-            fareMode: old.fareMode,
-            suggestedFare: old.suggestedFare,
-            clientOffer: old.clientOffer,
-            distanceKm: old.distanceKm,
-            clientName: old.clientName,
-            clientPhoto: old.clientPhoto,
-            clientRating: old.clientRating,
-            clientTotalTrips: old.clientTotalTrips,
-          ));
+          setState(
+            () => _availableTrips[tripId] = TripAlertData(
+              tripId: old.tripId,
+              originAddress: old.originAddress,
+              destinationAddress: old.destinationAddress,
+              originLat: old.originLat,
+              originLng: old.originLng,
+              searchRadiusKm: newRadius,
+              fareMode: old.fareMode,
+              suggestedFare: old.suggestedFare,
+              clientOffer: old.clientOffer,
+              distanceKm: old.distanceKm,
+              clientName: old.clientName,
+              clientPhoto: old.clientPhoto,
+              clientRating: old.clientRating,
+              clientTotalTrips: old.clientTotalTrips,
+            ),
+          );
         }
         return;
       }
@@ -305,7 +325,8 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       final trip = TripAlertData.fromEvent(map);
       if (trip == null) return;
       final pos = _pendingPosition;
-      if (pos != null && !driverWithinRadius(pos.latitude, pos.longitude, trip)) return;
+      if (pos != null && !driverWithinRadius(pos.latitude, pos.longitude, trip))
+        return;
       setState(() => _availableTrips[trip.tripId] = trip);
       _playTripSound();
     });
@@ -398,14 +419,16 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
 
   void _playTripSound() {
     AudioPlayer()
-      ..setAudioContext(AudioContext(
-        android: const AudioContextAndroid(
-          usageType: AndroidUsageType.alarm,
-          contentType: AndroidContentType.music,
-          audioFocus: AndroidAudioFocus.gain,
-          stayAwake: true,
+      ..setAudioContext(
+        AudioContext(
+          android: const AudioContextAndroid(
+            usageType: AndroidUsageType.alarm,
+            contentType: AndroidContentType.music,
+            audioFocus: AndroidAudioFocus.gain,
+            stayAwake: true,
+          ),
         ),
-      ))
+      )
       ..play(AssetSource('sounds/trip_alert.wav')).then((_) async {
         await Future.delayed(const Duration(milliseconds: 900));
         AudioPlayer().play(AssetSource('sounds/trip_alert.wav')).ignore();
@@ -427,7 +450,9 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
 
     try {
       final pos = await geo.Geolocator.getCurrentPosition(
-        locationSettings: const geo.LocationSettings(accuracy: geo.LocationAccuracy.high),
+        locationSettings: const geo.LocationSettings(
+          accuracy: geo.LocationAccuracy.high,
+        ),
       );
       _pendingPosition = pos;
       if (_imageReady) {
@@ -436,21 +461,22 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       }
     } catch (_) {}
 
-    _locationSub = geo.Geolocator.getPositionStream(
-      locationSettings: const geo.LocationSettings(
-        accuracy: geo.LocationAccuracy.high,
-        distanceFilter: 20,
-      ),
-    ).listen((pos) {
-      _pendingPosition = pos;
-      if (_imageReady) _updateSymbol(pos);
-      _flyTo(pos);
-      ref.read(socketClientProvider).emit('location.update', {
-        'lat': pos.latitude,
-        'lng': pos.longitude,
-        'speed_kmh': pos.speed > 0 ? pos.speed * 3.6 : 0.0,
-      });
-    });
+    _locationSub =
+        geo.Geolocator.getPositionStream(
+          locationSettings: const geo.LocationSettings(
+            accuracy: geo.LocationAccuracy.high,
+            distanceFilter: 20,
+          ),
+        ).listen((pos) {
+          _pendingPosition = pos;
+          if (_imageReady) _updateSymbol(pos);
+          _flyTo(pos);
+          ref.read(socketClientProvider).emit('location.update', {
+            'lat': pos.latitude,
+            'lng': pos.longitude,
+            'speed_kmh': pos.speed > 0 ? pos.speed * 3.6 : 0.0,
+          });
+        });
   }
 
   Future<void> _onStyleLoaded() async {
@@ -463,7 +489,9 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
         await _updateSymbol(_pendingPosition!);
         _mapController?.animateCamera(
           CameraUpdate.newLatLngZoom(
-            LatLng(_pendingPosition!.latitude, _pendingPosition!.longitude), 15),
+            LatLng(_pendingPosition!.latitude, _pendingPosition!.longitude),
+            15,
+          ),
         );
       }
     } catch (_) {}
@@ -475,11 +503,16 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     try {
       if (_locationSymbol == null) {
         _locationSymbol = await _mapController?.addSymbol(
-          SymbolOptions(geometry: latlng, iconImage: 'location-dot', iconSize: 1.0),
+          SymbolOptions(
+            geometry: latlng,
+            iconImage: 'location-dot',
+            iconSize: 1.0,
+          ),
         );
       } else {
         await _mapController?.updateSymbol(
-          _locationSymbol!, SymbolOptions(geometry: latlng),
+          _locationSymbol!,
+          SymbolOptions(geometry: latlng),
         );
       }
     } catch (_) {}
@@ -526,7 +559,10 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
   }
 
   Future<void> _showOwnerStartDaySheet() async {
-    final vehicles = ref.read(myVehiclesGuardProvider).value
+    final vehicles =
+        ref
+            .read(myVehiclesGuardProvider)
+            .value
             ?.where((v) => v.approvalStatus == 'approved')
             .toList() ??
         [];
@@ -535,7 +571,9 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Necesitas un taxi aprobado para activarte. Ve a "Mis taxis".'),
+            content: Text(
+              'Necesitas un taxi aprobado para activarte. Ve a "Mis taxis".',
+            ),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -553,13 +591,31 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) {
+    // Cuenta sin perfil de conductor (403 en /drivers/me, ej. una cuenta de
+    // owner que nunca se registró como driver) — no dejar la app atascada
+    // mostrando errores de widgets, avisar y cerrar sesión.
+    ref.listen<AsyncValue<dynamic>>(driverProfileProvider, (_, next) {
+      final err = next.error;
+      if (err is! DioException || err.response?.statusCode != 403) return;
+      _showSessionEndedDialog(
+        title: 'Cuenta no válida para esta app',
+        message: 'Esta cuenta no está registrada como conductor. '
+            'Vas a cerrar sesión — inicia con una cuenta de conductor.',
+      );
+    });
+
     // Auto-resume si hay un viaje activo al abrir la app
     ref.listen<AsyncValue<dynamic>>(activeTripProvider, (_, next) {
       if (_resumeChecked) return;
       final trip = next.valueOrNull;
-      if (trip == null) { _resumeChecked = true; return; }
+      if (trip == null) {
+        _resumeChecked = true;
+        return;
+      }
       final status = trip.status as String?;
-      if (status == 'accepted' || status == 'in_progress' || status == 'driver_arrived') {
+      if (status == 'accepted' ||
+          status == 'in_progress' ||
+          status == 'driver_arrived') {
         _resumeChecked = true;
         if (mounted) context.go('/trip/${trip.id}');
       }
@@ -570,15 +626,20 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     return Scaffold(
       body: Stack(
         children: [
-          MapLibreMap(
-            styleString: 'https://tiles.openfreemap.org/styles/liberty',
-            initialCameraPosition: const CameraPosition(
-              target: LatLng(-0.2295, -78.5243), zoom: 13, tilt: 40,
+          Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
+            child: MapLibreMap(
+              styleString: 'https://tiles.openfreemap.org/styles/liberty',
+              initialCameraPosition: const CameraPosition(
+                target: LatLng(-0.2295, -78.5243),
+                zoom: 13,
+                tilt: 40,
+              ),
+              onMapCreated: (controller) => _mapController = controller,
+              onStyleLoadedCallback: _onStyleLoaded,
+              myLocationEnabled: false,
+              trackCameraPosition: false,
             ),
-            onMapCreated: (controller) => _mapController = controller,
-            onStyleLoadedCallback: _onStyleLoaded,
-            myLocationEnabled: false,
-            trackCameraPosition: false,
           ),
 
           SafeArea(
@@ -588,7 +649,10 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
                 children: [
                   Expanded(child: HomeTopBarChip(onToggle: _toggleStatus)),
                   const SizedBox(width: 10),
-                  HomeTopIconBtn(icon: Icons.notifications_outlined, onTap: () => context.push('/notifications')),
+                  HomeTopIconBtn(
+                    icon: Icons.notifications_outlined,
+                    onTap: () => context.push('/notifications'),
+                  ),
                 ],
               ),
             ),
@@ -598,7 +662,9 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
 
           // Panel de viajes disponibles (modelo InDriver)
           Positioned(
-            bottom: 0, left: 0, right: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [

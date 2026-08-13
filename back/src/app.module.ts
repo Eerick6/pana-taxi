@@ -60,9 +60,16 @@ import { DriverSafetyModule } from './modules/driver-safety/driver-safety.module
     NotificationsQueueModule,
     TripExpansionModule,
     ScheduleModule.forRoot(),
-    ThrottlerModule.forRoot([
-      { name: 'global', ttl: 60000, limit: 60 },
-    ]),
+    ThrottlerModule.forRoot({
+      throttlers: [{ name: 'global', ttl: 60000, limit: 60 }],
+      // Bypass SOLO cuando LOAD_TEST_MODE=true está seteado explícitamente
+      // (nunca en prod — no existe esa var ahí). Sin esto, un script de
+      // prueba de carga local pega desde una sola IP y el rate-limit de
+      // seguridad (correcto para tráfico real, donde cada usuario tiene su
+      // propia IP) hace que el propio limitador sea el cuello de botella,
+      // no el backend.
+      skipIf: () => process.env.LOAD_TEST_MODE === 'true',
+    }),
     TypeOrmModule.forRoot({
       type: 'mysql',
       host: process.env.DB_HOST || 'db',

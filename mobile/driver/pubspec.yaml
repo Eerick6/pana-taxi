@@ -37,10 +37,15 @@ dependencies:
 
   # ── Maps / Location / Permissions ────────────────────────────────────────────
   maplibre_gl: ^0.21.0
-  google_navigation_flutter: ^0.10.0
   geolocator: ^13.0.2
   permission_handler: ^11.4.0
   image_picker: ^1.1.2
+
+  # ── Cámara (selfies de verificación de seguridad durante el viaje) ──────────
+  camera: ^0.11.1
+
+  # ── Navegación GUÍADA de Google ─────────────────────────────────────────────
+  google_navigation_flutter: ^0.10.0
 
   # ── Utils ────────────────────────────────────────────────────────────────────
   url_launcher: ^6.3.1
@@ -94,4 +99,3 @@ flutter_launcher_icons:
   ios: false
   image_path: "assets/images/logo.webp"
   min_sdk_android: 21
-

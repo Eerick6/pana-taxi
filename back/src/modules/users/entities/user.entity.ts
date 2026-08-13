@@ -49,6 +49,12 @@ export class User {
   @Column({ nullable: true })
   refresh_token: string;
 
+  // Identifica la sesión activa actual — se regenera en cada login nuevo.
+  // Un token con un session_id distinto al guardado aquí queda invalidado
+  // de inmediato (sesión única por cuenta, ver JwtStrategy).
+  @Column({ nullable: true })
+  session_id: string | null;
+
   // Token de Firebase Cloud Messaging — registrado desde la app al iniciar sesión
   @Column({ nullable: true })
   fcm_token: string | null;

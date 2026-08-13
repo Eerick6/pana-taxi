@@ -26,9 +26,11 @@ class DriverOffer {
     this.fareMode = 'negotiated',
     this.driverPhoto,
     this.driverRating,
+    this.driverTotalTrips,
     this.coopName,
     this.vehiclePlate,
     this.vehicleModel,
+    this.vehicleColor,
     this.etaMin,
     this.distanceToOriginKm,
   });
@@ -41,9 +43,11 @@ class DriverOffer {
   final String  fareMode;
   final String? driverPhoto;
   final double? driverRating;
+  final int?    driverTotalTrips;
   final String? coopName;
   final String? vehiclePlate;
   final String? vehicleModel;
+  final String? vehicleColor;
   final int?    etaMin;
   final double? distanceToOriginKm;
 
@@ -64,12 +68,14 @@ class DriverOffer {
       driverName:          driver['name']             as String? ?? 'Conductor',
       driverPhoto:         driver['photo']            as String?,
       driverRating:        _d(driver['rating']),
+      driverTotalTrips:    driver['total_trips']      as int?,
       coopName:            j['coop_name']             as String?,
       amount:              (_d(j['amount']) ?? 0),
       fareMode:            j['fare_mode']             as String? ?? 'negotiated',
       isCounter:           j['is_counter']            as bool? ?? false,
       vehiclePlate:        vehicle?['plate']          as String?,
       vehicleModel:        vehicle?['model']          as String?,
+      vehicleColor:        vehicle?['color']          as String?,
       etaMin:              j['eta_pickup_min']        as int?,
       distanceToOriginKm:  _d(j['distance_to_origin_km']),
     );
@@ -83,12 +89,14 @@ class DriverOffer {
       driverName:          j['driver_name']           as String? ?? 'Conductor',
       driverPhoto:         j['driver_photo']          as String?,
       driverRating:        _d(j['driver_rating']),
+      driverTotalTrips:    j['driver_total_trips']    as int?,
       coopName:            j['coop_name']             as String?,
       amount:              (_d(j['amount']) ?? 0),
       fareMode:            j['fare_mode']             as String? ?? 'negotiated',
       isCounter:           j['is_counter']            as bool? ?? false,
       vehiclePlate:        j['vehicle_plate']         as String?,
       vehicleModel:        j['vehicle_model']         as String?,
+      vehicleColor:        j['vehicle_color']         as String?,
       etaMin:              j['eta_pickup_min']        as int?,
       distanceToOriginKm:  _d(j['distance_to_origin_km']),
     );

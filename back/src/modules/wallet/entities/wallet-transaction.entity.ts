@@ -6,6 +6,11 @@ export enum TransactionType {
   COMMISSION_DEDUCTION = 'commission_deduction',
   REFUND = 'refund',
   ADJUSTMENT = 'adjustment',
+  // Estas dos mueven wallet.card_balance (lo que la plataforma le debe al
+  // conductor por tarjeta), no wallet.balance — balance_before/after abajo
+  // reflejan card_balance para estos dos tipos.
+  CARD_EARNING = 'card_earning',
+  CARD_PAYOUT = 'card_payout',
 }
 
 @Entity('wallet_transactions')

@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
@@ -278,6 +279,116 @@ export class WalletService {
         reference_id: tripId,
       }),
     );
+  }
+
+  // ── Saldo por tarjeta (lo que la plataforma le debe al conductor) ────────────
+
+  // Se llama al confirmar un pago con tarjeta exitoso — acredita la parte
+  // neta del conductor (fare - comisión, sin el recargo de Payphone).
+  async creditCardEarning(
+    walletId: string,
+    amount: number,
+    tripId: string,
+    em?: import('typeorm').EntityManager,
+  ): Promise<void> {
+    const repo = em ?? this.dataSource.manager;
+
+    const wallet = await repo.findOne(DriverWallet, {
+      where: { id: walletId },
+      lock: em ? { mode: 'pessimistic_write' } : undefined,
+    });
+    if (!wallet) throw new NotFoundException('Wallet no encontrada');
+
+    const balanceBefore = parseFloat(wallet.card_balance);
+    const balanceAfter = +(balanceBefore + amount).toFixed(2);
+
+    await repo.update(DriverWallet, wallet.id, { card_balance: balanceAfter.toString() });
+
+    await repo.save(
+      repo.create(WalletTransaction, {
+        wallet,
+        type: TransactionType.CARD_EARNING,
+        amount: amount.toFixed(2),
+        balance_before: balanceBefore.toFixed(2),
+        balance_after: balanceAfter.toFixed(2),
+        reference_id: tripId,
+      }),
+    );
+  }
+
+  // Lista conductores con saldo por tarjeta pendiente — para el panel de
+  // pagos semanales. cooperativeId filtra al staff de una sola cooperativa.
+  async getCardBalances(cooperativeId?: string) {
+    const qb = this.walletRepo.createQueryBuilder('wallet')
+      .leftJoinAndSelect('wallet.driver', 'driver')
+      .leftJoinAndSelect('driver.user', 'user')
+      .leftJoin('driver.active_vehicle', 'v')
+      .where('wallet.card_balance != 0');
+
+    if (cooperativeId) {
+      qb.andWhere('v.cooperative_id = :cooperativeId', { cooperativeId });
+    }
+
+    const wallets = await qb.orderBy('wallet.card_balance', 'DESC').getMany();
+    return wallets.map((w) => ({
+      wallet_id: w.id,
+      driver_id: w.driver.id,
+      driver_name: w.driver.full_name,
+      driver_phone: w.driver.user?.phone ?? null,
+      card_balance: w.card_balance,
+      updated_at: w.updated_at,
+    }));
+  }
+
+  // "Pagar y cerrar": el staff ya le pagó al conductor por fuera del
+  // sistema (transferencia, efectivo, etc.) — esto solo registra el pago y
+  // pone el saldo en 0 para que el siguiente período arranque limpio.
+  async payoutCardBalance(walletId: string, notes?: string, restrictToCooperativeId?: string) {
+    return this.dataSource.transaction(async (em) => {
+      const wallet = await em.findOne(DriverWallet, {
+        where: { id: walletId },
+        relations: ['driver', 'driver.user', 'driver.active_vehicle', 'driver.active_vehicle.cooperative'],
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!wallet) throw new NotFoundException('Wallet no encontrada');
+
+      if (restrictToCooperativeId && wallet.driver.active_vehicle?.cooperative?.id !== restrictToCooperativeId) {
+        throw new ForbiddenException('Este conductor no pertenece a tu cooperativa');
+      }
+
+      const balanceBefore = parseFloat(wallet.card_balance);
+      if (balanceBefore <= 0) throw new BadRequestException('No hay saldo por tarjeta pendiente para este conductor');
+
+      await em.update(DriverWallet, wallet.id, { card_balance: '0.00' });
+
+      await em.save(
+        em.create(WalletTransaction, {
+          wallet,
+          type: TransactionType.CARD_PAYOUT,
+          amount: balanceBefore.toFixed(2),
+          balance_before: balanceBefore.toFixed(2),
+          balance_after: '0.00',
+          notes,
+        }),
+      );
+
+      if (wallet.driver.user?.id) {
+        this.notificationsService.sendToUser(wallet.driver.user.id, {
+          type: NotificationType.WALLET,
+          title: 'Pago recibido',
+          body: `Se registró el pago de $${balanceBefore.toFixed(2)} por viajes con tarjeta.`,
+        }).catch(() => {});
+        this.gateway.notifyUser(wallet.driver.user.id, 'wallet.card_payout', {
+          amount: balanceBefore.toFixed(2),
+        });
+      }
+      // Para que otros paneles abiertos (admin/coop) refresquen la lista sola
+      this.gateway.notifyPlatform('wallet.card_payout', { wallet_id: wallet.id });
+      const coopId = wallet.driver.active_vehicle?.cooperative?.id;
+      if (coopId) this.gateway.notifyCoop(coopId, 'wallet.card_payout', { wallet_id: wallet.id });
+
+      return { message: 'Pago registrado y saldo cerrado.', amount: balanceBefore.toFixed(2) };
+    });
   }
 
   // ── Bank accounts ────────────────────────────────────────────────────────────

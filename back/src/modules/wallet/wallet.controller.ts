@@ -26,6 +26,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User, UserRole } from '../users/entities/user.entity';
 
 const FINANCE_ROLES = [UserRole.OWNER, UserRole.PLATFORM_ADMIN, UserRole.FINANCE];
+const CARD_BALANCE_ROLES = [...FINANCE_ROLES, UserRole.COOPERATIVE_ADMIN, UserRole.COOPERATIVE_OPERATOR];
 
 @Controller('wallet')
 @UseGuards(JwtGuard, RolesGuard)
@@ -150,5 +151,27 @@ export class WalletController {
   @Roles(...FINANCE_ROLES)
   rejectRecharge(@Param('id', ParseUUIDPipe) id: string, @Body() dto: RejectRechargeDto) {
     return this.walletService.rejectRecharge(id, dto);
+  }
+
+  // ── Saldo por tarjeta — pagos semanales a conductores ──────────────────────
+  // Admin/finance ven todas las cooperativas; staff de coop solo la suya.
+
+  @Get('card-balances')
+  @Roles(...CARD_BALANCE_ROLES)
+  getCardBalances(@CurrentUser() user: User, @Query('cooperative_id') queryCoopId?: string) {
+    const isCoop = [UserRole.COOPERATIVE_ADMIN, UserRole.COOPERATIVE_OPERATOR].includes(user.role);
+    const cooperativeId = isCoop ? (user.cooperative_id ?? undefined) : queryCoopId;
+    return this.walletService.getCardBalances(cooperativeId);
+  }
+
+  @Post(':walletId/card-payout')
+  @Roles(...CARD_BALANCE_ROLES)
+  payoutCardBalance(
+    @Param('walletId', ParseUUIDPipe) walletId: string,
+    @CurrentUser() user: User,
+    @Body('notes') notes?: string,
+  ) {
+    const isCoop = [UserRole.COOPERATIVE_ADMIN, UserRole.COOPERATIVE_OPERATOR].includes(user.role);
+    return this.walletService.payoutCardBalance(walletId, notes, isCoop ? user.cooperative_id ?? undefined : undefined);
   }
 }

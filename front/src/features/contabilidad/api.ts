@@ -139,6 +139,30 @@ export async function createBankAccount(dto: {
   return data;
 }
 
+// Saldo por tarjeta — lo que la plataforma le debe a cada conductor por
+// viajes cobrados con Payphone.
+
+export interface CardBalanceRow {
+  wallet_id: string;
+  driver_id: string;
+  driver_name: string;
+  driver_phone: string | null;
+  card_balance: string;
+  updated_at: string;
+}
+
+export async function getCardBalances(cooperative_id?: string): Promise<CardBalanceRow[]> {
+  const { data } = await api.get('/wallet/card-balances', {
+    params: cooperative_id ? { cooperative_id } : {},
+  });
+  return data;
+}
+
+export async function payoutCardBalance(walletId: string, notes?: string): Promise<{ message: string; amount: string }> {
+  const { data } = await api.post(`/wallet/${walletId}/card-payout`, notes ? { notes } : {});
+  return data;
+}
+
 export async function updateBankAccount(id: string, dto: Partial<{
   bank_name: string;
   account_number: string;

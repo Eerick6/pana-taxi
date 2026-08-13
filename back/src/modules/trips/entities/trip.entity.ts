@@ -182,6 +182,15 @@ export class Trip {
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   commission_amount: number;
 
+  // Detalle del cobro con tarjeta (Payphone cobra 5% adicional, se lo
+  // pasamos al cliente — el conductor y la comisión se calculan sobre
+  // fare_amount sin este recargo).
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  card_fee_amount: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  card_charged_amount: number;
+
   // OTP de inicio — generado al aceptar el viaje, visible solo para el cliente en la app
   // el conductor lo pide al pasajero para verificar identidad antes de arrancar
   @Column({ nullable: true, length: 6 })

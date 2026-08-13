@@ -119,9 +119,13 @@ class PushNotificationService {
     await _localNotif.initialize(
       initSettings,
       onDidReceiveNotificationResponse: (response) {
-        final tripId = response.payload ?? '';
-        if (tripId.isEmpty) return;
-        onTripNotificationTap?.call(tripId, action: response.actionId);
+        final payload = response.payload ?? '';
+        if (payload.isEmpty) return;
+        if (payload == 'inactivity_check') {
+          _confirmActive();
+          return;
+        }
+        onTripNotificationTap?.call(payload, action: response.actionId);
       },
       onDidReceiveBackgroundNotificationResponse: onBackgroundNotificationAction,
     );
@@ -175,6 +179,7 @@ class PushNotificationService {
           icon: '@mipmap/ic_launcher',
         ),
       ),
+      payload: type == 'inactivity_check' ? 'inactivity_check' : null,
     );
   }
 
@@ -182,6 +187,21 @@ class PushNotificationService {
     final tripId = message.data['trip_id'];
     if (tripId != null && tripId.isNotEmpty) {
       onTripNotificationTap?.call(tripId, action: null);
+      return;
+    }
+
+    // El conductor tocó el push "¿sigues en línea?" — tocar = confirmar.
+    if (message.data['type'] == 'inactivity_check') {
+      _confirmActive();
+    }
+  }
+
+  Future<void> _confirmActive() async {
+    try {
+      await _dio?.patch('/drivers/me/confirm-active');
+      debugPrint('[FCM] Actividad confirmada tras prompt de inactividad');
+    } catch (e) {
+      debugPrint('[FCM] Error confirmando actividad: $e');
     }
   }
 

@@ -40,21 +40,30 @@ export class AccountingService {
   ): Promise<void> {
     const manager = em ?? this.dataSource.manager;
 
-    let account = await manager.findOne(CooperativeAccount, {
-      where: { cooperative_id: cooperativeId },
-      lock: em ? { mode: 'pessimistic_write' } : undefined,
-    });
-
-    if (!account) {
-      // Auto-crear cuenta si no existe (primera vez)
-      account = manager.create(CooperativeAccount, {
+    // INSERT IGNORE (no SELECT-then-INSERT) para crear la cuenta la primera
+    // vez: dos viajes de la misma cooperativa completando en simultáneo
+    // podían ambos hacer el SELECT, no encontrar nada, e intentar el INSERT
+    // a la vez sobre la unique key de cooperative_id — MySQL/InnoDB resuelve
+    // eso como deadlock (ER_LOCK_DEADLOCK), no como duplicate-key limpio.
+    // Con IGNORE, quien gana crea la fila y el resto no hace nada; todos
+    // siguen al SELECT ... FOR UPDATE de abajo, que ya encuentra la cuenta.
+    await manager
+      .createQueryBuilder()
+      .insert()
+      .into(CooperativeAccount)
+      .values({
         cooperative_id: cooperativeId,
         gross_balance: '0.00',
         platform_due: '0.00',
         net_balance: '0.00',
-      });
-      account = await manager.save(CooperativeAccount, account);
-    }
+      })
+      .orIgnore()
+      .execute();
+
+    const account = await manager.findOne(CooperativeAccount, {
+      where: { cooperative_id: cooperativeId },
+      lock: em ? { mode: 'pessimistic_write' } : undefined,
+    });
 
     const platformRate = await this.getPlatformFeeRate(manager);
     const platformCut = +(commissionAmount * platformRate).toFixed(2);

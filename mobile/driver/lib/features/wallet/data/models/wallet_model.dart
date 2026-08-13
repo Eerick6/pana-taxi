@@ -71,15 +71,24 @@ class RechargeModel {
 }
 
 class WalletModel {
-  const WalletModel({required this.id, required this.balance, required this.currency});
+  const WalletModel({
+    required this.id,
+    required this.balance,
+    required this.currency,
+    this.cardBalance = 0,
+  });
   final String id;
   final double balance;
   final String currency;
+  // Lo que la plataforma te debe por viajes cobrados con tarjeta — se paga
+  // aparte (transferencia/efectivo), no es plata disponible en la app.
+  final double cardBalance;
 
   factory WalletModel.fromJson(Map<String, dynamic> json) => WalletModel(
         id: json['id'] as String,
         balance: double.parse(json['balance'].toString()),
         currency: json['currency'] as String? ?? 'USD',
+        cardBalance: double.parse((json['card_balance'] ?? '0').toString()),
       );
 }
 
@@ -100,7 +109,7 @@ class TransactionModel {
   final DateTime createdAt;
   final String? referenceId;
 
-  bool get isCredit => type == 'recharge' || type == 'refund' || type == 'adjustment';
+  bool get isCredit => type == 'recharge' || type == 'refund' || type == 'adjustment' || type == 'card_earning';
 
   factory TransactionModel.fromJson(Map<String, dynamic> json) => TransactionModel(
         id: json['id'] as String,

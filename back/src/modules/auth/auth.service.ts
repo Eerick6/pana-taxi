@@ -77,7 +77,7 @@ export class AuthService {
 
     if (this.isDev && dto.code === '000000') {
       await this.usersRepository.update(user.id, { otp_code: null, otp_expires_at: null, status: UserStatus.ACTIVE });
-      return this.generateTokens({ ...user, status: UserStatus.ACTIVE });
+      return this.generateTokens({ ...user, status: UserStatus.ACTIVE }, { newSession: true });
     }
 
     // UPDATE atómico: consume el OTP solo si aún es válido — previene race condition
@@ -89,7 +89,7 @@ export class AuthService {
       .execute();
     if (result.affected === 0) throw new UnauthorizedException('Código inválido o expirado');
 
-    return this.generateTokens({ ...user, status: UserStatus.ACTIVE });
+    return this.generateTokens({ ...user, status: UserStatus.ACTIVE }, { newSession: true });
   }
 
   async requestEmailOtp(dto: EmailOtpRequestDto) {
@@ -113,7 +113,7 @@ export class AuthService {
 
     if (this.isDev && dto.code === '000000') {
       await this.usersRepository.update(user.id, { otp_code: null, otp_expires_at: null });
-      return this.generateTokens(user);
+      return this.generateTokens(user, { newSession: true });
     }
 
     const result = await this.usersRepository
@@ -124,7 +124,7 @@ export class AuthService {
       .execute();
     if (result.affected === 0) throw new UnauthorizedException('Código inválido o expirado');
 
-    return this.generateTokens(user);
+    return this.generateTokens(user, { newSession: true });
   }
 
   private async sendBrevoEmail(to: string, subject: string, html: string): Promise<void> {
@@ -185,7 +185,7 @@ export class AuthService {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) throw new UnauthorizedException('Teléfono o contraseña incorrectos');
 
-    return this.generateTokens(user);
+    return this.generateTokens(user, { newSession: true });
   }
 
   async loginWithPassword(email: string, password: string) {
@@ -198,7 +198,7 @@ export class AuthService {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) throw new UnauthorizedException('Correo o contraseña incorrectos');
 
-    return this.generateTokens(user);
+    return this.generateTokens(user, { newSession: true });
   }
 
   async forgotPassword(email: string) {
@@ -535,7 +535,7 @@ export class AuthService {
       `<p>Tu código de acceso es: <strong style="font-size:24px">${code}</strong></p><p>Expira en 10 minutos.</p>`);
   }
 
-  private async generateTokens(user: User) {
+  private async generateTokens(user: User, opts: { newSession?: boolean } = {}) {
     let cooperative_id: string | null = null;
     if (COOP_ROLES.includes(user.role)) {
       const membership = await this.cooperativeMembersRepo.findOne({
@@ -545,13 +545,30 @@ export class AuthService {
       cooperative_id = membership?.cooperative?.id ?? null;
     }
 
-    const payload = { sub: user.id, role: user.role, cooperative_id };
+    // Sesión única por cuenta: un login nuevo genera un session_id nuevo y
+    // avisa por socket al dispositivo anterior (si sigue conectado) para que
+    // cierre sesión al instante — no hace falta esperar a que expire su
+    // access token. Un refresh (newSession=false) conserva el session_id
+    // actual, es la misma sesión renovando su token.
+    const previousSessionId = user.session_id;
+    const session_id = opts.newSession ? crypto.randomUUID() : user.session_id;
+
+    const payload = { sub: user.id, role: user.role, cooperative_id, session_id };
     const access_token = this.jwtService.sign(payload);
     const refresh_token = this.jwtService.sign(payload, {
       secret: process.env.JWT_REFRESH_SECRET,
       expiresIn: process.env.JWT_REFRESH_EXPIRES_IN as any,
     });
-    await this.usersRepository.update(user.id, { refresh_token: this.hashToken(refresh_token) });
+    await this.usersRepository.update(user.id, {
+      refresh_token: this.hashToken(refresh_token),
+      session_id,
+    });
+
+    if (opts.newSession && previousSessionId && previousSessionId !== session_id) {
+      this.gateway.notifyUser(user.id, 'session.revoked', {
+        message: 'Se inició sesión en otro dispositivo.',
+      });
+    }
     return { access_token, refresh_token, role: user.role };
   }
 }

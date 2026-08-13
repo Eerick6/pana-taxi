@@ -28,7 +28,14 @@ class _SplashPageState extends ConsumerState<SplashPage> {
 
     if (user != null) {
       final dio = ref.read(dioProvider);
-      await PushNotificationService.instance.initialize(dio);
+      // No debe trabar el arranque si el permiso de notificaciones, el
+      // token FCM o el registro en el backend se cuelgan (red lenta, Play
+      // Services no listo, etc.) — la app tiene que entrar igual.
+      try {
+        await PushNotificationService.instance
+            .initialize(dio)
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {}
       if (!mounted) return;
 
       // Si hay un viaje activo, ir directo a él en lugar del home

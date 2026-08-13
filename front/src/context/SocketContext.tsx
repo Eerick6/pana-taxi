@@ -12,7 +12,7 @@ interface SocketContextValue {
 const SocketContext = createContext<SocketContextValue>({ socket: null, connected: false });
 
 export function SocketProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
 
@@ -36,6 +36,14 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     s.on("connect", () => setConnected(true));
     s.on("disconnect", () => setConnected(false));
 
+    // Sesión única por cuenta: el backend avisa cuando alguien inicia
+    // sesión con esta cuenta en otro dispositivo/pestaña — cerrar acá sin
+    // esperar a que falle la próxima llamada a la API.
+    s.on("session.revoked", () => {
+      alert("Se inició sesión con esta cuenta en otro dispositivo.");
+      logout();
+    });
+
     setSocket(s);
 
     return () => {
@@ -43,6 +51,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setSocket(null);
       setConnected(false);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   return (

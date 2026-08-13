@@ -42,7 +42,14 @@ export const ROOM = {
 @Injectable()
 @WebSocketGateway({
   cors: { origin: process.env.ALLOWED_ORIGINS?.split(',') ?? [], credentials: true },
-  namespace: '/',
+  // OJO: no poner namespace: '/' — aunque '/' es el default y no cambia
+  // nada para los clientes (igual se conectan sin especificar namespace),
+  // el IoAdapter de NestJS trata CUALQUIER namespace truthy (incluido '/')
+  // llamando a server.of(namespace), que devuelve un objeto Namespace en
+  // vez del Server real. Namespace no tiene el método .adapter(), así que
+  // afterInit() fallaba silenciosamente con "server.adapter is not a
+  // function" y el adaptador de Redis nunca se activaba — confirmado
+  // leyendo node_modules/@nestjs/platform-socket.io/adapters/io-adapter.js.
   pingTimeout: 60000,   // 60s (default 20s) — more forgiving for mobile Doze throttling
   pingInterval: 25000,
 })

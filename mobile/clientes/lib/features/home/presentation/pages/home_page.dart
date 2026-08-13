@@ -9,6 +9,7 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/network/socket_client.dart';
+import '../../../../core/storage/secure_storage.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../profile/presentation/providers/profile_provider.dart';
 import '../../../trips/presentation/providers/active_trip_provider.dart';
@@ -21,12 +22,12 @@ Future<Uint8List> _getLocationDotBytes() async =>
     _locationDotBytesCache ??= await _buildLocationDotBytes();
 
 Future<Uint8List> _buildLocationDotBytes() async {
-  const size  = 60.0;
-  const cx    = size / 2;
-  const cy    = size / 2;
+  const size = 60.0;
+  const cx = size / 2;
+  const cy = size / 2;
 
   final recorder = ui.PictureRecorder();
-  final canvas   = Canvas(recorder, Rect.fromLTWH(0, 0, size, size));
+  final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, size, size));
 
   // Halo exterior translúcido (estilo Google Maps)
   canvas.drawCircle(
@@ -54,12 +55,12 @@ Future<Uint8List> _buildLocationDotBytes() async {
     const Offset(cx, cy),
     16,
     Paint()
-      ..color   = Colors.white
-      ..style   = PaintingStyle.stroke
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
       ..strokeWidth = 3,
   );
 
-  final img   = await recorder.endRecording().toImage(size.toInt(), size.toInt());
+  final img = await recorder.endRecording().toImage(size.toInt(), size.toInt());
   final bytes = await img.toByteData(format: ui.ImageByteFormat.png);
   return bytes!.buffer.asUint8List();
 }
@@ -73,8 +74,8 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> {
   MapLibreMapController? _mapController;
-  Symbol?   _locationSymbol;
-  bool      _imageReady    = false;
+  Symbol? _locationSymbol;
+  bool _imageReady = false;
   Position? _pendingPosition;
   StreamSubscription<Position>? _locationSub;
 
@@ -85,7 +86,9 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   void initState() {
     super.initState();
-    Permission.locationWhenInUse.request().then((_) => _startLocationTracking());
+    Permission.locationWhenInUse.request().then(
+      (_) => _startLocationTracking(),
+    );
     _initSocket();
   }
 
@@ -106,6 +109,41 @@ class _HomePageState extends ConsumerState<HomePage> {
       final tripId = (data['trip_id'] as String?) ?? '';
       if (tripId.isNotEmpty) context.go('/trip/$tripId');
     });
+
+    // Sesión única por cuenta: el backend avisa por socket cuando alguien
+    // inicia sesión en otro dispositivo — cerrar acá sin esperar a que
+    // falle la próxima llamada a la API.
+    socket.on('session.revoked', (_) {
+      if (!_socketActive || !mounted) return;
+      _showSessionEndedDialog();
+    });
+  }
+
+  bool _sessionEndedDialogShown = false;
+
+  void _showSessionEndedDialog() {
+    if (_sessionEndedDialogShown || !mounted) return;
+    _sessionEndedDialogShown = true;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sesión cerrada'),
+        content: const Text(
+          'Se inició sesión con esta cuenta en otro dispositivo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              await ref.read(secureStorageProvider).clearAll();
+              if (mounted) context.go('/welcome');
+            },
+            child: const Text('Entendido'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -128,7 +166,9 @@ class _HomePageState extends ConsumerState<HomePage> {
       await _updateSymbol(_pendingPosition!);
       _mapController?.animateCamera(
         CameraUpdate.newLatLngZoom(
-          LatLng(_pendingPosition!.latitude, _pendingPosition!.longitude), 15),
+          LatLng(_pendingPosition!.latitude, _pendingPosition!.longitude),
+          15,
+        ),
       );
     }
   }
@@ -136,7 +176,9 @@ class _HomePageState extends ConsumerState<HomePage> {
   Future<void> _startLocationTracking() async {
     try {
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
       _pendingPosition = pos;
       if (_imageReady) {
@@ -147,15 +189,16 @@ class _HomePageState extends ConsumerState<HomePage> {
       }
     } catch (_) {}
 
-    _locationSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 5,
-      ),
-    ).listen((pos) {
-      _pendingPosition = pos;
-      if (_imageReady) _updateSymbol(pos);
-    });
+    _locationSub =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 5,
+          ),
+        ).listen((pos) {
+          _pendingPosition = pos;
+          if (_imageReady) _updateSymbol(pos);
+        });
   }
 
   Future<void> _updateSymbol(Position pos) async {
@@ -179,15 +222,20 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   Widget build(BuildContext context) {
     final activeTripAsync = ref.watch(activeTripProvider);
-    final hasActiveTrip   = activeTripAsync.valueOrNull?.isActive ?? false;
+    final hasActiveTrip = activeTripAsync.valueOrNull?.isActive ?? false;
 
     // Auto-resume si hay un viaje en curso al abrir la app
     ref.listen<AsyncValue<dynamic>>(activeTripProvider, (_, next) {
       if (_resumeChecked) return;
       final trip = next.valueOrNull;
-      if (trip == null) { _resumeChecked = true; return; }
+      if (trip == null) {
+        _resumeChecked = true;
+        return;
+      }
       final status = trip.status as String?;
-      if (status == 'accepted' || status == 'in_progress' || status == 'driver_arrived') {
+      if (status == 'accepted' ||
+          status == 'in_progress' ||
+          status == 'driver_arrived') {
         _resumeChecked = true;
         if (mounted) context.go('/trip/${trip.id}');
       }
@@ -196,17 +244,20 @@ class _HomePageState extends ConsumerState<HomePage> {
     return Scaffold(
       body: Stack(
         children: [
-          MapLibreMap(
-            onMapCreated: _onMapCreated,
-            onStyleLoadedCallback: _onStyleLoaded,
-            initialCameraPosition: const CameraPosition(
-              target: LatLng(-0.2295, -78.5243),
-              zoom: 13,
-              tilt: 40,
+          Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
+            child: MapLibreMap(
+              onMapCreated: _onMapCreated,
+              onStyleLoadedCallback: _onStyleLoaded,
+              initialCameraPosition: const CameraPosition(
+                target: LatLng(-0.2295, -78.5243),
+                zoom: 13,
+                tilt: 40,
+              ),
+              styleString: 'https://tiles.openfreemap.org/styles/liberty',
+              myLocationEnabled: false,
+              trackCameraPosition: false,
             ),
-            styleString: 'https://tiles.openfreemap.org/styles/liberty',
-            myLocationEnabled: false,
-            trackCameraPosition: false,
           ),
 
           const SafeArea(child: _TopBar()),
@@ -219,7 +270,9 @@ class _HomePageState extends ConsumerState<HomePage> {
             ),
 
           Positioned(
-            left: 0, right: 0, bottom: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
             child: HomeBottomSheet(mapController: _mapController),
           ),
         ],
@@ -242,14 +295,16 @@ class _TopBar extends ConsumerWidget {
           GestureDetector(
             onTap: () => context.push('/profile'),
             child: Container(
-              width: 44, height: 44,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: AppColors.white,
                 boxShadow: [
                   BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.15),
-                      blurRadius: 6),
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 6,
+                  ),
                 ],
               ),
               child: ClipOval(
@@ -258,11 +313,17 @@ class _TopBar extends ConsumerWidget {
                         imageUrl: photoUrl,
                         fit: BoxFit.cover,
                         errorWidget: (_, __, ___) => const Icon(
-                            Icons.person, color: AppColors.gray500, size: 24),
+                          Icons.person,
+                          color: AppColors.gray500,
+                          size: 24,
+                        ),
                         placeholder: (_, __) => const SizedBox.shrink(),
                       )
-                    : const Icon(Icons.person,
-                        color: AppColors.gray500, size: 24),
+                    : const Icon(
+                        Icons.person,
+                        color: AppColors.gray500,
+                        size: 24,
+                      ),
               ),
             ),
           ),
@@ -270,18 +331,23 @@ class _TopBar extends ConsumerWidget {
           GestureDetector(
             onTap: () => context.push('/notifications'),
             child: Container(
-              width: 44, height: 44,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                 color: AppColors.white,
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.15),
-                      blurRadius: 6),
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 6,
+                  ),
                 ],
               ),
-              child: const Icon(Icons.notifications_outlined,
-                  color: AppColors.secondary, size: 22),
+              child: const Icon(
+                Icons.notifications_outlined,
+                color: AppColors.secondary,
+                size: 22,
+              ),
             ),
           ),
         ],
