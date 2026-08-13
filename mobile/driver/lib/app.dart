@@ -38,14 +38,20 @@ class PanaDriverApp extends ConsumerWidget {
               // también aparezca en la pantalla de viaje activo, que está
               // fuera del shell. Se oculta solo mientras no hay usuario
               // logueado (splash, login, registro, onboarding).
+              //
+              // Arriba a la derecha, no abajo: home tiene un panel de viajes
+              // disponibles pegado al fondo (AvailableTripsPanel +
+              // HomeBottomPanel) que es más alto que 110px y lo tapaba por
+              // completo — quedaba invisible e intocable en la pantalla que
+              // el conductor más usa.
               Consumer(
                 builder: (context, ref, _) {
                   final user = ref.watch(authStateProvider).valueOrNull;
                   if (user == null) return const SizedBox.shrink();
                   return Positioned(
                     right: 16,
-                    bottom: 110,
-                    child: SafeArea(child: DriverSosButton()),
+                    top: MediaQuery.of(context).padding.top + 12,
+                    child: const DriverSosButton(),
                   );
                 },
               ),

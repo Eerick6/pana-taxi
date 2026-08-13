@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 
 // SOS del conductor — a diferencia del cliente, tripId es opcional: el
 // conductor puede necesitar ayuda esté o no en un viaje (esperando pasajero,
@@ -17,20 +18,26 @@ class DriverSosButton extends ConsumerWidget {
     return GestureDetector(
       onTap: () => _confirmSos(context, ref),
       child: Container(
-        width: 52,
-        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: AppColors.error,
-          shape: BoxShape.circle,
+          borderRadius: BorderRadius.circular(22),
           boxShadow: [
             BoxShadow(
-              color: AppColors.error.withValues(alpha: 0.45),
-              blurRadius: 14,
+              color: AppColors.error.withValues(alpha: 0.4),
+              blurRadius: 12,
               offset: const Offset(0, 4),
             ),
           ],
         ),
-        child: const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 26),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: AppColors.white, size: 18),
+            const SizedBox(width: 6),
+            Text('SOS', style: AppTextStyles.label.copyWith(color: AppColors.white)),
+          ],
+        ),
       ),
     );
   }
@@ -39,14 +46,15 @@ class DriverSosButton extends ConsumerWidget {
     showDialog<void>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('¿Necesitas ayuda?'),
-        content: const Text(
+        title: Text('¿Necesitas ayuda?', style: AppTextStyles.h3),
+        content: Text(
           'Se enviará una alerta de emergencia con tu ubicación actual a la plataforma.',
+          style: AppTextStyles.body,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
+            child: Text('Cancelar', style: AppTextStyles.label),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
@@ -54,7 +62,7 @@ class DriverSosButton extends ConsumerWidget {
               Navigator.pop(context);
               await _triggerSos(context, ref);
             },
-            child: const Text('Enviar SOS', style: TextStyle(color: Colors.white)),
+            child: Text('Enviar SOS', style: AppTextStyles.label.copyWith(color: AppColors.white)),
           ),
         ],
       ),
