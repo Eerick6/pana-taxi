@@ -92,6 +92,17 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     // Dar acceso al server WS a NotificationsService para emitir notification.new
     this.notificationsService.setWsServer(server);
 
+    // Apagado por defecto a propósito: con el adaptador activo, CADA
+    // server.to(room).emit(...) — que se dispara constantemente, sobre
+    // todo location.update de cada conductor — se convierte en un comando
+    // PUBLISH a Redis en vez de un simple dispatch en memoria. Corriendo
+    // una sola instancia (tu caso actual) ese tráfico extra a Redis no
+    // compra nada: no hay otra instancia escuchando. Se activa solo con
+    // WS_REDIS_ADAPTER=true, el día que de verdad corras 2+ réplicas.
+    if (process.env.WS_REDIS_ADAPTER !== 'true') {
+      this.logger.warn('WS_REDIS_ADAPTER no activado — Socket.IO en modo single-instance (más barato, sin tráfico extra a Redis)');
+      return;
+    }
     if (!process.env.REDIS_URL) {
       this.logger.warn('REDIS_URL no configurado — Socket.IO en modo single-instance (no escala horizontal)');
       return;
