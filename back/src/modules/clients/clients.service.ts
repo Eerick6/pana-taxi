@@ -10,7 +10,6 @@ import { Client } from './entities/client.entity';
 import { EmergencyContact } from './entities/emergency-contact.entity';
 import { User, UserStatus } from '../users/entities/user.entity';
 import { StorageService } from '../storage/storage.service';
-import { LocalStorageService } from '../storage/local-storage.service';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { AddEmergencyContactDto } from './dto/add-emergency-contact.dto';
 
@@ -26,8 +25,12 @@ export class ClientsService {
     @InjectRepository(User)
     private usersRepo: Repository<User>,
     private storage: StorageService,
-    private localStorage: LocalStorageService,
   ) {}
+
+  private async signPhotoUrl(key: string | null | undefined): Promise<string | null> {
+    if (!key) return null;
+    return this.storage.getPresignedUrl(key, 7200);
+  }
 
   async getMyProfile(userId: string) {
     const client = await this.clientsRepo.findOne({
@@ -38,16 +41,15 @@ export class ClientsService {
 
     const { otp_code, otp_expires_at, refresh_token, password_hash, ...user } = client.user as any;
 
-    // Solo servir fotos en disco local ("local:..."); limpiar keys R2 legacy
+    // Fotos de la etapa transitoria en disco local ("local:...") ya no son
+    // servibles (se movió de vuelta a R2, que sí sobrevive redeploys y se
+    // comparte entre réplicas) — se limpian para que el usuario suba de nuevo.
     const raw = client.profile_photo_url;
     let photoUrl: string | null = null;
-    if (raw) {
-      if (this.localStorage.isLocal(raw)) {
-        photoUrl = this.localStorage.staticPath(raw);
-      } else {
-        // Key R2 antigua — limpiar del DB para que el usuario suba de nuevo
-        await this.clientsRepo.update(client.id, { profile_photo_url: null });
-      }
+    if (raw?.startsWith('local:')) {
+      await this.clientsRepo.update(client.id, { profile_photo_url: null });
+    } else {
+      photoUrl = await this.signPhotoUrl(raw);
     }
 
     return { ...client, user, profile_photo_url: photoUrl };
@@ -70,9 +72,9 @@ export class ClientsService {
     if (!allowed.includes(file.mimetype)) throw new BadRequestException('Solo JPEG, PNG o WebP');
     if (file.size > 5 * 1024 * 1024) throw new BadRequestException('Máximo 5MB');
 
-    const key = this.localStorage.save(`clients/${client.id}`, file.buffer, file.originalname);
+    const key = await this.storage.upload(`clients/${client.id}`, file.originalname, file.buffer, file.mimetype);
     await this.clientsRepo.update(client.id, { profile_photo_url: key });
-    return { profile_photo_url: key };
+    return { profile_photo_url: await this.signPhotoUrl(key) };
   }
 
   // ── Contactos de emergencia ─────────────────────────────────────────────────
