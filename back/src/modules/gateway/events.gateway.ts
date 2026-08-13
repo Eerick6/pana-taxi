@@ -637,13 +637,26 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     this.server.to(ROOM.available).emit(event, payload);
   }
 
+  // server.sockets es el Namespace por defecto ('/'), NO un Map — el Map
+  // real de sockets conectados vive en server.sockets.sockets. (Antes
+  // server SÍ era directamente ese Map por el bug de namespace:'/' que
+  // hacía que NestJS pasara un Namespace en vez del Server a afterInit;
+  // al arreglar eso para que el adaptador de Redis funcionara, este acceso
+  // dejó de ser válido.) Solo encuentra sockets conectados a ESTA
+  // instancia — con una sola instancia corriendo no hay problema, pero si
+  // algún día se corre más de una réplica esto necesita volverse
+  // adapter-aware para encontrar el socket sin importar a cuál instancia
+  // esté conectado.
+  private getLocalSocket(socketId: string): Socket | undefined {
+    return (this.server.sockets.sockets as Map<string, Socket>).get(socketId);
+  }
+
   // Añade o saca al conductor de ROOM.available según su nuevo estado online.
   // Llamar desde DriversService después de startDay / endDay / setOnlineStatus.
   async syncAvailableRoom(userId: string, isOnline: boolean): Promise<void> {
     const socketId = this.userSockets.get(userId);
     if (!socketId) return;
-    const socketMap = this.server.sockets as unknown as Map<string, Socket>;
-    const socket = socketMap.get(socketId);
+    const socket = this.getLocalSocket(socketId);
     if (!socket) return;
     if (isOnline) {
       await socket.join(ROOM.available);
@@ -658,8 +671,7 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     const socketId = this.userSockets.get(userId);
     if (!socketId) return; // conductor no está conectado
 
-    const socketMap2 = this.server.sockets as unknown as Map<string, Socket>;
-    const socket = socketMap2.get(socketId);
+    const socket = this.getLocalSocket(socketId);
     if (!socket) return;
 
     const driver = await this.driversRepo.findOne({
