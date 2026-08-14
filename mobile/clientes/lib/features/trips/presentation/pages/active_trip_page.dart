@@ -78,7 +78,8 @@ class ActiveTripPage extends ConsumerStatefulWidget {
   ConsumerState<ActiveTripPage> createState() => _ActiveTripPageState();
 }
 
-class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
+class _ActiveTripPageState extends ConsumerState<ActiveTripPage>
+    with WidgetsBindingObserver {
   ActiveTrip? _trip;
   Timer? _waitTimer;
   int _waitSecondsLeft = 0;
@@ -112,12 +113,14 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadTrip();
     _initSocket();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _waitTimer?.cancel();
     _meterTimer?.cancel();
     _driverAnimTimer?.cancel();
@@ -132,6 +135,32 @@ class _ActiveTripPageState extends ConsumerState<ActiveTripPage> {
     socket.off('trip.meter_update');
     socket.off('trip.rerouted');
     super.dispose();
+  }
+
+  // El socket puede desconectarse mientras la app está en segundo plano
+  // (común en iOS/Android). Si el viaje se completó o canceló durante ese
+  // tiempo, el evento por WS nunca llega y esta pantalla se queda
+  // congelada mostrando el viaje como si siguiera activo. Al volver a
+  // primer plano, re-consultamos directo al servidor — si este viaje ya
+  // no está activo, salimos, sin esperar a que el usuario cierre y abra
+  // la app para notarlo.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    _resyncAfterResume();
+  }
+
+  Future<void> _resyncAfterResume() async {
+    try {
+      final current = await ref.read(tripsApiProvider).getActiveTrip();
+      if (!mounted) return;
+      if (current == null || current.id != widget.tripId) {
+        context.go('/home');
+      }
+    } catch (_) {
+      // Sin conexión momentánea u otro error — no navegar a ciegas,
+      // el próximo evento por socket o resume lo intentará de nuevo.
+    }
   }
 
   void _startWaitCountdown(String? isoExpires) {

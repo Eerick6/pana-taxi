@@ -268,6 +268,14 @@ class _HomePageState extends ConsumerState<HomePage>
       if (!mounted) return;
       final tripId = (data is Map ? data['trip_id'] : null) as String?;
       if (tripId != null) {
+        // Sacarlo de la lista de disponibles YA, antes de navegar — de lo
+        // contrario queda atrapado ahí para siempre: trip.taken también lo
+        // sacaría, pero llega después de que _navigatedToTrip ya bloquea
+        // los setState de handlers posteriores. Sin esto, el viaje que el
+        // conductor recién aceptó (y más tarde completó) reaparecía como
+        // "disponible" al volver a home.
+        _availableTrips.remove(tripId);
+        _pendingOffers.remove(tripId);
         _navigatedToTrip = true; // bloquea setState en handlers posteriores
         ref.invalidate(activeTripProvider);
         context.go('/trip/$tripId');

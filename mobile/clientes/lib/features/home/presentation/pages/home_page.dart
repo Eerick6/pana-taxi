@@ -109,6 +109,14 @@ class _HomePageState extends ConsumerState<HomePage> {
       final tripId = (data['trip_id'] as String?) ?? '';
       if (tripId.isNotEmpty) context.go('/trip/$tripId');
     });
+    // Faltaba: sin esto, activeTripProvider nunca se invalidaba al
+    // completarse el viaje — el cliente se quedaba viendo la pantalla del
+    // viaje "activo" indefinidamente (solo un fetch al arrancar la app,
+    // sin este evento nada disparaba un refresh).
+    socket.on('trip.completed', (_) {
+      if (!_socketActive || !mounted) return;
+      ref.invalidate(activeTripProvider);
+    });
 
     // Sesión única por cuenta: el backend avisa por socket cuando alguien
     // inicia sesión en otro dispositivo — cerrar acá sin esperar a que
