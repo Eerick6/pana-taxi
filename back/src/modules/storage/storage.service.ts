@@ -19,12 +19,20 @@ export class StorageService {
     });
   }
 
+  // El bucket casi nunca deja de existir una vez creado — verificarlo con
+  // un round-trip a R2 en CADA subida (antes del PutObject real) duplicaba
+  // la latencia de todas las subidas de documentos/fotos sin necesidad.
+  // Se verifica una sola vez por vida del proceso.
+  private bucketEnsured = false;
+
   async ensureBucket(): Promise<void> {
+    if (this.bucketEnsured) return;
     try {
       await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
     } catch {
       await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
     }
+    this.bucketEnsured = true;
   }
 
   async upload(folder: string, originalName: string, buffer: Buffer, mimetype: string): Promise<string> {

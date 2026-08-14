@@ -630,8 +630,12 @@ class _RechargeSheetState extends State<_RechargeSheet> {
   }
 
   Future<void> _pickImage() async {
-    final img = await ImagePicker()
-        .pickImage(source: ImageSource.gallery, imageQuality: 80);
+    final img = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+      maxWidth: 1600,
+      maxHeight: 1600,
+    );
     if (img != null) setState(() => _proof = img);
   }
 
