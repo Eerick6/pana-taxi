@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Vehicle, VehicleApprovalStatus, VehicleStatus } from './entities/vehicle.entity';
 import { VehicleDocument, VehicleDocumentType } from './entities/vehicle-document.entity';
 import { Driver, DriverType, DriverApprovalStatus } from '../drivers/entities/driver.entity';
@@ -203,7 +203,34 @@ export class VehiclesService {
     }
 
     const [items, total] = await qb.getManyAndCount();
-    return { items, total, page, limit };
+
+    // Chofer actualmente al volante: el dueño puede tener varios taxis,
+    // manejar uno él mismo y asignarle un chofer a otro (bolsa de empleo)
+    // — la lista debe mostrar quién maneja CADA taxi, no solo quién es
+    // dueño. VehicleAssignment es el contrato de empleo (a quién le está
+    // PERMITIDO manejar), no quién lo está manejando AHORA MISMO — eso
+    // vive en Driver.active_vehicle, que start-day/end-day actualiza en
+    // tiempo real sin importar si es OWNER_DRIVER o chofer contratado.
+    const vehicleIds = items.map((v) => v.id);
+    const activeDrivers = vehicleIds.length
+      ? await this.driversRepo.find({
+          where: { active_vehicle: { id: In(vehicleIds) } },
+          relations: ['active_vehicle'],
+        })
+      : [];
+    const driverByVehicleId = new Map(activeDrivers.map((d) => [d.active_vehicle.id, d]));
+
+    const enriched = items.map((v) => ({
+      ...v,
+      current_driver: driverByVehicleId.get(v.id)
+        ? {
+            id: driverByVehicleId.get(v.id)!.id,
+            full_name: driverByVehicleId.get(v.id)!.full_name,
+          }
+        : null,
+    }));
+
+    return { items: enriched, total, page, limit };
   }
 
   // ── Cooperative admin endpoints ──────────────────────────────────────────

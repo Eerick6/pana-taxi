@@ -118,6 +118,17 @@ export class DriversService {
     }
   }
 
+  // Avisa a los paneles admin/coop que un conductor cambió su disponibilidad
+  // (iniciar/terminar jornada, "buscando trabajo", etc.) — sin esto, la
+  // columna "En línea" de DriversList.tsx queda congelada hasta que alguien
+  // recarga la página a mano, porque ese panel no escuchaba ningún evento
+  // para este cambio.
+  private notifyOnlineStatusChange(driverId: string, onlineStatus: DriverOnlineStatus, cooperativeId?: string | null): void {
+    const payload = { driver_id: driverId, online_status: onlineStatus };
+    this.gateway.notifyPlatform('driver.online_status_changed', payload);
+    if (cooperativeId) this.gateway.notifyCoop(cooperativeId, 'driver.online_status_changed', payload);
+  }
+
   // Invalida la caché de Redis del conductor (llamar cuando cambia vehículo o aprobación)
   async invalidateDriverCache(driverId: string): Promise<void> {
     try {
@@ -251,7 +262,10 @@ export class DriversService {
   }
 
   async setOnlineStatus(userId: string, status: DriverOnlineStatus) {
-    const driver = await this.driversRepo.findOne({ where: { user: { id: userId } } });
+    const driver = await this.driversRepo.findOne({
+      where: { user: { id: userId } },
+      relations: ['active_vehicle', 'active_vehicle.cooperative'],
+    });
     if (!driver) throw new NotFoundException('Perfil de conductor no encontrado');
     if (driver.approval_status !== DriverApprovalStatus.APPROVED) {
       throw new ForbiddenException('Tu perfil debe estar aprobado para cambiar disponibilidad');
@@ -265,6 +279,7 @@ export class DriversService {
 
     await this.driversRepo.update(driver.id, { online_status: status, last_seen_at: new Date() });
     await this.gateway.syncAvailableRoom(userId, status !== DriverOnlineStatus.OFFLINE);
+    this.notifyOnlineStatusChange(driver.id, status, driver.active_vehicle?.cooperative?.id);
     return { online_status: status };
   }
 
@@ -311,7 +326,7 @@ export class DriversService {
         online_status: In(activeStatuses),
         inactivity_prompt_sent_at: LessThanOrEqual(graceSince),
       },
-      relations: ['user'],
+      relations: ['user', 'active_vehicle', 'active_vehicle.cooperative'],
     });
     for (const driver of toDisconnect) {
       await this.driversRepo.update(driver.id, {
@@ -319,6 +334,7 @@ export class DriversService {
         inactivity_prompt_sent_at: null,
       });
       await this.gateway.syncAvailableRoom(driver.user.id, false);
+      this.notifyOnlineStatusChange(driver.id, DriverOnlineStatus.OFFLINE, driver.active_vehicle?.cooperative?.id);
       this.notifications.sendToUser(driver.user.id, {
         title: 'Te desconectamos por inactividad',
         body: 'No respondiste a tiempo, así que te pusimos fuera de línea. Conéctate de nuevo cuando quieras recibir viajes.',
@@ -397,6 +413,7 @@ export class DriversService {
       relations: ['active_vehicle', 'active_vehicle.cooperative'],
     });
     if (updatedDriver) await this.setCachedDriver(updatedDriver);
+    this.notifyOnlineStatusChange(driver.id, DriverOnlineStatus.ONLINE, updatedDriver?.active_vehicle?.cooperative?.id);
 
     const fareConfig = await this.fareService.getConfig();
 
@@ -409,8 +426,12 @@ export class DriversService {
   }
 
   async endDay(userId: string) {
-    const driver = await this.driversRepo.findOne({ where: { user: { id: userId } } });
+    const driver = await this.driversRepo.findOne({
+      where: { user: { id: userId } },
+      relations: ['active_vehicle', 'active_vehicle.cooperative'],
+    });
     if (!driver) throw new NotFoundException('Perfil de conductor no encontrado');
+    const cooperativeId = driver.active_vehicle?.cooperative?.id;
 
     await this.driversRepo.update(driver.id, {
       active_vehicle: null,
@@ -419,6 +440,7 @@ export class DriversService {
     });
 
     await this.gateway.syncAvailableRoom(userId, false);
+    this.notifyOnlineStatusChange(driver.id, DriverOnlineStatus.OFFLINE, cooperativeId);
 
     // Limpiar caché Redis al terminar jornada
     await this.invalidateDriverCache(driver.id);

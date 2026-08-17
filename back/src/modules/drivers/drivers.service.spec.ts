@@ -76,7 +76,12 @@ describe('DriversService', () => {
         { provide: StorageService, useValue: { upload: jest.fn(), getPresignedUrl: jest.fn() } },
         { provide: TermsService, useValue: { validateAcceptance: jest.fn() } },
         { provide: FareService, useValue: fareService },
-        { provide: EventsGateway, useValue: { notifyDriver: jest.fn(), syncAvailableRoom: jest.fn().mockResolvedValue(undefined) } },
+        { provide: EventsGateway, useValue: {
+          notifyDriver: jest.fn(),
+          syncAvailableRoom: jest.fn().mockResolvedValue(undefined),
+          notifyPlatform: jest.fn(),
+          notifyCoop: jest.fn(),
+        } },
         { provide: NotificationsService, useValue: { sendToUser: jest.fn().mockResolvedValue(undefined) } },
         { provide: REDIS_CLIENT, useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() } },
       ],

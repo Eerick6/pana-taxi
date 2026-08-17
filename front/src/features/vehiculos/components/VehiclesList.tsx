@@ -137,7 +137,7 @@ export default function VehiclesList({ cooperativeId }: Props) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 dark:border-gray-800">
-                {['Vehículo', 'Placa', 'Propietario', 'Cooperativa', 'Aprobación', 'Estado op.', 'Registrado', 'Acciones'].map((h) => (
+                {['Vehículo', 'Placa', 'Propietario', 'Chofer', 'Cooperativa', 'Aprobación', 'Estado op.', 'Registrado', 'Acciones'].map((h) => (
                   <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -146,7 +146,7 @@ export default function VehiclesList({ cooperativeId }: Props) {
               {loading
                 ? Array.from({ length: 6 }).map((_, i) => (
                     <tr key={i} className="border-b border-gray-50 dark:border-gray-800/50">
-                      {Array.from({ length: 8 }).map((__, j) => (
+                      {Array.from({ length: 9 }).map((__, j) => (
                         <td key={j} className="px-5 py-3.5"><div className="h-3.5 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" /></td>
                       ))}
                     </tr>
@@ -163,6 +163,15 @@ export default function VehiclesList({ cooperativeId }: Props) {
                         </span>
                       </td>
                       <td className="px-5 py-3.5 text-gray-600 dark:text-gray-400">{v.owner?.full_name ?? '—'}</td>
+                      <td className="px-5 py-3.5 text-gray-600 dark:text-gray-400">
+                        {v.current_driver
+                          ? (
+                            <span className={v.current_driver.id === v.owner?.id ? 'text-gray-400 italic' : ''}>
+                              {v.current_driver.id === v.owner?.id ? 'El propietario' : v.current_driver.full_name}
+                            </span>
+                          )
+                          : <span className="text-gray-300 dark:text-gray-600">Sin jornada activa</span>}
+                      </td>
                       <td className="px-5 py-3.5 text-gray-600 dark:text-gray-400">{v.cooperative?.name ?? '—'}</td>
                       <td className="px-5 py-3.5">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${APPROVAL_BADGE[v.approval_status] ?? ''}`}>

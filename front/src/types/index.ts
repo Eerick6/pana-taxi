@@ -86,6 +86,9 @@ export interface Vehicle {
   cooperative?: { id: string; name: string } | null;
   owner?: { id: string; full_name: string } | null;
   assigned_driver?: { id: string; full_name: string } | null;
+  // Chofer con jornada activa AHORA MISMO (bolsa de empleo, vehicle_assignments
+  // con status='active') — puede ser el propio dueño o un chofer asignado.
+  current_driver?: { id: string; full_name: string } | null;
   documents?: VehicleDocument[];
   created_at: string;
 }

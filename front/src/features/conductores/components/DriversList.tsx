@@ -20,10 +20,10 @@ const ONLINE_BADGE: Record<string, string> = {
 };
 
 const ONLINE_LABEL: Record<string, string> = {
-  online: 'En línea',
-  busy: 'Ocupado',
+  online: 'Activo',
+  busy: 'En viaje',
   looking_for_work: 'Buscando',
-  offline: 'Fuera de línea',
+  offline: 'Inactivo',
 };
 
 const TYPE_LABEL: Record<string, string> = { driver: 'Conductor', owner_driver: 'Propietario' };
@@ -139,7 +139,7 @@ export default function DriversList({ cooperativeId }: Props) {
   }, [page, search, filterApproval, cooperativeId]);
 
   useEffect(() => { load(); }, [load]);
-  useRealtimeRefresh(['driver.registered', 'driver.approved', 'driver.rejected'], load);
+  useRealtimeRefresh(['driver.registered', 'driver.approved', 'driver.rejected', 'driver.online_status_changed'], load);
 
   const act = async (fn: () => Promise<void>, id: string) => {
     setActionLoading(id);

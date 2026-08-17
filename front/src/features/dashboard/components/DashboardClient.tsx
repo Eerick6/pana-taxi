@@ -11,7 +11,7 @@ import { useRealtimeRefresh } from '@/hooks/useRealtimeRefresh';
 
 const DASHBOARD_EVENTS = [
   'trip.created', 'trip.accepted', 'trip.completed', 'trip.cancelled',
-  'driver.registered', 'driver.approved',
+  'driver.registered', 'driver.approved', 'driver.online_status_changed',
   'vehicle.registered', 'vehicle.approved',
   'cooperative.registered', 'cooperative.approved',
   'client.registered',

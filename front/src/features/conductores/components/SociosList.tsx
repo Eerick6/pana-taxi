@@ -89,7 +89,7 @@ export default function SociosList({ cooperativeId }: Props) {
 
   useEffect(() => { loadPending(); }, [loadPending]);
   useEffect(() => { if (activeTab === 'all') loadAll(); }, [loadAll, activeTab]);
-  useRealtimeRefresh(['driver.registered', 'driver.approved', 'driver.rejected'], () => {
+  useRealtimeRefresh(['driver.registered', 'driver.approved', 'driver.rejected', 'driver.online_status_changed'], () => {
     loadPending();
     if (activeTab === 'all') loadAll();
   });
